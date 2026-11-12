@@ -139,6 +139,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
 /**
+ * Whether a channel's config carries a coexistence record at all: any object
+ * under `coexistence`, complete or not.
+ *
+ * Looser than `parseCoexistence`, which also wants `onboardedAt` and `wabaId`,
+ * and the twin of `isCoexistenceNumber` in `lib/tickets/owner-only.ts`, which
+ * decides who may see a number's tickets. What a page says about such a
+ * ticket — that it is its owner's alone, that it cannot be handed to a group —
+ * asks this one, so a record written by hand is not hidden by one rule and
+ * described as a team number's by another.
+ */
+export function hasCoexistenceRecord(config: unknown): boolean {
+  return isRecord(config) && isRecord(config.coexistence);
+}
+
+/**
  * The `coexistence` object out of a channel's config, or null for a channel
  * that was not connected this way.
  *

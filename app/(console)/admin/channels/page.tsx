@@ -524,7 +524,7 @@ function NumberOwnerLine({
   ownership: NumberOwnership;
   agents: OwnerChoice[];
 }) {
-  const { owner, current, earlier } = ownership;
+  const { owner, current, earlier, ownerOnly } = ownership;
 
   return (
     <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-(--color-text-secondary)">
@@ -535,6 +535,17 @@ function NumberOwnerLine({
             New tickets on this number are assigned to its owner, and every ticket on it counts
             against them for its SLA, whoever it is reassigned to. Unassigning one hands it back to
             them.
+            {ownerOnly
+              ? ' It is their phone, so only they and agents who can see every ticket see its tickets.'
+              : null}
+          </InfoTip>
+        </Badge>
+      ) : ownerOnly ? (
+        <Badge tone="warning">
+          No owner
+          <InfoTip label="No owner">
+            This number is somebody&rsquo;s phone, and nobody owns it here. Only agents who can see
+            every ticket see its tickets, and new ones are assigned to nobody until it has an owner.
           </InfoTip>
         </Badge>
       ) : (
@@ -550,9 +561,9 @@ function NumberOwnerLine({
         <Badge tone="warning">
           Owner deactivated
           <InfoTip label="Owner deactivated">
-            The owner can no longer sign in. Until the number is handed to somebody else, or they
-            are reactivated, its new tickets go to the default group&rsquo;s rota and count against
-            whoever holds them; the tickets it already has stay with them.
+            {ownerOnly
+              ? 'The owner can no longer sign in. Until the number is handed to somebody else, or they are reactivated, only agents who can see every ticket see its tickets, and new ones are assigned to nobody. The open tickets the owner holds stay in their name until then, and one that is resolved and reopened is unassigned.'
+              : 'The owner can no longer sign in. Until the number is handed to somebody else, or they are reactivated, its new tickets go to the default group’s rota and count against whoever holds them; the tickets it already has stay with them.'}
           </InfoTip>
         </Badge>
       ) : null}
@@ -592,6 +603,7 @@ function NumberOwnerLine({
       <OwnerEditor
         channelId={ownership.channelId}
         owner={owner}
+        ownerOnly={ownerOnly}
         agents={agents}
         movableTickets={ownership.movableTickets}
       />

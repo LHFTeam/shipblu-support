@@ -1224,7 +1224,10 @@ export const channelOwnerChanges = pgTable(
     /**
      * The number's open and pending tickets whose accountability moved, and how
      * many of those also changed hands as work — only the ones the previous
-     * owner held, or nobody did. Kept here because the events that say the
+     * owner held, or nobody did, and on a coexistence number those held by
+     * anybody its tickets are hidden from. The tickets a handover to nobody
+     * unassigned there are counted on no column: each carries an `unassigned`
+     * line naming this change. Kept here because the events that say the
      * same thing per ticket do not survive a purge, and an admin asking "what
      * did that handover do?" should not have to count a timeline.
      */

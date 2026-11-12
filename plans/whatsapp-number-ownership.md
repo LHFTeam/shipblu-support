@@ -76,7 +76,9 @@ Each was put as a question with the alternatives below, and answered.
    tickets and reopens treat it as a team number: the group's rota assigns, and
    a breach counts against whoever holds the ticket. The tickets the owner
    already had stay with them until an admin hands the number over.
-   Reactivating them undoes it. Reason: it can be undone, it never blocks an
+   Reactivating them undoes it. (On a coexistence number, since 2026-11-12,
+   nothing assigns the new tickets and only agents who see every ticket see
+   them; the reactivated owner takes them at the next assignment pass.) Reason: it can be undone, it never blocks an
    urgent offboarding, and it is how deactivation treats every other reference
    to an agent. `/admin/channels` shows a warning, which is what prompts the
    handover. Asked in review whether those tickets' breaches should show on
@@ -270,13 +272,74 @@ hint on `/reports/agents` says what it counts.
 
 ## Who sees what
 
-`heldByOrInGroupsOf` ORs in `answerableBy(agent)` on both of its branches:
-accountable to them, or on a channel they own. The inbox list and counts, the
+`heldByOrInGroupsOf` ORs in, on both of its branches, what an agent answers
+for: accountable to them, or on a channel they own (`onNumberOwnedBy`). The inbox list and counts, the
 ticket page, the console guards, the attachments route and the shipment read
 model all read that one predicate, so they all inherit it. The halves cover
 different tickets. The number's half covers what arrives on it now, including
 its copied history, which nobody is accountable for. The accountable half covers
 a ticket that stays theirs after the number moves on.
+
+### A coexistence number is its owner's alone (2026-11-12)
+
+Asked for as "a WhatsApp coexistence channel should only be visible to its
+owner", and three questions were put and answered: agents who see every ticket
+(`ticket.view.all`) keep seeing these; a number with no owner, or a deactivated
+one, is seen by them alone; and nobody else the ticket is tied to keeps it —
+not its assignee, not the agent it is accountable to, not the previous owner.
+
+So `heldByOrInGroupsOf` is `on a number I own, or (not on a coexistence number
+and (assigned to me, accountable to me, or in my groups))`. That takes in the
+copied history, which sits resolved in the number's default group and was
+readable by every member of it. `lib/tickets/owner-only.ts` holds the SQL and
+the reasons, and is what the writers ask too, since a ticket held by somebody
+it is hidden from is in nobody's list:
+
+| Writer                              | On a coexistence number                                             |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `assignConversation`, the rota      | Never picks: an active owner, or `owner_only` and nobody            |
+| `updateTicket`, the Assignee picker | Offers and accepts only the owner and agents who see every ticket   |
+| `assign_agent`                      | Skipped, with a warning, for anybody else                           |
+| `handOverNumber`                    | Moves every holder it is hidden from to the new owner, or unassigns |
+| `alignAccountable`                  | The same, for any ticket coming back out of resolved or closed      |
+| `takeForNumberOwner`                | An unassigned ticket accountable to nobody goes to an active owner  |
+
+Production on the day: three coexistence numbers, two with no owner, 188
+tickets, 130 open or pending, and none held by anybody but its number's owner,
+so nothing needed moving at the deploy. The two ownerless numbers' tickets
+became visible to supervisors and admins only.
+
+Left as they are, each a change of its own if it is wanted:
+
+- **The contact directory.** A coexistence onboarding copies the phone's
+  address book into `contacts`, and `/contacts` is open to every agent
+  (`contact.view`). A person known only from that phone is found by name and
+  number; their ticket list is empty for anybody but the owner.
+- **Report lists.** The CSAT comments, the category labelling list, the
+  routing report's ticket numbers and the subcategory review queue are not
+  scoped by ticket. Each is behind a key (`report.view`, `admin.*`) whose
+  roles hold `ticket.view.all`, so only a per-agent override reaches them.
+- **The live tick.** Inbox streams are woken per channel type, so an open
+  inbox re-reads when a coexistence ticket changes. The payload is empty and
+  the re-read is the scoped list.
+- **A plain number adopted as a coexistence one, or a ticket filed under no
+  row adopted onto one** (`findOrAdoptLive`), keeps the assignee it had.
+- **One place that enforces it.** "Never held by somebody it is hidden from"
+  is asked writer by writer: the rota, the console, `assign_agent`, a handover
+  and a reopen. Two writers do not ask: a ticket adopted onto a coexistence
+  row while a colleague holds it (`findOrAdoptLive`, `db/sql/009`), and the
+  sweep's reclaim. Decided on #516's review, and left to a pull request of its
+  own because it touches every assignment path: one `assignTicket(tx, …)`
+  helper that every writer of `assignee_agent_id` calls, and a repo rule
+  refusing a bare write of the column outside it, as `pool-confinement` does
+  for the pool. Not a trigger: "sees every ticket" is `can()` over a role and
+  an agent's overrides, which SQL would have to copy.
+- **The handover's record.** `channel_owner_changes` counts the tickets moved
+  and reassigned, and has no column for those a handover to nobody unassigned;
+  that count is in the notice and on each ticket's `unassigned` line, which
+  names the change.
+- **Reclaim** takes an abandoned ticket off a supervisor on an ownerless
+  coexistence number and leaves it unassigned, where the rota once re-placed it.
 
 An agent in no group used to be offered Mine alone, since their Unassigned was
 always empty. The shell now asks `ownsANumber`. An owner in no group is offered
@@ -403,7 +466,9 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
 - Rolling back the code leaves the columns and the table unread, and every
   report falls back to the assignee. Undoing a handover is a handover to
   "Nobody — team number": accountability clears, and the assignees keep what
-  they hold.
+  they hold. On a coexistence number, since 2026-11-12, it is "Nobody —
+  only agents who see every ticket", and whoever cannot see the tickets loses them
+  (**A coexistence number is its owner's alone**).
 
 ## How it was verified
 

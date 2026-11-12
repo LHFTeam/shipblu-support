@@ -1030,7 +1030,8 @@ which also closes the race that opened two tickets for one chat, §6.100), and a
 ticket carries the person accountable for it beside the person working it.
 Reassigning moves the work and leaves the breach with the owner; reports, the
 live board and the hourly sample all file breaches that way; an owner sees every
-ticket on their number; and the ticket page names our number and who is
+ticket on their number, and on a coexistence number nobody else but an agent
+who sees every ticket does (`lib/tickets/owner-only.ts`); and the ticket page names our number and who is
 accountable. The threading changed with the deploy. The rest waits for an admin
 to hand a number over, and none has been yet: no row had an owner at 21:35 UTC.
 §5.1 has the steps for Nayera's, and the two configuration fixes that decide
@@ -2004,8 +2005,11 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
      §5.5) opens at the open tickets that had already breached, because a
      figure is filed under whoever is accountable on the day it is measured. If the team wants her figures to
      start from the handover, triage those first. To undo it, hand the number
-     to "Nobody — team number": accountability clears, and the tickets stay with
-     her until somebody reassigns them.
+     to Nobody. It is a coexistence number, so since 2026-11-12 that reads
+     "Nobody — only agents who see every ticket": accountability clears, every open
+     or pending ticket she holds is unassigned, and until the number has an
+     owner again only agents who see every ticket see its tickets, and nothing
+     assigns them (`lib/tickets/owner-only.ts`).
 
   5. _Done 2026-10-30, at the user's go-ahead (the plan's 0.2 reorder): the
      group conditions name the groups' uuids. Not re-read since._ **The SLA
