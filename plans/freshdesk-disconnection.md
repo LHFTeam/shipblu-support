@@ -15,18 +15,21 @@ it is one line in the checklist.
 
 ## Where it stands, 2026-11-12
 
-**Everything this repository had to do before the disconnection is live, and
-`support.shipblu.com` answers from this app.** What is left belongs to other
-teams, or waits for the account to close.
+**Every pull request this plan needed before the disconnection is live, and
+`support.shipblu.com` answers from this app.** What is left: setting
+`KB_PUBLIC_HOST`, deciding whether to run the import once more, writing the
+domain into `render.yaml`, the items other teams own, and what waits for the
+account to close.
 
 - **PRs 1 to 5 are in production**, with the fixes from PR 5's review (#504):
   PR 1 in #497 (`918ac12`, 2026-11-08), PRs 2, 3 and 4 in #502 (`932e8ea`,
   2026-11-10), and PR 5 with #504 in #508 (`7605993`, all six services live by
   14:19:54 UTC on 2026-11-11). PR 6 waits for the disconnection.
-- **The domain moved on 2026-11-11.** The CNAME's TTL was down to 1800 by
-  16:25 UTC. By 20:58 the CNAME named `shipblu-support.onrender.com`, with a
-  TTL of 14400 again, and the web service had logged its first request for the
-  host at 20:54:12. Freshdesk's copy of the knowledge base is no longer
+- **The domain moved on 2026-11-11.** The CNAME's TTL already read 1800 at
+  13:44 UTC. The CNAME was switched between 19:30, when Freshdesk last
+  answered there, and 20:54:12, when the web service logged its first request
+  for the host. By 20:58 resolvers answered `shipblu-support.onrender.com`,
+  with a TTL of 14400 again. Freshdesk's copy of the knowledge base is no longer
   reachable there. Of the 58 legacy article ids, 54 answer with a 301 to an
   article that answers 200, and the 4 agents-only ones answer 404. Every
   outside link in the tables below now lands here: the phone's nine ids, the
@@ -42,8 +45,11 @@ teams, or waits for the account to close.
   back, and with the TTL at 14400 again, that takes up to four hours to reach
   resolvers that cached the new answer.
 - **Outside this repository** ([the to-dos](#to-dos-outside-this-repository)),
-  five items are open: the phone's quick replies, the dashboard's Freshchat
-  loader, where mail is delivered, the article wording and Messenger's swap.
+  six items are open: `KB_PUBLIC_HOST` (above), the phone's quick replies,
+  the dashboard (its 16 help links, which still depend on the legacy route,
+  its 2 links to an older Freshdesk account that 404, and its Freshchat and
+  Zendesk widgets), where mail is delivered, the article wording and
+  Messenger's swap.
 - **After the disconnection** come PR 6, SPF, a re-run of the audit, and the
   date in `docs/PROJECT-STATE.md`.
 
@@ -65,7 +71,8 @@ Measured read-only on 2026-11-11 and 2026-11-12, the same way as on
 2026-11-07: Render's deploys and logs, the production database, every public
 host by `curl`, and the repository. As before, a second sweep re-checked each
 finding and tried to refute it. The sections that follow are the 2026-11-07
-audit, with what has changed noted where it applies.
+audit. Each subsection that has changed since carries a dated note, and the
+PR sections below say what was fixed and how it was checked.
 
 ## How it was measured
 
@@ -97,6 +104,10 @@ was. Only a SELECT on the host answers the question.
 ## What production held on 2026-11-07
 
 ### Blocking: every image in the knowledge base is Freshdesk's
+
+_Fixed by PR 1 (#497), live on 2026-11-08: every picture is a `kb_images` row
+named by its route, and the audit counts 0 Freshdesk images in articles and in
+versions._
 
 - **214 `<img>` in 61 of the 112 articles** (109 in 30 Arabic, 105 in 31
   English), and **every one** is
@@ -130,6 +141,11 @@ closed or downgraded cannot be tested in advance. Plan for it not to.
 
 ### Latent: three ways a Freshdesk link comes back into an article
 
+_Closed by PR 2 (#502), live on 2026-11-10. Save, Restore and the import now
+point Freshdesk's links and pictures here as they write (`pointedHere`). Save
+and Restore also refuse to add a Freshdesk reference that has no home here.
+See PR 2 below._
+
 None of these is live today. Each is one ordinary action away from putting
 Freshdesk links back on the public help centre.
 
@@ -159,6 +175,10 @@ Freshdesk links back on the public help centre.
    Freshdesk path shape.
 
 ### Blocking the domain move: Freshdesk's old URLs 404 here
+
+_Fixed by PR 3 (#502), live on 2026-11-10. On 2026-11-11 all six shapes
+answered 301 on the Render host and on `support.shipblu.com`. The 4
+agents-only articles answer 404 (#504). See PR 3 below._
 
 Every legacy shape `proxy.ts` sends to `/help/legacy` answers **404**:
 `/support/solutions/articles/<id>`, the same with a `-title` suffix,
@@ -251,12 +271,16 @@ modified on 2026-11-09, also loads a **Zendesk Web Widget**
 whether a merchant is signed in or not. shipblu.com loads the same Zendesk
 widget. Neither was in the 2026-11-07 sweep.
 
-That matters to the knowledge base because **16 public articles** tell
-merchants to use the chat in their ShipBlu account. The 2026-11-07 count was 15;
+That matters to the knowledge base because **16 public articles** tell readers
+to contact support by chat. Two of them, `en/claims-procedure` and
+`ar/سياسات-وإجراءات-التعويض`, say the chat is in the merchant's ShipBlu
+account. The other 14 say "live chat", "chat" or «الشات المباشر» without
+saying where. `en/where-s-my-package` and `ar/شحنتي-فين؟` speak to parcel
+recipients and mention the myBlu app. The 2026-11-07 count was 15;
 no article's text has changed since, so that count missed one, most likely an
 English article that says "chat" without "live". Until the dashboard embeds
-this app's widget (`docs/embedding-the-widget.md`), the instruction sends
-merchants to Freshchat or Zendesk. The 16 articles are:
+this app's widget (`docs/embedding-the-widget.md`), a merchant who looks for
+the chat in the dashboard finds Freshchat or Zendesk. The 16 articles are:
 
 - **Arabic (8):** `إزاي-أعيد-توصيل-الأوردر-للعميل؟`, `التواصل-مع-الدعم-الفني`,
   `التواصل-مع-الدعم-الفني-2`, `المندوب-لم-يسلم-الاوردر-بعد`,
@@ -309,12 +333,13 @@ phrase now points at the right place by accident. Unchanged on 2026-11-11.
   hreflang and JSON-LD URL are on `shipblu-support.onrender.com`, and the
   console is still served there, so the variable is unset or names the Render
   host. Read from output, not from the dashboard. `docs/PROJECT-STATE.md` §5.1
-  said otherwise until this change. _Still true on 2026-11-12, after the
-  domain moved. The environment changed three times, all from the
-  dashboard, and each change redeployed all six services: at 08:39:58 UTC on
-  2026-11-10, and at 16:08:37 and 17:59:50 on 2026-11-11. Which variables
-  changed cannot be read, but none of the three set this one to
-  `support.shipblu.com`._
+  said otherwise until this change. _Still true of the web service on
+  2026-11-12, after the domain moved. Since the 2026-11-07 audit the
+  environment has changed three times, all from the dashboard, and each change
+  redeployed all six services: at 08:39:58 UTC on 2026-11-10, and at 16:08:37
+  and 17:59:50 on 2026-11-11. (It also changed on 2026-11-04 and twice on
+  2026-11-05.) Which variables changed cannot be read, but none of the three
+  set this one to `support.shipblu.com` on the web service._
 - **The blueprint lists `KB_PUBLIC_HOST` in `shipblu-support-production`,**
   which the web service and the worker both link, with no service-level entry
   on either. So one dashboard value serves both services, unless somebody added
@@ -326,8 +351,10 @@ phrase now points at the right place by accident. Unchanged on 2026-11-11.
   `contact_tokens` none. The admin CSAT page reads the web service's value, so
   it would not show the worker's.
 - Two links built by this app on `support.shipblu.com` were delivered in August
-  (one agent reply, one CSAT invitation) and 404 there. Nothing to do; nothing
-  like them has been sent since 2026-08-31.
+  (one agent reply, one CSAT invitation) and answered 404 while that host
+  served Freshdesk. Since the move, the reply's article link answers 200 there;
+  the survey's token was not tried. Nothing to do; nothing like them has been
+  sent since 2026-08-31.
 
 ### Clean
 
@@ -558,10 +585,13 @@ call with no `pointedHere` after it fails CI.
 **Deployed in #502** (`932e8ea`, web service live 18:16:28 UTC on 2026-11-10).
 The checklist's check is the tests: on `main`, `app/(console)/kb/actions.db.test.ts`
 restores a version that carries a Freshdesk link, and refuses a save that adds
-one. Production has not seen a Restore or a Save since. No version row has
-been cut since 2026-09-03, and no article has been updated after the copy job
-at 21:14 UTC on 2026-11-08. #504, deployed in #508, added `freshservice` to
-the hosts the guard counts as Freshworks'.
+one. No Save or Restore has changed an article in production since: no version
+row has been cut since 2026-09-03, and no article has been updated after the
+copy job at 21:14 UTC on 2026-11-08. A Save that changes nothing, or one that
+is refused, leaves no trace, so this cannot say none was tried. #504, deployed
+in #508, added `freshservice` to the pattern the copy job selects pictures by
+(`isFreshworksImage`), so every picture Save refuses is one the copy job would
+copy. The guard already refused `freshservice.com`.
 
 ### 3. Freshdesk's old URLs resolve through the proxy — blocking the domain move
 
@@ -720,8 +750,9 @@ nothing advertises them.
 **Deployed in #508** (`7605993`, 2026-11-11). On the Render host,
 `/robots.txt` and `/sitemap.xml` answer 200, and the sitemap's 114 `<loc>`
 match `/help/sitemap.xml` byte for byte. They answer the same on
-`support.shipblu.com` since the move, while `KB_PUBLIC_HOST` still names the
-Render host, and so do the `Sitemap:` line and every `<loc>`.
+`support.shipblu.com` since the move. The published base is still the Render
+host there (`KB_PUBLIC_HOST` unset or naming it), and so are the `Sitemap:`
+line and every `<loc>`.
 
 ### 6. Retire the Freshdesk importer — after the disconnection
 
@@ -747,9 +778,11 @@ one.
   `render.yaml` as `sync: false`. They also need deleting from the worker in
   the dashboard. Whether they are still set cannot be read.
 - **The card, not the page.** `/admin/import` keeps its two backfills. Delete
-  `form.tsx` (`ImportForm`) and `startFreshdeskImport` in its `actions.ts`;
-  `actions.ts`'s comment that completed jobs keep their dedupe key for seven
-  days is wrong today and goes with it. In `page.tsx`, delete the card,
+  `form.tsx` (`ImportForm`) and `startFreshdeskImport` in its `actions.ts`.
+  The comment there says a fixed dedupe key would be "taken forever" by the
+  first run, which holds only for a run that went `dead`: cleanup frees a
+  completed job's key after seven days. It goes with the card. In `page.tsx`,
+  delete the card,
   `recentRuns('import_freshdesk_kb')`, `knowledgeBaseCounts()` and the header's
   "Bring the Freshdesk knowledge base in". `admin/sections.ts` describes the
   page as "The Freshdesk knowledge base import, and the backfills", with the
@@ -765,21 +798,24 @@ one.
   CI passes, but the code is dead.
 - **What goes stale without failing.** The comment in `lib/env.ts` is already
   wrong: it says an unset variable makes the job skip, but the handler throws,
-  and no cron runs it. The same applies to the comment in
-  `worker/handlers/backfill-subcategorise-ai.ts` and to the "Three today" in
-  `scripts/ci/rules/article-off-freshdesk.mjs`; the rule still needs only two
-  writers. In the docs: the list of body writers in AGENTS.md; the README's
+  and no cron runs it. The comment in
+  `worker/handlers/backfill-subcategorise-ai.ts` that leans on it is wrong in
+  the same way. The "Three today" in
+  `scripts/ci/rules/article-off-freshdesk.mjs` is right until PR 6 and then
+  becomes two; the rule needs only two writers. In the docs: the list of body writers in AGENTS.md; the README's
   "Freshdesk import"; in `docs/PROJECT-STATE.md`, §1's "with its Freshdesk
   importer", §5.3's "The KB importer is the working model" and the passages
   that name the import's re-run; and
   `plans/help-centre-design-v02.md`'s re-import note. Find the rest with
   `git grep -n -i -E 'freshdesk import|the importer|re-import|import_freshdesk'`.
 - **Keep, beyond the four above:** `proxy.ts`'s legacy section,
-  `lib/kb/legacy-path.ts`, `lib/kb/legacy-resolve.ts`, and PR 2's
-  `lib/kb/off-freshdesk.ts`, `lib/kb/freshdesk-refs.ts` and the
-  `article-off-freshdesk` rule. Restore still needs them to point the 29 links
-  in 18 version rows here. Once the importer goes, nothing writes
-  `kb_redirects`, and nothing needs to: its 174 rows are data.
+  `lib/kb/legacy-path.ts` and `lib/kb/legacy-resolve.ts`, which with
+  `app/help/legacy` serve the inbound Freshdesk URLs: the phone's, the
+  dashboard's and every old bookmark. And PR 2's `lib/kb/off-freshdesk.ts` and
+  `lib/kb/freshdesk-refs.ts`, which Restore needs to point the 29 links in 18
+  version rows here, with the `article-off-freshdesk` rule that keeps every
+  writer on them. Once the importer goes, nothing writes `kb_redirects`, and
+  nothing needs to: its 174 rows are data.
 
 ## To-dos outside this repository
 
@@ -795,7 +831,7 @@ The state column is as measured on 2026-11-11 and 2026-11-12.
 | App Store Connect                    | The myBlu listing's support URL, as above.                                                                                                                                                                                                                                   | Done by the domain move, as above.                                                                                                                                                                                    |
 | Mail admin (Zoho)                    | Say where `support@shipblu.com`, `help@shipblu.com` and `tech@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing (after the disconnection). | Open. Nobody has read the routing. SPF still includes `email.freshdesk.com`.                                                                                                                                          |
 | Meta (the Page's settings)           | Messenger's swap, per §5.1 of `docs/PROJECT-STATE.md`.                                                                                                                                                                                                                       | Not confirmed. Since 09:50 UTC on 2026-11-11, new Messenger threads have been handed to this app. Older threads still arrive in `standby`, and nothing here can read whether Freshchat is still the primary receiver. |
-| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME has named the Render host since about 20:54 UTC.                                                                                                                                        |
+| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME was switched between 19:30 and 20:54 UTC. The first request reached the web service at 20:54:12, and by 20:58 resolvers answered with the Render host.                                  |
 
 ## Checklist before Freshdesk is disconnected
 
@@ -858,14 +894,21 @@ Order matters. The check beside each item is what proves it, not the merge.
 
 - [x] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
       host. Done: deployed 2026-11-10 (#502), and measured on 2026-11-11.
-- [x] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead. It read
-      1800 at 16:25 UTC on 2026-11-11, and has been 14400 again since the
+- [x] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead. It
+      already read 1800 at 13:44 UTC on 2026-11-11, more than one 14400 s TTL
+      before the switch (after 19:30), and has been 14400 again since the
       switch.
 - [x] **Add `support.shipblu.com` as a custom domain** on the
       `shipblu-support` web service, then switch the CNAME and wait for the
       certificate. Done 2026-11-11. The web service logged its first request
-      for the host at 20:54:12 UTC, and HTTPS answers there. `render.yaml`
-      declares no `domains:`, so the blueprint does not record the domain.
+      for the host at 20:54:12 UTC, and HTTPS answers there.
+- [ ] **Write the domain into `render.yaml`.** It was added in the
+      dashboard, and the blueprint declares no `domains:` for
+      `shipblu-support`, so the file no longer describes the running service
+      (AGENTS.md, **Land config in the repo too**). Its own small change into
+      `dev`: `render.yaml` reaches production by the merge into `main`, and a
+      Blueprint sync applies what it says (`docs/PROJECT-STATE.md` §2). Say
+      so in §2's service table in the same change.
 - [ ] **Only then** set `KB_PUBLIC_HOST=support.shipblu.com` — a bare
       hostname, because `proxy.ts` compares it with `Host` as written — on the
       web service **and** the worker, which builds the survey and portal-email
@@ -873,8 +916,11 @@ Order matters. The check beside each item is what proves it, not the merge.
       August: every published URL on a host that serves Freshdesk. The
       blueprint keeps it in `shipblu-support-production`, which both services
       link, so one change to the group covers both, and Render redeploys every
-      service that links it. **Open on 2026-11-12, and the DNS answers here,
-      so nothing stands in the way.**
+      service that links it. That holds unless either service carries its own
+      entry, set in the dashboard, which would win over the group and which
+      the blueprint does not show: look at each service's Environment page
+      when setting it. **Open on 2026-11-12, and the DNS answers here, so
+      nothing stands in the way.**
 - [ ] _Check:_ `/widget/embed.js`'s `BASE`, the sitemap and the canonicals name
       `support.shipblu.com`; `/en/a/packaging-guidelines` answers 200 there; a
       Freshdesk URL from the tables above 301s to its article; `/inbox` there
@@ -892,8 +938,9 @@ Order matters. The check beside each item is what proves it, not the merge.
       not Freshdesk's bucket, are what the pages load.
 - [ ] PR 6. Remove Freshdesk from SPF.
 - [ ] `rehost_kb_images revert=true` stops being a way back: it would write
-      addresses that no longer serve anything. Say so where AGENTS.md and the
-      job's payload name it, or take the option out with PR 6.
+      addresses that no longer serve anything. The job's payload says so
+      (`lib/queue/payloads.ts`), and AGENTS.md since 2026-11-12. Take the
+      option out with PR 6, or leave it with that warning.
 - [ ] `docs/PROJECT-STATE.md` §1 and §5.1 say Freshdesk is gone, with the date.
 
 ## Re-running this audit
@@ -913,12 +960,15 @@ What "zeros where it says" means after the disconnection:
 - **Reaches 0 by itself:** `phone/app sends, 7 days`, as old sends age out. It
   proves the quick replies changed only after a normal week of the phone's
   traffic.
-- **Never falls:** `phone/app sends, all time`, which counts history.
+- **Should not fall:** `phone/app sends, all time`, which counts history. It
+  drops only if one of those conversations is purged.
 
 The link patterns no longer name `support.shipblu.com`, since the domain is
 ours: a `/<locale>/a/<slug>` link there is a good one. The path alternatives
-still catch every Freshdesk shape on that host. On 2026-11-12 the narrowed
-pattern counted exactly what the old one did.
+are the portal shapes Save refuses (`PORTAL_PATH` in
+`lib/kb/freshdesk-refs.ts`), so they catch every Freshdesk shape on that host.
+On 2026-11-12 this pattern counted exactly what the old one did, because
+nothing of the other shapes is stored.
 
 ```sql
 select 'images, live' as what, count(*) as n, count(distinct a.id) as rows_
@@ -931,11 +981,11 @@ where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwuserc
 union all
 select 'links, live', count(*), count(distinct a.id)
 from kb_articles a, regexp_matches(a.body_html, 'href="([^"]*)"', 'gi') m
-where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders)/|/support/(home|tickets|solutions))'
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$)|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$)|/helpdesk/attachments(/|$))'
 union all
 select 'links, versions', count(*), count(distinct v.id)
 from kb_article_versions v, regexp_matches(v.body_html, 'href="([^"]*)"', 'gi') m
-where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders)/|/support/(home|tickets|solutions))'
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$)|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$)|/helpdesk/attachments(/|$))'
 union all
 select 'phone/app sends, 7 days', count(*), count(distinct conversation_id)
 from messages

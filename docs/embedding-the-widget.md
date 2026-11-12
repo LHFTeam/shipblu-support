@@ -16,11 +16,15 @@ open, an iframe pointing back at the host it was loaded from — so the chat run
 on **our** origin, where the host page's CSS cannot reach it and where the
 visitor's token lives in storage the host page cannot read.
 
-`<helpdesk-host>` is whichever hostname serves this app: today
-`shipblu-support.onrender.com`, and `support.shipblu.com` once that domain's DNS
-points here. Load it from the same host in every environment — the script frames
-the origin it was served from, so a staging dashboard pointing at production
-opens production's chat.
+`<helpdesk-host>` is whichever hostname serves this app:
+`shipblu-support.onrender.com`, or `support.shipblu.com`, whose DNS has pointed
+here since 2026-11-11. Pick one and keep it. The visitor's token lives in the
+frame's own storage, which belongs to the host the script was loaded from, so
+moving to the other host later starts every visitor afresh: their stored
+conversation stays behind on the first. `support.shipblu.com` is the name to
+pick, since it is the one meant to last. Load it from the same host in every
+environment — the script frames the origin it was served from, so a staging
+dashboard pointing at production opens production's chat.
 
 **A third-party origin must be allowlisted before the frame will load.** The
 `/widget` route answers with `frame-ancestors 'self' …WIDGET_ALLOWED_ORIGINS`,

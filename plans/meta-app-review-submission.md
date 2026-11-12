@@ -337,6 +337,12 @@ the cutover swaps the default app, and a recording of a reply Graph refuses is a
 rejected submission. `docs/PROJECT-STATE.md` §5.1 has the arrangement; it is
 deliberate and temporary, not a fault to chase.
 
+_2026-11-12: Instagram has been this app's since 2026-11-05, and Meta has
+handed each new Messenger thread to it since 09:50 UTC on 2026-11-11, so a send
+on a new thread can now be filmed. Agents answered Messenger from the console
+on 2026-11-12. Threads opened before the switch still arrive in `standby`
+(`docs/PROJECT-STATE.md` §5.1)._
+
 That reorders the whole list below: the seven unlock calls and the permission
 edits can be done now, and the recording cannot.
 
@@ -1195,7 +1201,11 @@ of them are obvious from the dashboard:
   before the tag is even read. The direct Instagram connection is outside the
   Page's handover protocol and can send today. That is also the connection the
   09-06 refusal came back on, so it is the connection the feature request has
-  to cover. Check in the dashboard that the request is filed against the
+  to cover. _2026-11-12: a new Messenger thread is this app's since
+  2026-11-11, and two console replies outside the 24 hours came back from
+  `graph.facebook.com` as "Cannot tag messages with 'HUMAN_AGENT' without prior
+  approval" (code 100, subcode 2018276). So Messenger can be filmed too, on a
+  thread opened since then._ Check in the dashboard that the request is filed against the
   Instagram product as well as Messenger; `FEATURES` lists one entry per
   connection because Meta treats them separately.
 - **The role-holder exemption does not apply.** It covers permissions at

@@ -35,18 +35,20 @@ between the two.
 
 **On the same day `7605993` was deployed twice more, after environment changes
 from the dashboard:** at 16:08:37 UTC, to all six services, the web service
-live at 16:11:17; and at 17:59:50, to the web service and the worker at least
-(the crons were not read), the web service live at 18:03:48 (read on Render).
-Which variables changed cannot be read. Neither change set `KB_PUBLIC_HOST` to
-`support.shipblu.com`: at 08:50 UTC on 2026-11-12, `/widget/embed.js` still
-named the Render host. **And `support.shipblu.com` moved here**, the first time
-the name has pointed at this app (§5.1 measured in August that it never had).
-The CNAME's TTL was down to 1800 by 16:25 UTC, the web service logged its
-first request for the host at 20:54:12, and by 20:58 the CNAME named
-`shipblu-support.onrender.com`, with a TTL of 14400 again. With
-`KB_PUBLIC_HOST` unset, the host is served as a console host rather than as the
-help centre's (§5.1). See `plans/freshdesk-disconnection.md`, "Where it
-stands".
+live at 16:11:17; and at 17:59:50, to all six again (created 17:59:49 to
+17:59:53), the web service live at 18:03:48 (read on Render; nothing has been
+deployed since). Which variables changed cannot be read. Neither change set
+`KB_PUBLIC_HOST` to `support.shipblu.com` on the web service: at 08:50 UTC on
+2026-11-12, `/widget/embed.js` still named the Render host. The worker's value
+cannot be read. **And `support.shipblu.com` moved here**, the first time the
+name has pointed at this app (§5.1 measured in August that it never had). The
+CNAME's TTL already read 1800 at 13:44 UTC. The CNAME was switched between
+19:30, when Freshdesk last answered there, and 20:54:12, when the web service
+logged its first request for the host, and by 20:58 resolvers answered
+`shipblu-support.onrender.com`, with a TTL of 14400 again. With the published
+base still the Render host (`KB_PUBLIC_HOST` unset or naming it), the domain is
+served as a console host rather than as the help centre's (§5.1). See
+`plans/freshdesk-disconnection.md`, "Where it stands".
 
 **Before it, production ran `932e8ea`, which deployed itself on 2026-11-10, the
 web service live at 18:16:28 UTC and the worker at 18:15:10** (the crons were
@@ -1528,13 +1530,15 @@ row will look for.
 The system cannot take a single real ticket until this is done, and none of it
 is code:
 
-- **Freshworks is still the live support service, and it is still the default
-  Meta app on the account.** This is the fact that explains the single most
-  confusing thing about the Meta channels, and it is deliberate rather than
-  broken: ShipBlu is still being supported out of Freshworks while this app is
-  under construction, so the Freshworks app (Freshchat — `app_id`
-  576817601276249, `metadata: "freshchannel"`) is the Page's default app and
-  **holds thread control on the Messenger inbox**. _Since 2026-11-05 10:30:24
+- **Freshworks is still the live support service, and until November it was
+  the default Meta app on the account.** This is the fact that explains the
+  single most confusing thing about the Meta channels, and it is deliberate
+  rather than broken: ShipBlu is still being supported out of Freshworks while
+  this app is under construction, so the Freshworks app (Freshchat — `app_id`
+  576817601276249, `metadata: "freshchannel"`) was the Page's default app and
+  **held thread control on the Messenger inbox**. _What holds now is dated
+  below: Instagram has been this app's since 2026-11-05, and new Messenger
+  threads since 2026-11-11._ _Since 2026-11-05 10:30:24
   UTC it no longer holds Instagram's: this app (1009187740467732) was made the
   Instagram account's default app in the Page's Advanced messaging settings —
   Meta's `app_roles` webhook on the `instagram` object says so — and Instagram
@@ -1551,25 +1555,38 @@ is code:
   `messaging`, so the console may answer them. These are the first such
   events in the 30 days of deliveries kept, and the 2026-11-05 switch
   produced none: all 19 inbound Messenger messages stored in the day after it
-  arrived in `standby`. Threads opened before 09:50 still arrive in
+  arrived in `standby`. (§6.111 said 23 until 2026-11-12: that is the day's
+  Facebook deliveries, not its messages.) Threads opened before 09:50 still
+  arrive in
   `standby`, the last at 12:29:51. Freshchat's app id (576817601276249)
   appears in none of the 1,497 Facebook and 397 Instagram deliveries kept,
   back to 2026-10-12. So whether it is still the Page's primary receiver
   cannot be read from here; the Page's Advanced messaging settings, or
   Graph's `thread_owner` with the Page token, would answer it._
 
-  _The team answers those new threads in Business Suite, and the console never
-  sees the answers. Page Inbox (app 263902037430900) had sent 13 replies in
-  `messaging` on threads this app owns by 16:22. `parseMetaWebhook` counts
-  every echo and drops it (`lib/meta/parse.ts`), so no outbound Facebook
-  message has been stored since the switch. By 16:22, the six conversations
-  with messages in `messaging` since the switch all read as unanswered
-  (`first_responded_at` and `last_agent_message_at` null), so their SLA clocks
-  run as though nobody had replied. This app's own last Messenger reply went
-  out on 2026-11-09. A ticket answered in Business Suite will keep reading as
-  unanswered until one of two things changes: the team answers in the
-  console, or the echo of a reply typed elsewhere is filed, as WhatsApp's
-  coexistence echoes are._
+  _On 2026-11-11 the team answered those new threads in Business Suite, and the
+  console never saw the answers. Page Inbox (app 263902037430900) had sent 13
+  replies in `messaging` on threads this app owns by 16:22.
+  `parseMetaWebhook` counts every echo and drops it (`lib/meta/parse.ts`), so
+  no outbound Facebook message was stored that day. By 16:22, six
+  conversations had messages in `messaging` since the switch: five new
+  threads, and one opened earlier that an agent had taken control of in the
+  console at 09:51:47. All six read as unanswered (`first_responded_at` and
+  `last_agent_message_at` null). Business Suite had replied on four of them,
+  so their SLA clocks ran as though nobody had replied. A ticket answered in
+  Business Suite keeps reading as unanswered until one of two things changes:
+  the team answers in the console, or the echo of a reply typed elsewhere is
+  filed, as WhatsApp's coexistence echoes are._
+
+  _On 2026-11-12 the team began answering Messenger from the console. Between
+  09:39:46 and 15:20 UTC, agents sent 30 Messenger replies in 10
+  conversations: 27 delivered, 1 sent, and 2 refused by Meta (14:39 and 14:40)
+  with code 100, subcode 2018276,
+  "Cannot tag messages with 'HUMAN_AGENT' without prior approval". Those two
+  were outside the 24 hours, where the reply goes out tagged `HUMAN_AGENT`,
+  and the feature is still not approved (§5.2). This app's previous Messenger
+  reply had gone out on 2026-11-09. By 15:20 UTC, four of the six
+  conversations above had a console reply._
 
   The consequence is that every Meta event reaches this system in the handover
   protocol's `standby` array rather than `messaging`. A secondary receiver may
@@ -1577,12 +1594,16 @@ is code:
   Facebook and Instagram conversation and answer none of them, and
   `lib/meta/thread.ts` refuses those sends before Graph does (§6.22). Nothing
   about that is a credential, an approval or a bug — do not go looking for one.
+  _Since 2026-11-05 this no longer holds for Instagram. Since 09:50 UTC on
+  2026-11-11 it holds only for Messenger threads opened before then; new
+  threads arrive in `messaging` (above)._
 
   **The plan is a swap, not a negotiation.** When this service is ready, the
   Freshworks app is removed from the Meta account and this service's Meta app
   becomes the default; thread control follows the default app. Until that
-  happens, treat **Messenger** as read-only in practice however the code is
-  configured.
+  happens, treat **Messenger threads opened before 2026-11-11 09:50 UTC** as
+  read-only in practice however the code is configured. Newer threads are this
+  app's to answer (above).
 
   **Instagram is the exception as of 2026-08-30, and it is the way out of this
   paragraph.** _(The route changed on 2026-11-04: the Instagram Login token
@@ -1599,20 +1620,26 @@ is code:
   answered from here before the swap — which also means the Instagram App Review
   screencast can be recorded before it. `standby` on a Page delivery no longer
   refuses an Instagram send; see §6.36 and `lib/meta/connection.ts`. Messenger
-  has no equivalent second route and still waits for the swap.
+  has no equivalent second route. Its threads opened before 2026-11-11 still
+  wait for the swap; newer ones do not (above).
 
   Two things follow that are easy to get wrong. **The App Review screencasts
   cannot be recorded before the swap** — `pages_messaging` and the comment
   permissions all require footage of the app _sending_, and a recording of a
   reply Graph refuses is a rejected submission
-  (`plans/meta-app-review-submission.md`). And **the swap is the cutover's point
-  of no return** for these channels: the moment Freshworks stops being default,
-  the Meta inboxes are answered here or not at all, so the channel rows, the
-  agents and the groups below need to be in place first rather than after.
+  (`plans/meta-app-review-submission.md`). _Since 2026-11-11 a send on a new
+  Messenger thread can be filmed, and on Instagram since 2026-11-05 (above)._
+  And **the swap is the cutover's point of no return** for these channels: the
+  moment Freshworks stops being default, the Meta inboxes are answered here or
+  not at all, so the channel rows, the agents and the groups below need to be
+  in place first rather than after. _On 2026-11-11 the new Messenger threads
+  had a third answer: Business Suite, where the console never sees it (above).
+  From 2026-11-12 the team answers them here._
 
 - **The knowledge base no longer depends on Freshdesk, and
   `support.shipblu.com` answers from this app. What is left of the
-  disconnection is owned outside this repository.** The record and the
+  disconnection is setting `KB_PUBLIC_HOST`, writing the domain into
+  `render.yaml`, and work owned outside this repository.** The record and the
   checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
   stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
   images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
@@ -1637,12 +1664,14 @@ is code:
   - **PR 5, the crawler files on every host, with its review fixes** (#508,
     2026-11-11).
 
-  **The domain moved on 2026-11-11**, by about 20:54 UTC (the header).
-  `KB_PUBLIC_HOST` still does not name it, so the host is served as a console
-  host. Freshdesk's bookmarks there, `/support/home` and
-  `/support/tickets/new`, go to the console's sign-in, and so do `/inbox` and
-  the favicon. The widget's `BASE`, the sitemap and the canonicals still name
-  the Render host. Setting the variable is the next step (the
+  **The domain moved on 2026-11-11**, between 19:30 and 20:54 UTC (the
+  header). `KB_PUBLIC_HOST` still does not name it, so the host is served as a
+  console host. Freshdesk's bookmarks there, `/support/home` and
+  `/support/tickets/new`, go to the console's sign-in, and so does `/inbox`.
+  The widget's `BASE`, the sitemap and the canonicals still name the Render
+  host. The favicon is behind sign-in on every host, a separate bug:
+  `/icon.svg` is not a public path, and once the variable is set the help
+  centre's host rewrites it to `/help/icon.svg`, which 404s. Setting the variable is the next step (the
   `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
   paths that are not an article or a folder become the help centre's 404
   rather than the sign-in page.
@@ -1653,8 +1682,10 @@ is code:
     coexistence number, 5 of them in the 7 days to 2026-11-11 10:49 UTC. Each
     now 301s to its article here.
   - **The merchant dashboard.** Its 16 help links land here through the move,
-    but it still loads Freshchat, and a Zendesk widget besides. shipblu.com
-    loads the same Zendesk widget.
+    but they still depend on the legacy route, and its 2 links to an older
+    Freshdesk account (`shipblu.freshdesk.com`) still 404. It still loads
+    Freshchat, and a Zendesk widget besides. shipblu.com loads the same
+    Zendesk widget.
   - **Mail.** Nobody has read where `support@`, `help@` (in 15 articles) and
     `tech@` (in 2) deliver, and SPF still includes `email.freshdesk.com`.
   - **Article wording.** "Support Portal" is in 2 articles, and the chat
@@ -2106,17 +2137,22 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   (`plans/freshdesk-disconnection.md`). What follows is the record of
   August and September._
 
-  _**That name has answered from this app since about 20:54 UTC on
-  2026-11-11, so the variable can be set now.** On 2026-11-12 it was still
+  _**That name has answered from this app since 20:54 UTC on 2026-11-11 at
+  the latest, so the variable can be set now.** On 2026-11-12 it was still
   not set to the domain: `/widget/embed.js`, the sitemap, the `Sitemap:` line
   and every canonical named `shipblu-support.onrender.com`, on both hosts.
-  With the variable unset, `support.shipblu.com` is served the way the Render
-  host is, as a console host. `/inbox` and Freshdesk's `/support/home` answer
-  307 to `/login` there, and only the help centre's locale paths, `/`,
-  `robots.txt` and the sitemap reach the help centre. The blueprint lists the
-  key in `shipblu-support-production`, which the web service and the worker
-  both link, with no service-level entry on either. So one change to the
-  group sets both, and Render redeploys every service that links the group.
+  With the published base still the Render host (the variable unset or naming
+  it), `support.shipblu.com` is served the way the Render host is, as a
+  console host. `/inbox` and Freshdesk's `/support/home` answer 307 to
+  `/login` there. Only the help centre's locale paths, `/help/…`, `/`,
+  `robots.txt`, the sitemap and Freshdesk's article and folder URLs (through
+  the legacy route) reach the help centre. The blueprint lists the key in
+  `shipblu-support-production`, which the web service and the worker both
+  link, with no service-level entry on either. So one change to the group
+  should set both, and Render redeploys every service that links the group,
+  unless the dashboard holds a service-level entry on either service that the
+  blueprint does not show. Read a survey link built on the worker before CSAT
+  is switched on.
   Once it is set, the domain serves only the help centre, and the console
   stays on the Render host._
 
@@ -2478,9 +2514,9 @@ nobody has run, that somebody has to actually watch against the real provider:
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
   which was read as "nothing links to them" and was not: 29 links **inside the
-  articles** pointed at those legacy paths until 2026-09-03, and `support.
-shipblu.com` still serves Freshdesk, so each one took a reader out of this
-  help centre and into the old portal. They are now `/{locale}/a/{slug}`
+  articles** pointed at those legacy paths until 2026-09-03, and
+  `support.shipblu.com` served Freshdesk until 2026-11-11, so each one took a
+  reader out of this help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
 
@@ -2509,10 +2545,12 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   article that answers 200. The 4 in agents-only folders answer 404 since
   #504 (#508): they are empty placeholders, and a 301 to a page that 404s
   would have been a dead link a browser keeps. **The domain moved the same
-  evening** (§5.1), and since about 20:54 UTC the same holds on
-  `support.shipblu.com`. Every Freshdesk link the phone and the merchant
-  dashboard send now lands on its article here: the 32 phone sends to date
-  name 9 ids, and the dashboard 8. What still answers the console's sign-in
+  evening** (§5.1), and since 20:54 UTC at the latest the same holds on
+  `support.shipblu.com`. Every `support.shipblu.com` link the phone and the
+  merchant dashboard send now lands on its article here: the 32 phone sends to
+  date name 9 ids, and the dashboard's 16 links 8. The dashboard's 2 links to
+  the older account, `shipblu.freshdesk.com/a/solutions/articles/80001070415`,
+  still 404. What still answers the console's sign-in
   there, until `KB_PUBLIC_HOST` names the domain, is Freshdesk's portal paths
   that are not an article or a folder, such as `/support/home` and
   `/support/tickets/new`.
@@ -7314,10 +7352,13 @@ still waiting for it` one whose outcome is not known yet.
   - All six legacy URL shapes answered 301 on the Render host.
   - `/robots.txt` and `/sitemap.xml` answered 200 at the root.
 
-  After the domain moved that evening, the same held on `support.shipblu.com`.
-  Every check was then re-tried by a second sweep set on refuting it, and
-  each held. The measurements and their queries are in
-  `plans/freshdesk-disconnection.md`.
+  After the domain moved that evening, the legacy URLs, `robots.txt`, the
+  sitemap, an article page and an image route answered the same on
+  `support.shipblu.com`. A second sweep re-checked the first sweep's findings
+  and tried to refute them. Where the release of `7605993` had changed the
+  answer (the crawler files, the agents-only URLs), the figures above are the
+  second sweep's. The 61-article navigation is the second sweep's alone. The
+  measurements and their queries are in `plans/freshdesk-disconnection.md`.
 
 - **Production health**, checked 2026-08-21 on `98ec9d4`: `status: ok`, 2 ms
   database latency, queue empty. **One dead job** — the `send_meta` row in §5.2,
@@ -8287,8 +8328,10 @@ dryRun=true`, then without, gives those two theirs back from their
       (`lib/meta/app-roles.ts`) reads it into the verdict, which supersedes an
       Instagram `standby` older than the switch as it supersedes one older
       than a `thread_control_taken`. It is Instagram only. The Page's event
-      named this app `default_app` too, yet the 23 Messenger messages received
-      in the day after it all arrived in `standby`. A `standby` newer than the
+      named this app `default_app` too, yet the 19 Messenger messages stored
+      in the day after it all arrived in `standby`. (This said 23 until
+      2026-11-12, which is the day's Facebook deliveries: 21 of them came in
+      `standby`.) A `standby` newer than the
       switch still refuses, worded as another app having taken the thread
       since. A switch away from this app is weighed the other way: a thread
       whose customer last wrote before it reads as the new default's, and

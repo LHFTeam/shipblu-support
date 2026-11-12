@@ -674,8 +674,11 @@ rules follow, each of which has already cost a customer channel:
   a thread whose customer last wrote before it is the new default's, and
   refuses. The Page's own switch supersedes nothing: it named this app
   `default_app` on 2026-11-05 too, and every Messenger message in the day after
-  it still arrived in `standby`, since Freshworks holds that inbox as primary
-  receiver (§6.111). Every reader of a stored message takes both facts from
+  it still arrived in `standby`, while Freshworks held that inbox as primary
+  receiver (§6.111). Since 2026-11-11 Meta hands each new Messenger thread to
+  this app, and whether Freshworks is still primary receiver cannot be read
+  from the deliveries (`docs/PROJECT-STATE.md` §5.1), so a thread opened
+  before then is still the case this rule is for. Every reader of a stored message takes both facts from
   `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the standing
   as a required argument, so the console and `send_meta` cannot weigh different
   ones. The one reader that takes neither is the survey's thanks, which judges a
@@ -2367,7 +2370,8 @@ picture. `rehost_kb_images` copies
 Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
 rewrites versions in place rather than cutting one, so no Restore can bring
 Freshdesk's address back, and its way back is `revert=true` from
-`kb_images.source_url`. The editor uploads a new picture the same way
+`kb_images.source_url`, which works only while Freshdesk still serves those
+addresses, so never after the account is closed. The editor uploads a new picture the same way
 (`uploadArticlePicture`, PR 4): judged by its bytes, stored with no
 `source_url`, and named by its route.
 
