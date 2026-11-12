@@ -65,6 +65,19 @@ async function phone(name: string, ownerAgentId: string | null = null) {
   return row!.id;
 }
 
+/**
+ * A number answered through the console: a ticket on it is the team's to see,
+ * so somebody deliberately given one keeps it across a handover. `phone()` is
+ * a coexistence number, whose tickets nobody but its owner may be left with.
+ */
+async function teamPhone(name: string, ownerAgentId: string | null = null) {
+  const [row] = await db
+    .insert(channels)
+    .values({ type: 'whatsapp', name, ownerAgentId, config: { phoneNumberId: `pn-${name}` } })
+    .returning({ id: channels.id });
+  return row!.id;
+}
+
 async function statusId(name: 'Open' | 'Pending' | 'Resolved' | 'Closed') {
   const [row] = await db
     .select({ id: ticketStatuses.id })
@@ -240,6 +253,8 @@ describe('handOverNumber', () => {
       to: { id: nayera, label: 'Nayera Mohamed' },
       ticketsMoved: 2,
       ticketsReassigned: 2,
+      ticketsUnassigned: 0,
+      ownerOnly: true,
     });
     expect(await ownerOf(number)).toBe(nayera);
 
@@ -318,7 +333,7 @@ describe('handOverNumber', () => {
     const nayera = await agent('Nayera Mohamed');
     const ali = await agent('Ali Nasser');
     const bob = await agent('Bob Supervisor');
-    const number = await phone('Nayera Mohamed', nayera);
+    const number = await teamPhone('Nayera Mohamed', nayera);
 
     const hers = await ticket(number, 'Open', {
       accountableAgentId: nayera,
@@ -359,7 +374,7 @@ describe('handOverNumber', () => {
   it('hands a number to nobody: accountability clears and the work stays where it is', async () => {
     const admin = await agent('Mona Admin', { role: 'admin' });
     const nayera = await agent('Nayera Mohamed');
-    const number = await phone('Nayera Mohamed', nayera);
+    const number = await teamPhone('Nayera Mohamed', nayera);
     const hers = await ticket(number, 'Open', {
       accountableAgentId: nayera,
       assigneeAgentId: nayera,
@@ -380,6 +395,91 @@ describe('handOverNumber', () => {
     expect(await db.select().from(channelOwnerChanges)).toEqual([
       expect.objectContaining({ fromAgentId: nayera, toAgentId: null, toLabel: null }),
     ]);
+  });
+
+  // A coexistence number's tickets are hidden from everybody but its owner and
+  // the agents who see every ticket, so a handover leaves none with anybody
+  // else: held by somebody who cannot open it, a ticket is in nobody's list
+  // and reads as taken to everybody who can.
+  describe('of a coexistence number', () => {
+    it('moves the work off anybody its tickets are hidden from, to the new owner', async () => {
+      const admin = await agent('Mona Admin', { role: 'admin' });
+      const nayera = await agent('Nayera Mohamed');
+      const ali = await agent('Ali Nasser');
+      const bob = await agent('Bob Agent');
+      const sara = await agent('Sara Supervisor', { role: 'supervisor' });
+      // A supervisor whose own override takes every ticket away again.
+      const omar = await agent('Omar Supervisor', {
+        role: 'supervisor',
+        permissions: { 'ticket.view.all': false },
+      });
+      const number = await phone('Nayera Mohamed', nayera);
+
+      const held = { accountableAgentId: nayera };
+      const bobs = await ticket(number, 'Open', { ...held, assigneeAgentId: bob });
+      const saras = await ticket(number, 'Pending', { ...held, assigneeAgentId: sara });
+      const omars = await ticket(number, 'Open', { ...held, assigneeAgentId: omar });
+
+      const result = await handOverNumber({
+        channelId: number,
+        toAgentId: ali,
+        actor: { id: admin, label: 'Mona Admin' },
+      });
+
+      expect(result).toMatchObject({ ticketsMoved: 3, ticketsReassigned: 2, ticketsUnassigned: 0 });
+      expect(await holders(bobs)).toEqual({ accountable: ali, assignee: ali });
+      expect(await holders(omars)).toEqual({ accountable: ali, assignee: ali });
+      // She sees every ticket, so what she was given stays with her.
+      expect(await holders(saras)).toEqual({ accountable: ali, assignee: sara });
+    });
+
+    it('unassigns them when the number goes to nobody, and says so on each', async () => {
+      const admin = await agent('Mona Admin', { role: 'admin' });
+      const nayera = await agent('Nayera Mohamed');
+      const sara = await agent('Sara Supervisor', { role: 'supervisor' });
+      const number = await phone('Nayera Mohamed', nayera);
+
+      const held = { accountableAgentId: nayera };
+      const hers = await ticket(number, 'Open', { ...held, assigneeAgentId: nayera });
+      const saras = await ticket(number, 'Open', { ...held, assigneeAgentId: sara });
+      // Not hers to lose: a handover moves only open and pending tickets.
+      const resolved = await ticket(number, 'Resolved', { ...held, assigneeAgentId: nayera });
+
+      const result = await handOverNumber({
+        channelId: number,
+        toAgentId: null,
+        actor: { id: admin, label: 'Mona Admin' },
+      });
+
+      expect(result).toMatchObject({
+        to: null,
+        ticketsMoved: 2,
+        ticketsReassigned: 0,
+        ticketsUnassigned: 1,
+        ownerOnly: true,
+      });
+      expect(await holders(hers)).toEqual({ accountable: null, assignee: null });
+      expect(await holders(saras)).toEqual({ accountable: null, assignee: sara });
+      expect(await holders(resolved)).toEqual({ accountable: nayera, assignee: nayera });
+
+      const [change] = await db.select({ id: channelOwnerChanges.id }).from(channelOwnerChanges);
+      expect(await eventsOf(hers)).toEqual([
+        expect.objectContaining({ type: 'accountable_changed' }),
+        {
+          type: 'unassigned',
+          actorAgentId: null,
+          actorLabel: 'number_handover',
+          data: {
+            to: null,
+            from: nayera,
+            channelId: number,
+            reason: 'owner_only',
+            by: admin,
+            changeId: change!.id,
+          },
+        },
+      ]);
+    });
   });
 
   it('writes nothing when the number already belongs to that person', async () => {
@@ -611,7 +711,7 @@ describe('alignAccountable', () => {
     const nayera = await agent('Nayera Mohamed');
     const ali = await agent('Ali Nasser');
     const bob = await agent('Bob Supervisor');
-    const number = await phone('Nayera Mohamed', ali);
+    const number = await teamPhone('Nayera Mohamed', ali);
     const hers = await ticket(number, 'Open', {
       accountableAgentId: nayera,
       assigneeAgentId: nayera,
@@ -655,6 +755,46 @@ describe('alignAccountable', () => {
     // The number gone to nobody: accountability clears, the holder keeps it.
     expect(await align(hers, null)).toEqual({ changed: true, reassigned: false });
     expect(await holders(hers)).toEqual({ accountable: null, assignee: ali });
+  });
+
+  // On a coexistence number a reopened ticket is left with nobody it is hidden
+  // from: the previous owner, or a colleague it was given to.
+  it('leaves a coexistence number’s ticket only with somebody who can see it', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const ali = await agent('Ali Nasser');
+    const bob = await agent('Bob Agent');
+    const sara = await agent('Sara Supervisor', { role: 'supervisor' });
+    const number = await phone('Nayera Mohamed', ali);
+    const held = { accountableAgentId: nayera };
+    const bobs = await ticket(number, 'Open', { ...held, assigneeAgentId: bob });
+    const saras = await ticket(number, 'Open', { ...held, assigneeAgentId: sara });
+    const orphan = await ticket(number, 'Open', { ...held, assigneeAgentId: nayera });
+    const orphanSeen = await ticket(number, 'Open', { ...held, assigneeAgentId: sara });
+
+    const align = (conversationId: string, ownerId: string | null) =>
+      db.transaction((tx) =>
+        alignAccountable(tx, {
+          conversationId,
+          ownerId,
+          channelId: number,
+          reason: 'reopened_after_handover',
+        }),
+      );
+
+    expect(await align(bobs, ali)).toEqual({ changed: true, reassigned: true });
+    expect(await holders(bobs)).toEqual({ accountable: ali, assignee: ali });
+    expect(await align(saras, ali)).toEqual({ changed: true, reassigned: false });
+    expect(await holders(saras)).toEqual({ accountable: ali, assignee: sara });
+
+    // The number is nobody's now: unassigned, where a supervisor finds it.
+    expect(await align(orphan, null)).toEqual({ changed: true, reassigned: false });
+    expect(await holders(orphan)).toEqual({ accountable: null, assignee: null });
+    expect((await eventsOf(orphan)).map((e) => [e.type, e.data.from])).toEqual([
+      ['accountable_changed', nayera],
+      ['unassigned', nayera],
+    ]);
+    expect(await align(orphanSeen, null)).toEqual({ changed: true, reassigned: false });
+    expect(await holders(orphanSeen)).toEqual({ accountable: null, assignee: sara });
   });
 
   // Its locked read can wait on another writer, and its `assigned` line is

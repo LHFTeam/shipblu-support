@@ -9,6 +9,12 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import {
+  agentsWhoSeeEveryTicket,
+  hiddenFromHolder,
+  isCoexistenceNumber,
+  ownerOnlyNumber,
+} from '@/lib/tickets/owner-only';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from './coexistence';
@@ -245,6 +251,10 @@ async function ownerOnReopen(
  * it does in a handover. With the number now nobody's (cleared, or its owner
  * deactivated) the accountability clears and the assignee stays: the ticket is
  * then a team ticket like any other, which keeps the assignee it had.
+ *
+ * A coexistence number is the exception to both, as in a handover: a holder
+ * its tickets are hidden from is never left with one. It moves to the owner,
+ * or is unassigned when there is none.
  */
 export async function alignAccountable(
   tx: typeof db,
@@ -269,13 +279,26 @@ export async function alignAccountable(
     return { changed: false, reassigned: false };
   }
 
-  const reassign = movesAssignee(ticket, ticket.accountableAgentId, input.ownerId);
+  // On a coexistence number the holder also has to be somebody the ticket is
+  // not hidden from (`lib/tickets/owner-only.ts`): the previous owner, or a
+  // colleague it was given to, would hold a reopened ticket that is in none
+  // of their lists and reads as taken to everybody who can see it. It goes to
+  // the owner it came back to, or to nobody when the number has none.
+  const stranded =
+    ticket.assigneeAgentId !== null &&
+    ticket.assigneeAgentId !== input.ownerId &&
+    (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, input.ownerId));
+  const reassign =
+    movesAssignee(ticket, ticket.accountableAgentId, input.ownerId) ||
+    (stranded && input.ownerId !== null);
+  const unassign = stranded && input.ownerId === null;
 
   await tx
     .update(conversations)
     .set({
       accountableAgentId: input.ownerId,
       ...(reassign ? { assigneeAgentId: input.ownerId, assignedAt: input.now ?? new Date() } : {}),
+      ...(unassign ? { assigneeAgentId: null, assignedAt: null } : {}),
     })
     .where(eq(conversations.id, input.conversationId));
 
@@ -303,6 +326,20 @@ export async function alignAccountable(
       conversationId: input.conversationId,
       ownerId: input.ownerId,
       channelId: input.channelId,
+    });
+  }
+  if (unassign) {
+    await tx.insert(conversationEvents).values({
+      conversationId: input.conversationId,
+      type: 'unassigned',
+      actorLabel: 'number_owner',
+      createdAt: CHANGE_STAMP,
+      data: {
+        to: null,
+        from: ticket.assigneeAgentId,
+        reason: 'owner_only',
+        channelId: input.channelId,
+      },
     });
   }
 
@@ -392,6 +429,14 @@ export type Handover =
       ticketsMoved: number;
       /** Of those, the ones whose assignee moved to `to` as well. */
       ticketsReassigned: number;
+      /**
+       * Open and pending tickets taken off their holder and given to nobody: a
+       * coexistence number handed back to the team, whose tickets its holders
+       * can no longer see.
+       */
+      ticketsUnassigned: number;
+      /** A coexistence number, whose tickets only its owner and the agents who see every ticket can open. */
+      ownerOnly: boolean;
     };
 
 /**
@@ -411,6 +456,10 @@ export type Handover =
  * its breach still counts against the new owner. Handing a number to nobody
  * clears the accountability and moves no work; the assignees keep what they
  * hold.
+ *
+ * A coexistence number moves more, because its tickets are hidden from
+ * everybody but its owner and the agents who see every ticket: whoever else
+ * holds one loses it, to the new owner or, with none, to nobody (`stranded`).
  *
  * Refused, with a sentence for the admin, when the channel is gone or is not a
  * plain WhatsApp number (`channels_owner_only_whatsapp` refuses it below this
@@ -484,6 +533,8 @@ export async function handOverNumber(input: {
       to,
       ticketsMoved: 0,
       ticketsReassigned: 0,
+      ticketsUnassigned: 0,
+      ownerOnly: false,
     };
     if (channel.ownerAgentId === (to?.id ?? null)) return unchanged;
 
@@ -530,10 +581,27 @@ export async function handOverNumber(input: {
       if (MOVES_WITH_NUMBER.includes(category)) tickets.push(ticket);
     }
 
+    // A coexistence number's tickets are hidden from everybody but its owner
+    // and the agents who see every ticket (`lib/tickets/owner-only.ts`), so
+    // the handover leaves none with anybody else: the previous owner, who has
+    // just stopped being the one person it showed them to, or a colleague one
+    // was given to. With a new owner they follow the number; with none they
+    // are unassigned, where everybody who can still see them finds them.
+    const ownerOnly = (await ownerOnlyNumber(tx, channel.id)) !== null;
+    const seesAll = ownerOnly ? await agentsWhoSeeEveryTicket(tx) : null;
+    const stranded = (ticket: { assigneeAgentId: string | null }) =>
+      seesAll !== null &&
+      ticket.assigneeAgentId !== null &&
+      ticket.assigneeAgentId !== (to?.id ?? null) &&
+      !seesAll.has(ticket.assigneeAgentId);
+
     const moved = tickets.filter((ticket) => ticket.accountableAgentId !== (to?.id ?? null));
     const reassigned = to
-      ? tickets.filter((ticket) => movesAssignee(ticket, from, to.id)).map((ticket) => ticket.id)
+      ? tickets
+          .filter((ticket) => movesAssignee(ticket, from, to.id) || stranded(ticket))
+          .map((ticket) => ticket.id)
       : [];
+    const unassigned = to ? [] : tickets.filter(stranded);
 
     if (moved.length > 0) {
       await tx
@@ -551,6 +619,17 @@ export async function handOverNumber(input: {
         .update(conversations)
         .set({ assigneeAgentId: to.id, assignedAt: now })
         .where(inArray(conversations.id, reassigned));
+    }
+    if (unassigned.length > 0) {
+      await tx
+        .update(conversations)
+        .set({ assigneeAgentId: null, assignedAt: null })
+        .where(
+          inArray(
+            conversations.id,
+            unassigned.map((ticket) => ticket.id),
+          ),
+        );
     }
 
     const [change] = await tx
@@ -606,6 +685,13 @@ export async function handOverNumber(input: {
         data: { to: to!.id, ...stamp },
         createdAt: CHANGE_STAMP,
       })),
+      ...unassigned.map((ticket) => ({
+        conversationId: ticket.id,
+        type: 'unassigned',
+        actorLabel: 'number_handover',
+        data: { to: null, from: ticket.assigneeAgentId, ...stamp, reason: 'owner_only' },
+        createdAt: CHANGE_STAMP,
+      })),
     ];
     if (events.length > 0) await tx.insert(conversationEvents).values(events);
 
@@ -614,6 +700,8 @@ export async function handOverNumber(input: {
       changed: true,
       ticketsMoved: moved.length,
       ticketsReassigned: reassigned.length,
+      ticketsUnassigned: unassigned.length,
+      ownerOnly,
     };
   });
 }
@@ -643,6 +731,15 @@ export function handoverNotice(done: Extract<Handover, { ok: true }>): string {
   }
 
   if (!done.to) {
+    // A coexistence number is never a team number: with no owner its tickets
+    // are hidden from the team, and those somebody held have left them, so
+    // the sentence about who they count against would name nobody.
+    if (done.ownerOnly) {
+      const sees = 'only supervisors and admins can see its tickets until it has one';
+      if (done.ticketsUnassigned === 0) return `${number} has no owner from now: ${sees}.`;
+      const tickets = `${done.ticketsUnassigned} open or pending ${done.ticketsUnassigned === 1 ? 'ticket was' : 'tickets were'}`;
+      return `${number} has no owner from now: ${tickets} unassigned, and ${sees}.`;
+    }
     return done.ticketsMoved === 0
       ? `${number} is a team number from now.`
       : `${number} is a team number from now: its ${moved} ${counts} against whoever holds ${one ? 'it' : 'each'}.`;
@@ -691,6 +788,12 @@ export type NumberOwnership = {
   channelId: string;
   /** Null for a team number. A deactivated owner is still named, with `active` false. */
   owner: { id: string; label: string; active: boolean } | null;
+  /**
+   * A coexistence number: its tickets are seen by its owner and the agents who
+   * see every ticket, and by nobody else (`lib/tickets/owner-only.ts`), which
+   * the page says beside the owner and before a handover.
+   */
+  ownerOnly: boolean;
   /** What a handover would move now: open and pending native tickets. */
   movableTickets: number;
   /**
@@ -731,6 +834,7 @@ export async function numberOwnership(): Promise<NumberOwnership[]> {
       ownerName: agents.name,
       ownerEmail: agents.email,
       ownerActive: agents.isActive,
+      ownerOnly: sql<boolean>`${isCoexistenceNumber()}`,
     })
     .from(channels)
     .leftJoin(agents, eq(agents.id, channels.ownerAgentId))
@@ -786,6 +890,7 @@ export async function numberOwnership(): Promise<NumberOwnership[]> {
             active: row.ownerActive ?? false,
           }
         : null,
+      ownerOnly: row.ownerOnly,
       movableTickets: counts.find((count) => count.channelId === row.channelId)?.count ?? 0,
       current: isCurrent ? (shown[0] ?? null) : null,
       earlier: isCurrent ? shown.slice(1) : shown,

@@ -107,6 +107,8 @@ export type ConversationDetail = {
    * the same map `custom.<key>` conditions are evaluated against.
    */
   customFields: CustomFieldValues;
+  /** The `channels` row of our number, where one names it. */
+  channelId: string | null;
   assigneeAgentId: string | null;
   assigneeName: string | null;
   /**
@@ -526,6 +528,9 @@ export async function getConversation(
     statusCategory: row.statusCategory,
     tags: row.conversation.tags,
     customFields: row.conversation.customFields,
+    // Which of our numbers it is on, for the Assignee picker
+    // (`listAssignableAgents`).
+    channelId: row.conversation.channelId,
     assigneeAgentId: row.conversation.assigneeAgentId,
     assigneeName: row.assigneeName,
     accountable: row.accountableId

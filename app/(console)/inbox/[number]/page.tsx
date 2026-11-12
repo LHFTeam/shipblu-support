@@ -16,7 +16,7 @@ import { listSideConversationRecipients } from '@/lib/side-conversations/queries
 import { getConversation } from '@/lib/tickets/conversation';
 import { lastCustomerWords, subjectWords } from '@/lib/tickets/customer-text';
 import {
-  listActiveAgents,
+  listAssignableAgents,
   listApprovedTemplates,
   listCannedResponses,
   listGroups,
@@ -140,7 +140,7 @@ export default async function ConversationPage({
   const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions, live] =
     await Promise.all([
       listStatuses(),
-      listActiveAgents(),
+      listAssignableAgents(conversation),
       listGroups(),
       listTicketFields(),
       // Only the reply form inserts one, so no reply box, no list.

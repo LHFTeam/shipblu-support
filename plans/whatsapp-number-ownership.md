@@ -278,6 +278,52 @@ different tickets. The number's half covers what arrives on it now, including
 its copied history, which nobody is accountable for. The accountable half covers
 a ticket that stays theirs after the number moves on.
 
+### A coexistence number is its owner's alone (2026-11-12)
+
+Asked for as "a WhatsApp coexistence channel should only be visible to its
+owner", and three questions were put and answered: agents who see every ticket
+(`ticket.view.all`) keep seeing these; a number with no owner, or a deactivated
+one, is seen by them alone; and nobody else the ticket is tied to keeps it —
+not its assignee, not the agent it is accountable to, not the previous owner.
+
+So `heldByOrInGroupsOf` is `on a number I own, or (not on a coexistence number
+and (assigned to me, accountable to me, or in my groups))`. That takes in the
+copied history, which sits resolved in the number's default group and was
+readable by every member of it. `lib/tickets/owner-only.ts` holds the SQL and
+the reasons, and is what the writers ask too, since a ticket held by somebody
+it is hidden from is in nobody's list:
+
+| Writer                              | On a coexistence number                                             |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `assignConversation`, the rota      | Never picks: an active owner, or `owner_only` and nobody            |
+| `updateTicket`, the Assignee picker | Offers and accepts only the owner and agents who see every ticket   |
+| `assign_agent`                      | Skipped, with a warning, for anybody else                           |
+| `handOverNumber`                    | Moves every holder it is hidden from to the new owner, or unassigns |
+| `alignAccountable`                  | The same, for a ticket reopened after the number changed            |
+
+Production on the day: three coexistence numbers, two with no owner, 188
+tickets, 130 open or pending, and none held by anybody but its number's owner,
+so nothing needed moving at the deploy. The two ownerless numbers' tickets
+became visible to supervisors and admins only.
+
+Left as they are, each a change of its own if it is wanted:
+
+- **The contact directory.** A coexistence onboarding copies the phone's
+  address book into `contacts`, and `/contacts` is open to every agent
+  (`contact.view`). A person known only from that phone is found by name and
+  number; their ticket list is empty for anybody but the owner.
+- **Report lists.** The CSAT comments, the category labelling list, the
+  routing report's ticket numbers and the subcategory review queue are not
+  scoped by ticket. Each is behind a key (`report.view`, `admin.*`) whose
+  roles hold `ticket.view.all`, so only a per-agent override reaches them.
+- **The live tick.** Inbox streams are woken per channel type, so an open
+  inbox re-reads when a coexistence ticket changes. The payload is empty and
+  the re-read is the scoped list.
+- **A plain number adopted as a coexistence one, or a ticket filed under no
+  row adopted onto one** (`findOrAdoptLive`), keeps the assignee it had.
+- **Reclaim** takes an abandoned ticket off a supervisor on an ownerless
+  coexistence number and leaves it unassigned, where the rota once re-placed it.
+
 An agent in no group used to be offered Mine alone, since their Unassigned was
 always empty. The shell now asks `ownsANumber`. An owner in no group is offered
 Unassigned and All open, and their bare inbox reads as All rather than Mine.

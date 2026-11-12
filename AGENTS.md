@@ -1120,7 +1120,7 @@ previous owner for good. Six rules hold:
   supervisor's reassignment, an automation and a merge never write
   accountability. A handover or a reopen moves the assignee too, but only off
   the number's previous owner or nobody: a ticket somebody was deliberately
-  given stays with them.
+  given stays with them — on a plain number; a coexistence number's is below.
 - **The owner is outside the rota.** `assignConversation` hands an unassigned
   owned ticket straight back to its active owner — group, hours, presence,
   capacity and skills unasked, the cursor unmoved, though a group a caller
@@ -1148,11 +1148,53 @@ previous owner for good. Six rules hold:
   "accountable to me, or on a number I own" on both of its branches, so every
   reader of visibility inherits it; and the inbox asks `ownsANumber`, so an
   owner in no group is offered Unassigned and All open rather than Mine alone.
+  On a coexistence number the number's half is the only one asked (below).
 - **A handover's events carry no `actorAgentId`.** The agent rollup counts every
   event an agent acted in as a ticket they touched, and an admin handing over
   ninety tickets has worked none of them. The admin is named in `data.by` and in
   `channel_owner_changes`, the append-only record of who owned a number when,
   which outlives the channel, the agents and any purged ticket.
+
+**A coexistence number's tickets are its owner's alone**
+(`lib/tickets/owner-only.ts`). It is one person's phone, and its copied history
+is six months of that phone's chats, so a ticket on one is seen by the number's
+owner and by an agent who sees every ticket (`ticket.view.all`), and by nobody
+else: not the members of the group it sits in, not a colleague it was assigned
+to, not a previous owner it is still accountable to. With no owner, or a
+deactivated one, that leaves the agents who see every ticket. Reading is
+`heldByOrInGroupsOf`, which asks every half but the number's own only of a
+ticket `notOnCoexistenceNumber()` — spelled with `channel_id is null or`,
+because most tickets have no number and `null <> all(…)` is null, which hid
+every ticket off WhatsApp when it was negated the short way. Which number
+counts is one SQL fragment, `isCoexistenceNumber`: any object under
+`coexistence`, looser than `parseCoexistence` on a row written by hand, since
+the side to be wrong on is hiding. A rule about who may see a ticket is a rule
+about who may hold it — held by somebody it is hidden from, a ticket is in
+nobody's list, counts against their capacity and reads as taken to everybody
+who can see it — so every writer that hands tickets out asks the same module:
+
+- **The rota never picks for one.** `assignConversation` hands it back to an
+  active owner as it does any owned ticket, and otherwise answers `owner_only`,
+  unrecorded, since its candidates are a group's members.
+- **The console and a rule leave one only with somebody who sees it.** The
+  Assignee picker offers the owner and the agents who see every ticket
+  (`listAssignableAgents`), `updateTicket` refuses anybody else, and a rule's
+  `assign_agent` naming anybody else is skipped with a warning.
+- **A handover and a reopen move more than they do on a plain number.** Every
+  open or pending ticket held by somebody it is hidden from goes to the new
+  owner, a ticket somebody was deliberately given included; handed to nobody,
+  those tickets are unassigned, with an `unassigned` line naming `from`.
+  `alignAccountable` does the same for a ticket coming back out of resolved.
+  "Sees every ticket" is `can()` over each active agent's role and overrides
+  (`agentsWhoSeeEveryTicket`), never a role test, so one statement of what a
+  role holds decides it.
+
+What it does not reach: the contact directory, where a person known only from
+that phone is still found by name and number with an empty ticket list; a
+report's own lists (CSAT comments, the labelling and review queues), which
+only somebody given a report key without `ticket.view.all` reads; and the
+inbox's live tick, which carries no content. Each is written down in
+`plans/whatsapp-number-ownership.md`, and is a change of its own.
 
 Only a `whatsapp` row may have an owner — a plain number or a coexistence one,
 never the bot (`channels_owner_only_whatsapp` in `db/sql/003`): the bot and the

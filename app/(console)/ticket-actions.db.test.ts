@@ -512,6 +512,47 @@ describe('handToGroup', () => {
   });
 });
 
+// A coexistence number's tickets are hidden from everybody but its owner and
+// the agents who see every ticket, so the action leaves one with nobody else
+// (`lib/tickets/owner-only.ts`): the picker narrows, and this is the authority.
+describe('updateTicket: the assignee of a coexistence number’s ticket', () => {
+  it('refuses somebody it is hidden from, and takes its owner or a supervisor', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const hana = await agent('Hana Sales');
+    const sara = await agent('Sara Supervisor', { role: 'supervisor' });
+    const care = await group('Customer Care', []);
+    const [phone] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Nayera Mohamed',
+        ownerAgentId: nayera,
+        config: {
+          phoneNumberId: 'pn-1',
+          coexistence: { onboardedAt: '2026-10-01T09:00:00.000Z', wabaId: '1' },
+        },
+      })
+      .returning({ id: channels.id });
+    const { id } = await ticket(care, {
+      channel: 'whatsapp',
+      channelId: phone!.id,
+      accountableAgentId: nayera,
+      assigneeAgentId: nayera,
+    });
+
+    expect(await edit(id, 'assignee', hana)).toEqual({
+      error: expect.stringContaining('Only the owner of this WhatsApp number'),
+    });
+    expect(await ticketRow(id)).toMatchObject({ assigneeAgentId: nayera });
+    expect(await eventsOf(id, 'assigned')).toEqual([]);
+
+    expect(await edit(id, 'assignee', sara)).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ assigneeAgentId: sara });
+    expect(await edit(id, 'assignee', nayera)).toMatchObject({ error: null });
+    expect(await ticketRow(id)).toMatchObject({ assigneeAgentId: nayera });
+  });
+});
+
 describe('updateTicket: a group move', () => {
   // The bug this pins: the group case assigned in the group the person chose,
   // and only then ran the rules, whose `assign_group` moved the ticket on and

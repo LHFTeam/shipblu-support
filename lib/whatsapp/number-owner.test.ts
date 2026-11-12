@@ -42,6 +42,8 @@ describe('handoverNotice', () => {
     to: { id: 'nayera', label: 'Nayera Mohamed' },
     ticketsMoved: 89,
     ticketsReassigned: 89,
+    ticketsUnassigned: 0,
+    ownerOnly: false,
   };
 
   it('says who owns the number and what moved to them', () => {
@@ -93,6 +95,20 @@ describe('handoverNotice', () => {
     );
     expect(handoverNotice({ ...done, to: null, ticketsMoved: 0, ticketsReassigned: 0 })).toBe(
       '+20 12 78707918 is a team number from now.',
+    );
+  });
+
+  // A coexistence number with no owner is nobody's queue but the supervisors':
+  // "a team number" would send the team to look for tickets hidden from them.
+  it('says who can still see a coexistence number handed to nobody', () => {
+    const nobody = { ...done, to: null, ownerOnly: true };
+    expect(handoverNotice({ ...nobody, ticketsUnassigned: 2 })).toBe(
+      '+20 12 78707918 has no owner from now: 2 open or pending tickets were unassigned, and ' +
+        'only supervisors and admins can see its tickets until it has one.',
+    );
+    expect(handoverNotice({ ...nobody, ticketsMoved: 0, ticketsReassigned: 0 })).toBe(
+      '+20 12 78707918 has no owner from now: only supervisors and admins can see its tickets ' +
+        'until it has one.',
     );
   });
 

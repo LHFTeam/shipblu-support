@@ -999,7 +999,8 @@ which also closes the race that opened two tickets for one chat, §6.100), and a
 ticket carries the person accountable for it beside the person working it.
 Reassigning moves the work and leaves the breach with the owner; reports, the
 live board and the hourly sample all file breaches that way; an owner sees every
-ticket on their number; and the ticket page names our number and who is
+ticket on their number, and on a coexistence number nobody else but an agent
+who sees every ticket does (`lib/tickets/owner-only.ts`); and the ticket page names our number and who is
 accountable. The threading changed with the deploy. The rest waits for an admin
 to hand a number over, and none has been yet: no row had an owner at 21:35 UTC.
 §5.1 has the steps for Nayera's, and the two configuration fixes that decide

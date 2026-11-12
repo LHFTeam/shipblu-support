@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import type { TicketFieldDef } from './custom-fields';
+import { ownerOnlyNumber, seesOwnerOnlyTicket } from './owner-only';
 
 // --- Lookups the console's controls are built from -------------------------
 
@@ -150,12 +151,42 @@ export function cannedVisibleTo(agentId: string): SQL {
 
 export type CannedResponseOption = Awaited<ReturnType<typeof listCannedResponses>>[number];
 
-export async function listActiveAgents() {
-  return db
-    .select({ id: agents.id, name: agents.name, email: agents.email })
+/**
+ * The agents a ticket's Assignee picker offers: every active agent, or, on a
+ * coexistence number, only those the ticket is not hidden from — its owner and
+ * the agents who see every ticket (`lib/tickets/owner-only.ts`). The action
+ * refuses anybody else, so offering them would be a list of refusals.
+ *
+ * Whoever holds the ticket now stays in the list though they could not be
+ * chosen again: a select whose value names no option draws its first one, and
+ * a ticket held by a colleague would read "Unassigned".
+ *
+ * One read after the other, not at once: the ticket page asks this inside a
+ * batch that already fills the pool's places (§6.91), and a ticket off
+ * WhatsApp has no number to ask about.
+ */
+export async function listAssignableAgents(ticket: {
+  channelId: string | null;
+  assigneeAgentId: string | null;
+}) {
+  const rows = await db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      email: agents.email,
+      role: agents.role,
+      permissions: agents.permissions,
+    })
     .from(agents)
     .where(eq(agents.isActive, true))
     .orderBy(asc(agents.name));
+  const number = await ownerOnlyNumber(db, ticket.channelId);
+  return rows
+    .filter(
+      (row) =>
+        !number || row.id === ticket.assigneeAgentId || seesOwnerOnlyTicket(row, number.ownerId),
+    )
+    .map(({ id, name, email }) => ({ id, name, email }));
 }
 
 export async function listGroups() {

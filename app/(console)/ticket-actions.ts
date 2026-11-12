@@ -37,6 +37,7 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
+import { OWNER_ONLY_REFUSAL, ownerOnlyNumber, seesOwnerOnlyTicket } from '@/lib/tickets/owner-only';
 import { changeStatus } from '@/lib/tickets/status';
 import { seesTicket } from '@/lib/tickets/visibility';
 import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
@@ -128,12 +129,27 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       if (assigneeAgentId) {
         if (!isUuid(assigneeAgentId)) return { error: 'Unknown agent' };
         const [assignee] = await db
-          .select({ isActive: agents.isActive })
+          .select({
+            id: agents.id,
+            isActive: agents.isActive,
+            role: agents.role,
+            permissions: agents.permissions,
+          })
           .from(agents)
           .where(eq(agents.id, assigneeAgentId))
           .limit(1);
         if (!assignee) return { error: 'Unknown agent' };
         if (!assignee.isActive) return { error: 'That agent is deactivated' };
+
+        // A coexistence number's tickets are hidden from everybody but its
+        // owner and the agents who see every ticket, so anybody else given
+        // one would hold a ticket that is in none of their lists
+        // (`lib/tickets/owner-only.ts`). The picker leaves them out; this is
+        // the authority.
+        const number = await ownerOnlyNumber(db, row.conversation.channelId);
+        if (number && !seesOwnerOnlyTicket(assignee, number.ownerId)) {
+          return { error: OWNER_ONLY_REFUSAL };
+        }
       }
 
       const assigned = await db.transaction(async (tx) => {

@@ -23,6 +23,7 @@ import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { onCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
@@ -90,6 +91,14 @@ export type SkipReason =
   | 'none_available'
   | 'all_at_capacity'
   | 'no_skill_match'
+  /**
+   * On a coexistence number, whose tickets only its owner and the agents who
+   * see every ticket can open (`lib/tickets/owner-only.ts`): with no active
+   * owner to hand it back to, the rota would give it to a group member it is
+   * hidden from. Left unassigned, it is in the Unassigned view of everybody
+   * who can see it. Never recorded, since the sweep asks again every pass.
+   */
+  | 'owner_only'
   /**
    * Held for the router (`lib/routing/hold.ts`): the ticket's group is not
    * settled yet, and whatever ends the hold assigns it then. Never recorded —
@@ -214,6 +223,7 @@ async function routeAndPick(
       requesterEmail: contacts.primaryEmail,
       formSlug: ticketForms.slug,
       accountableActive: accountable.isActive,
+      ownerOnly: sql<boolean | null>`${onCoexistenceNumber()}`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -301,6 +311,10 @@ async function routeAndPick(
       { actorLabel: options.actorLabel, now },
     );
   }
+
+  // A coexistence number's ticket with no active owner to take it: the rota's
+  // candidates are a group's members, and it is hidden from them.
+  if (ticket.ownerOnly) return { assignedTo: null, reason: 'owner_only' };
 
   const groupId = options.groupId ?? conversation.groupId;
   if (!groupId) return { assignedTo: null, reason: 'no_group' };
