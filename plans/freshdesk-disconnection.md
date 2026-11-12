@@ -56,10 +56,13 @@ account to close.
 
 **Found on the way, and not part of this plan:**
 
-- The favicon is behind sign-in on every host. `app/icon.svg` is not in
-  `proxy.ts`'s public prefixes, so `/icon.svg` answers a signed-out visitor
-  with 307 to `/login`. Once `KB_PUBLIC_HOST` is set, the help-centre host
-  will rewrite it to `/help/icon.svg`, which does not exist.
+- The favicon is behind sign-in on every host in production. `app/icon.svg`
+  is not in `proxy.ts`'s public prefixes, so `/icon.svg` answers a signed-out
+  visitor with 307 to `/login`. Once `KB_PUBLIC_HOST` is set, the help-centre
+  host will rewrite it to `/help/icon.svg`, which does not exist. _Fixed on
+  `dev` in #510 (`7074dee`, 2026-11-12), which serves Next's head files as
+  themselves before the host split. Production has it once `dev` is next
+  merged into `main`._
 - Freshdesk's portal paths that are not an article or a folder will become the
   help centre's 404 once `KB_PUBLIC_HOST` is set: `/support/home`,
   `/support/tickets/new`, `/support/login` and `/support/solutions`. Freshdesk

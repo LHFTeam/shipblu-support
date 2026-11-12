@@ -1691,7 +1691,8 @@ the rest of the cutover still needs, and some of it is now partly done:_
   The widget's `BASE`, the sitemap and the canonicals still name the Render
   host. The favicon is behind sign-in on every host, a separate bug:
   `/icon.svg` is not a public path, and once the variable is set the help
-  centre's host rewrites it to `/help/icon.svg`, which 404s. Setting the variable is the next step (the
+  centre's host rewrites it to `/help/icon.svg`, which 404s. It is fixed on
+  `dev` in #510 (`7074dee`), and reaches production with the next release. Setting the variable is the next step (the
   `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
   paths that are not an article or a folder become the help centre's 404
   rather than the sign-in page.
