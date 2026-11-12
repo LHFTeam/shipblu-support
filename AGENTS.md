@@ -2521,9 +2521,11 @@ keys=<key,...>`, which replaces only the entries named, and an entry removed
 from the library is reported rather than deleted. `canned-library.test.ts` is
 the style guide.
 Every body is sendable exactly as it stands, because nothing interpolates and an
-automation sends it unread, so it carries no placeholder. It carries no link,
-because `support.shipblu.com` still serves Freshdesk and agents add links from
-the knowledge panel. It is at most 1000 bytes of UTF-8, Instagram's limit for a
+automation sends it unread, so it carries no placeholder. It carries no link:
+agents add links from the knowledge panel. The rule was set while
+`support.shipblu.com` still served Freshdesk, which it stopped doing on
+2026-11-11. Allowing links now would be a change of its own, made together
+with the test that refuses them. It is at most 1000 bytes of UTF-8, Instagram's limit for a
 direct message, so roughly 550 Arabic characters. The Arabic addresses the customer as «حضرتك» and uses no
 imperative, because neither the customer's gender nor the agent's is known. Any
 policy a response states is quoted from the help centre, so a change to a

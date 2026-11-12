@@ -43,6 +43,12 @@ surveys not going out, and the code says why before the data does:
 3. **The link names a host that does not serve this app.** `publicBaseUrl()`
    returns `support.shipblu.com`, which still answers from Freshdesk
    (`docs/PROJECT-STATE.md` §5). The one survey ever sent carried a dead link.
+   _Since 2026-11-07 the web service publishes the Render host instead, and
+   since 2026-11-11 `support.shipblu.com` answers from this app. The link is
+   built on the worker, though, whose value has never been read. The
+   blueprint gives the worker the same group value as the web service.
+   Setting `KB_PUBLIC_HOST` to the domain, and reading a survey link before
+   CSAT is switched on, settles it (`plans/freshdesk-disconnection.md`)._
 4. **On Facebook and Instagram it is a text link that mostly cannot send.** Half
    an hour after a resolve the Meta window is usually still open, but a survey
    sent as a plain DM is blocked at 24 hours by `automatedReplyBlocked`, rightly,

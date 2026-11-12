@@ -111,6 +111,10 @@ PROJECT-STATE §2.
   article already copied they never reach `kb_article_stats`. It is a cutover
   job, run by hand
   and on no schedule: **do not run it until the worker is on this build.**
+  _Never run: on 2026-11-12 no `import_freshdesk_kb` job had been queued, and
+  no import had run since 2026-08-19. Whether one more run is wanted is the
+  first item of `plans/freshdesk-disconnection.md`'s checklist, and PR 6 there
+  retires the importer._
 - **Left alone:** the three old columns, the `kb_articles` exception in
   `touch_updated_at()` and the `kb-edit-date` rule. During the deploy window
   the old code still writes those columns, and the exception still keeps its
@@ -418,7 +422,9 @@ test in the PR that adds that migration (PR 1 of
 applied `0061` in production, the runbook still works from history,
 unchanged: `git show b1032df:db/runbooks/kb-article-counters-restore.sql`. On
 2026-11-08, `0060` was the newest migration applied in production, the three
-columns were gone, and `kb_article_stats` held 108 rows.
+columns were gone, and `kb_article_stats` held 108 rows. _`0061` was applied
+with PR 1's release later that day (#497, the web service live at 21:05 UTC),
+so the runbook is history now, and what follows is the way back._
 
 Once `0061` is applied, PR 2 has no way back by the runbook. Deleting 0060's
 row would not make a deploy apply it again behind a newer row, and the runbook
@@ -429,7 +435,8 @@ migration of its own and a new commit.
 Rolling the web service back to a build from before `0061` would also strand
 the knowledge base's images. That build has no `/api/kb/images` route, so
 `rehost_kb_images revert=true` has to run first, while Freshdesk still serves
-the originals.
+the originals. Once the Freshdesk account is closed, that way back is gone too,
+and only a fix forward remains.
 
 Going back past PR 1 is not prepared here, and is no longer a revert either.
 Reverting #472 deletes 0057, which `generated-files` refuses. A redeploy of the

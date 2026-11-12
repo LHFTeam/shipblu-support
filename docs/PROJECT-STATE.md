@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-11, against `main` at `7605993`. The figures in §1 and §5
+Last updated: 2026-11-12, against `main` at `7605993`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
@@ -25,12 +25,28 @@ were live at 14:17:16–14:17:30, the worker at 14:18:21 and the web service at
 database at 6 ms, nothing pending or processing, the dead jobs still the 27
 named below and no lost admission on the first pool; on the Render host
 `/robots.txt` and `/sitemap.xml` answered 200, where on 2026-11-10 both were
-404, and Freshdesk's three article URL shapes 301 to the article (PR 3, live
-since `932e8ea` below; the folder shape still 404s, because `kb_redirects`
-holds 174 rows for 58 article ids and none for a folder). Its way back is
+404, and Freshdesk's old URLs 301 (PR 3, live since `932e8ea` below). Every
+article shape went to the article, and a folder URL to `/ar` when its id is a
+Freshdesk folder `kb_folders.external_id` holds; `kb_redirects` holds no folder
+rows, and the route does not need any. Its way back is
 `932e8ea` on each service: a code-only revert through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
+
+**On the same day `7605993` was deployed twice more, after environment changes
+from the dashboard:** at 16:08:37 UTC, to all six services, the web service
+live at 16:11:17; and at 17:59:50, to the web service and the worker at least
+(the crons were not read), the web service live at 18:03:48 (read on Render).
+Which variables changed cannot be read. Neither change set `KB_PUBLIC_HOST` to
+`support.shipblu.com`: at 08:50 UTC on 2026-11-12, `/widget/embed.js` still
+named the Render host. **And `support.shipblu.com` moved here**, the first time
+the name has pointed at this app (§5.1 measured in August that it never had).
+The CNAME's TTL was down to 1800 by 16:25 UTC, the web service logged its
+first request for the host at 20:54:12, and by 20:58 the CNAME named
+`shipblu-support.onrender.com`, with a TTL of 14400 again. With
+`KB_PUBLIC_HOST` unset, the host is served as a console host rather than as the
+help centre's (§5.1). See `plans/freshdesk-disconnection.md`, "Where it
+stands".
 
 **Before it, production ran `932e8ea`, which deployed itself on 2026-11-10, the
 web service live at 18:16:28 UTC and the worker at 18:15:10** (the crons were
@@ -767,7 +783,9 @@ Arabic and English packaging guides are images and nothing else — and the pane
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
 _Still true on 2026-11-07, and of every image in the knowledge base — 214 in 61
-articles. `plans/freshdesk-disconnection.md` is the plan for copying them._
+articles. No longer true since 2026-11-08: `rehost_kb_images` copied all 207
+pictures into our bucket, and every article and version now names
+`/api/kb/images/<id>` (§5.1, `plans/freshdesk-disconnection.md`)._
 
 And now **the widget knows who it is talking to, and opens with answers rather
 than a blank box.** Both were found by the same question: what does a merchant
@@ -1206,7 +1224,9 @@ deleted from the dashboard on 2026-09-26.
 
 Service-level entries exist only as deliberate exceptions, each commented in
 `render.yaml`: `LOG_ALL_INCOMING_WEBHOOKS` on the web service, the two
-`FRESHDESK_*` keys on the worker (the importer is a queued job),
+`FRESHDESK_*` keys on the worker (the importer is a queued job; they go with it
+in PR 6 of `plans/freshdesk-disconnection.md`, and whether they are still set
+on the worker could not be read on 2026-11-11),
 and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on the web and
 worker services. Confirmed against the dashboard on 2026-09-26.
 `LOG_ALL_INCOMING_WEBHOOKS` is declared with the literal `false` since
@@ -1522,6 +1542,35 @@ is code:
   (§6.108). That was Instagram's point of no return; Messenger's is still
   ahead._
 
+  _**Messenger moved part of the way on 2026-11-11, and nothing here records
+  who moved it.** The Page's `app_roles` events gave this app no role at
+  09:50:03 UTC and `default_app` again at 09:50:17. From then on, Meta has
+  handed each new Messenger thread to this app. By 16:22 UTC, five threads
+  had begun with a `pass_thread_control` naming it the new owner (metadata
+  `new message`, no previous owner), and their messages arrive in
+  `messaging`, so the console may answer them. These are the first such
+  events in the 30 days of deliveries kept, and the 2026-11-05 switch
+  produced none: all 19 inbound Messenger messages stored in the day after it
+  arrived in `standby`. Threads opened before 09:50 still arrive in
+  `standby`, the last at 12:29:51. Freshchat's app id (576817601276249)
+  appears in none of the 1,497 Facebook and 397 Instagram deliveries kept,
+  back to 2026-10-12. So whether it is still the Page's primary receiver
+  cannot be read from here; the Page's Advanced messaging settings, or
+  Graph's `thread_owner` with the Page token, would answer it._
+
+  _The team answers those new threads in Business Suite, and the console never
+  sees the answers. Page Inbox (app 263902037430900) had sent 13 replies in
+  `messaging` on threads this app owns by 16:22. `parseMetaWebhook` counts
+  every echo and drops it (`lib/meta/parse.ts`), so no outbound Facebook
+  message has been stored since the switch. By 16:22, the six conversations
+  with messages in `messaging` since the switch all read as unanswered
+  (`first_responded_at` and `last_agent_message_at` null), so their SLA clocks
+  run as though nobody had replied. This app's own last Messenger reply went
+  out on 2026-11-09. A ticket answered in Business Suite will keep reading as
+  unanswered until one of two things changes: the team answers in the
+  console, or the echo of a reply typed elsewhere is filed, as WhatsApp's
+  coexistence echoes are._
+
   The consequence is that every Meta event reaches this system in the handover
   protocol's `standby` array rather than `messaging`. A secondary receiver may
   **read** a thread and may not **send** on it, so the console can show every
@@ -1561,36 +1610,63 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
-- **The knowledge base's images no longer depend on Freshdesk, and closing
-  the account has a checklist.** Audited 2026-11-07: no article links to
-  Freshworks, but all 214 images in 61 of the 112 articles load from
-  Freshdesk's attachment bucket, and so do the same 214 in the version
-  history. 18 versions still hold the 29 old Freshdesk links, which one Restore
-  or one re-import puts back. Freshdesk's old article URLs 404'd here through
-  the proxy until `932e8ea` (§6.115). And the phone's quick replies, the merchant dashboard and its
-  Freshchat widget still send customers to the Freshdesk copy.
-  `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
-  requests and the order: the images are copied before the account closes,
-  because afterwards there is nothing to copy them from, and the redirects work
-  before `support.shipblu.com` moves. PR 1, the copy, is deployed and has
-  run: `main` took it at 21:05 UTC on 2026-11-08 (#497), and
-  `rehost_kb_images` copied all 207 pictures at 21:13. No article or version
-  loads a picture from Freshdesk now; every one comes from
-  `/api/kb/images/<id>`, and all 207 answered there on 2026-11-09. PRs 2, 3
-  and 4 went live together in #502 on 2026-11-10 (the header): Save, Restore
-  and the import point Freshdesk's pictures and article links here as they
-  write, and Save and Restore refuse to add one that has no home here, so the
-  29 old links in 18 version rows are no longer one Restore away; Freshdesk's
-  old article URLs 301 through the proxy (measured on the Render host on
-  2026-11-11: the bare id, the titled and the `/a/` shapes each 301 to the
-  article, and the folder shape 404s, since `kb_redirects` has no folder
-  rows); and the article editor uploads a picture (button, paste or drop)
-  into `kb_images`, so a new screenshot is ours rather than hot-linked. PR 5,
-  the crawler files on every host, and its review fixes went live in #508 on
-  2026-11-11. PR 6, retiring the importer, waits for the disconnection. The
-  plan's checklist still shows PRs 2 and 3 unchecked: its own checks there (a
-  Restore of a version carrying a Freshdesk link, the six shapes on the
-  deployed build) have not all been run.
+- **The knowledge base no longer depends on Freshdesk, and
+  `support.shipblu.com` answers from this app. What is left of the
+  disconnection is owned outside this repository.** The record and the
+  checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
+  stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
+  images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
+  and Freshdesk's old article URLs 404'd here through the proxy (§6.115).
+  Every PR the plan needed before the disconnection is now live:
+
+  - **PR 1, the copy** (#497, 2026-11-08). `rehost_kb_images` copied all 207
+    pictures at 21:13 UTC. No article or version loads a picture from
+    Freshdesk: every one of the 214 comes from `/api/kb/images/<id>`, measured
+    again across all 61 articles on 2026-11-11.
+  - **PRs 2, 3 and 4** (#502, 2026-11-10). Save, Restore and the import point
+    Freshdesk's pictures and article links here as they write, and Save and
+    Restore refuse to add one that has no home here. So the 29 old links in
+    18 version rows stay there by design, and a Restore points each one here.
+    Freshdesk's old URLs 301 through the proxy. On the deployed build on
+    2026-11-11, all six shapes answered 301. A folder URL went to `/ar` when
+    its id is a stored Freshdesk folder (`kb_folders.external_id`). Of the 58
+    imported article ids, 54 went to an article that answers 200. The 4 in
+    agents-only folders answer 404 since #504; they are empty placeholders.
+    The article editor uploads a picture into `kb_images`, though production
+    holds no upload yet.
+  - **PR 5, the crawler files on every host, with its review fixes** (#508,
+    2026-11-11).
+
+  **The domain moved on 2026-11-11**, by about 20:54 UTC (the header).
+  `KB_PUBLIC_HOST` still does not name it, so the host is served as a console
+  host. Freshdesk's bookmarks there, `/support/home` and
+  `/support/tickets/new`, go to the console's sign-in, and so do `/inbox` and
+  the favicon. The widget's `BASE`, the sitemap and the canonicals still name
+  the Render host. Setting the variable is the next step (the
+  `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
+  paths that are not an article or a folder become the help centre's 404
+  rather than the sign-in page.
+
+  **Open outside the repository, as of 2026-11-12:**
+
+  - **The phone's quick replies.** 32 Freshdesk links sent from one
+    coexistence number, 5 of them in the 7 days to 2026-11-11 10:49 UTC. Each
+    now 301s to its article here.
+  - **The merchant dashboard.** Its 16 help links land here through the move,
+    but it still loads Freshchat, and a Zendesk widget besides. shipblu.com
+    loads the same Zendesk widget.
+  - **Mail.** Nobody has read where `support@`, `help@` (in 15 articles) and
+    `tech@` (in 2) deliver, and SPF still includes `email.freshdesk.com`.
+  - **Article wording.** "Support Portal" is in 2 articles, and the chat
+    instruction in 16 (the plan counted 15).
+  - **Messenger's swap** (the bullet above).
+
+  The "Support" links on the marketing site, go.shipblu.com and the App Store
+  listing need nothing more: `https://support.shipblu.com/` now lands here.
+
+  **After the disconnection:** PR 6, which retires the importer; SPF; a re-run
+  of the plan's audit, where `links, versions` stays at 29 by design; and the
+  date, recorded here. None of these has happened.
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
@@ -2030,6 +2106,20 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   (`plans/freshdesk-disconnection.md`). What follows is the record of
   August and September._
 
+  _**That name has answered from this app since about 20:54 UTC on
+  2026-11-11, so the variable can be set now.** On 2026-11-12 it was still
+  not set to the domain: `/widget/embed.js`, the sitemap, the `Sitemap:` line
+  and every canonical named `shipblu-support.onrender.com`, on both hosts.
+  With the variable unset, `support.shipblu.com` is served the way the Render
+  host is, as a console host. `/inbox` and Freshdesk's `/support/home` answer
+  307 to `/login` there, and only the help centre's locale paths, `/`,
+  `robots.txt` and the sitemap reach the help centre. The blueprint lists the
+  key in `shipblu-support-production`, which the web service and the worker
+  both link, with no service-level entry on either. So one change to the
+  group sets both, and Render redeploys every service that links the group.
+  Once it is set, the domain serves only the help centre, and the console
+  stays on the Render host._
+
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
   2026-08-28: `/widget/embed.js` on production embeds
@@ -2410,9 +2500,22 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   arrived, so the query the rewrite added never reached it. The fix, PR 3,
   passes the path in a request header instead. A local production build of
   the fix answers 301 for all six shapes, where the same build of `dev`
-  answered 404. Not yet measured on the deployed service: check the six
-  shapes there once it ships, with the curl in the plan's "Re-running this
-  audit".
+  answered 404.
+
+  **Shipped in #502 (2026-11-10), and measured on the deployed build on
+  2026-11-11.** All six shapes answer 301 on the Render host. A folder URL
+  goes to `/ar` when its id is a stored Freshdesk folder, and an unknown id
+  answers 404. Of the 58 imported article ids, 54 answer with a 301 to an
+  article that answers 200. The 4 in agents-only folders answer 404 since
+  #504 (#508): they are empty placeholders, and a 301 to a page that 404s
+  would have been a dead link a browser keeps. **The domain moved the same
+  evening** (§5.1), and since about 20:54 UTC the same holds on
+  `support.shipblu.com`. Every Freshdesk link the phone and the merchant
+  dashboard send now lands on its article here: the 32 phone sends to date
+  name 9 ids, and the dashboard 8. What still answers the console's sign-in
+  there, until `KB_PUBLIC_HOST` names the domain, is Freshdesk's portal paths
+  that are not an article or a folder, such as `/support/home` and
+  `/support/tickets/new`.
 
 - ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
   console no longer replies on WhatsApp at all, template or free text
@@ -3206,7 +3309,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
   _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
-  either; §5.1 has the measurement.)_
+  either; §5.1 has the measurement. The domain has answered from this app
+  since 2026-11-11, and the variable is to be set to it again; §5.1.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
@@ -7196,6 +7300,25 @@ still waiting for it` one whose outcome is not known yet.
   version in Freshdesk — so nothing is missing. Its 4 folders are the only
   `agents_only` ones; every other folder is public. That visibility came from
   Freshdesk and matches the category's meaning, so it needs no decision.
+- **The knowledge base off Freshdesk, measured on production.** _2026-11-08
+  to 2026-11-12, read-only._ `rehost_kb_images` ran at 21:13 UTC on
+  2026-11-08 and copied 207 pictures, 30,171,562 bytes, 205 PNG and 2 JPEG.
+  It rewrote 214 `src` in 61 articles and 61 version rows, and cut no version.
+  On 2026-11-11, on `7605993`:
+  - All 207 `/api/kb/images/<id>` routes answered 307 to an image, and an
+    unknown id answered 404.
+  - Full navigations of all 61 articles with pictures drew all 214 from the
+    route and none from Freshdesk.
+  - The plan's audit query read 0 for both image rows and for `links, live`,
+    and 29 in 18 rows for `links, versions`, which is by design.
+  - All six legacy URL shapes answered 301 on the Render host.
+  - `/robots.txt` and `/sitemap.xml` answered 200 at the root.
+
+  After the domain moved that evening, the same held on `support.shipblu.com`.
+  Every check was then re-tried by a second sweep set on refuting it, and
+  each held. The measurements and their queries are in
+  `plans/freshdesk-disconnection.md`.
+
 - **Production health**, checked 2026-08-21 on `98ec9d4`: `status: ok`, 2 ms
   database latency, queue empty. **One dead job** — the `send_meta` row in §5.2,
   which is a real undelivered customer reply and not a transient failure.
@@ -8445,6 +8568,14 @@ found"}` and not Next's page. The same route called by its own URL
       at all. A value meant for a handler rides in a request header. Nothing
       else in `proxy.ts` added a query to a rewrite. The `?next=` it adds is
       on a redirect, which the browser follows as a new request.
+
+      Shipped in #502 (`932e8ea`, 2026-11-10). On the deployed build on
+      2026-11-11, all six shapes answered 301 on the Render host. #504 then
+      refined the route (#508, 2026-11-11): it answers only with an article
+      some reader may open, uses a 302 while a stand-in translation answers
+      for a closed one, and answers 404 for the 12 URLs of the 4 agents-only
+      articles. That evening `support.shipblu.com` moved here, and the same
+      URLs answered there too (§5.2).
 
 116.  **A release squash-merged into `main` makes `main` and `dev` disagree
       about history, and the merge back pays for it in conflicts.**
