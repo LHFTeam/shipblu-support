@@ -13,7 +13,7 @@ import {
 } from 'next/dist/lib/metadata/is-metadata-route';
 import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
-import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { GET as robotsTxt } from '@/app/help/robots.txt/route';
@@ -249,11 +249,11 @@ describe('the sitemap robots.txt advertises', () => {
 });
 
 /**
- * Freshdesk's article and folder URLs, on whichever host they arrive.
+ * Freshdesk's article, folder and category URLs, on whichever host they arrive.
  *
  * The rewrite used to put the path in `?path=`, which the route handler never
- * saw: Next hands it the request as it arrived, so every one of these answered
- * the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
+ * saw: Next hands it the request as it arrived, so every article and folder
+ * answered the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
  * header set on the rewritten request, which Next sends as
  * `x-middleware-request-<name>` and lists in `x-middleware-override-headers`.
  */
@@ -265,6 +265,8 @@ describe('Freshdesk URLs', () => {
     '/solutions/articles/154000189336',
     '/en/support/solutions/articles/154000189336',
     '/support/solutions/folders/154000050001',
+    '/support/solutions/154000297679',
+    '/en/support/solutions/154000297680-shipblu-customers',
   ];
 
   const legacyPathSent = (response: Response) =>
@@ -308,6 +310,128 @@ describe('Freshdesk URLs', () => {
 });
 
 /**
+ * Freshdesk's category page, `/support/solutions/<id>`, which Render's log
+ * showed followed 8 times in the night after the move on `support.shipblu.com`.
+ * Its page here is found by id, so the proxy hands it to the legacy route, as
+ * it does an article, ahead of the portal's rules, which stood the home in for
+ * it before. Checked on both hosts with `KB_PUBLIC_HOST` set and unset, since
+ * the catch-all, the locale rewrite and the sign-in check would each answer it
+ * otherwise; and every path the proxy sends is checked to be one
+ * `freshdeskCategoryId` reads the id of, as the route will.
+ */
+describe("Freshdesk's category pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+
+  /** Each shape, and the id the legacy route reads out of it. */
+  const CATEGORIES: [string, string][] = [
+    ['/support/solutions/154000297679', '154000297679'],
+    ['/ar/support/solutions/154000297679', '154000297679'],
+    ['/en/support/solutions/154000297680', '154000297680'],
+    ['/en/support/solutions/154000297680-shipblu-customers', '154000297680'],
+    ['/en-US/support/solutions/154000297680', '154000297680'],
+    // One of our languages in any case, as the portal's rules read it.
+    ['/AR/support/solutions/154000297679', '154000297679'],
+    ['/En-us/support/solutions/154000297680', '154000297680'],
+  ];
+
+  const legacyPathSent = (response: Response) =>
+    response.headers.get(`x-middleware-request-${LEGACY_PATH_HEADER}`);
+
+  for (const [label, host, env] of [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    // Production's setup today: the domain moved, the variable not yet set.
+    ['the help-centre host, KB_PUBLIC_HOST unset', KB_HOST, {}],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const) {
+    it(`hands each one to the legacy route in a header, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, id] of CATEGORIES) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, to: rewrittenTo(response), sent: legacyPathSent(response) }).toEqual({
+          path,
+          to: '/help/legacy',
+          sent: path,
+        });
+        expect(response.headers.get('location')).toBeNull();
+        expect({ path, id: freshdeskCategoryId(path) }).toEqual({ path, id });
+      }
+    });
+  }
+
+  it('hands it over for a signed-in agent too, with the query left off', () => {
+    const response = visit(
+      `https://${RENDER_HOST}/support/solutions/154000297679?utm_source=whatsapp`,
+      `${SESSION_COOKIE}=x`,
+    );
+    expect(rewrittenTo(response)).toBe('/help/legacy');
+    expect(new URL(response.headers.get('x-middleware-rewrite')!).search).toBe('');
+    expect(legacyPathSent(response)).toBe('/support/solutions/154000297679');
+  });
+
+  // Next answers a trailing slash with its own 308 before the proxy runs, so
+  // none arrives in production. One that did still reads as the category; the
+  // rewrite's clone puts the slash back on its path, which is why it is apart.
+  it('reads a trailing slash alike', () => {
+    const path = '/support/solutions/154000297679/';
+    const response = visit(`https://${RENDER_HOST}${path}`);
+    expect(rewrittenTo(response)).toMatch(/^\/help\/legacy\/?$/);
+    expect(legacyPathSent(response)).toBe(path);
+    expect(freshdeskCategoryId(path)).toBe('154000297679');
+  });
+
+  // An article or a folder URL is this shape with one more segment, a
+  // help-centre path has no `/support/` segment, and a Freshdesk tail behind
+  // another prefix, or a page of a category's list, is kept out by the
+  // anchors. Each answers as it did before the category rule, and the id
+  // reader reads none of them.
+  it('reads a category only in the shape Freshdesk gives it', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    const NOT_CATEGORIES: [string, string | null][] = [
+      // Ours, with a `solutions` segment: rewritten under /help, or under it
+      // already and served as itself.
+      ['/ar/c/solutions/2024-rates', '/help/ar/c/solutions/2024-rates'],
+      ['/en/c/shipping/solutions/154000297679', '/help/en/c/shipping/solutions/154000297679'],
+      ['/help/ar/support/solutions/154000297679', null],
+      // Freshdesk's, but no category page: the leftovers' answer.
+      [
+        '/ar/support/solutions/articles/most-viewed',
+        '/help/ar/support/solutions/articles/most-viewed',
+      ],
+      [
+        '/ar/support/solutions/154000297679/page/2',
+        '/help/ar/support/solutions/154000297679/page/2',
+      ],
+      ['/en/support/solutions/shipblu-partners', '/help/en/support/solutions/shipblu-partners'],
+      ['/ar/en/support/solutions/154000297679', '/help/ar/en/support/solutions/154000297679'],
+      // Bare, and no category of the portal's: the console's sign-in.
+      ['/a/solutions/154000297679', null],
+      ['/solutions/154000297679', null],
+      ['/supporting/solutions/154000297679', null],
+      // Two letters that are not one of our languages: no ShipBlu portal's,
+      // and `/kb/…` is the console's.
+      ['/fr/support/solutions/154000297102', null],
+      ['/kb/support/solutions/154000297679', null],
+    ];
+    for (const [path, to] of NOT_CATEGORIES) {
+      expect({ path, id: freshdeskCategoryId(path) }).toEqual({ path, id: null });
+      expect({ path, to: rewrittenTo(visit(`https://${RENDER_HOST}${path}`)) }).toEqual({
+        path,
+        to,
+      });
+    }
+    // An article and a folder still go to the legacy route, as themselves.
+    for (const path of [
+      '/support/solutions/articles/154000297679',
+      '/support/solutions/folders/154000297679',
+    ]) {
+      expect(freshdeskCategoryId(path)).toBeNull();
+      expect(legacyPathSent(visit(`https://${RENDER_HOST}${path}`))).toBe(path);
+    }
+  });
+});
+
+/**
  * Freshdesk's portal pages: its home, knowledge-base index, ticket form,
  * sign-in and search, which customers' bookmarks and Freshdesk's emails still
  * name (`lib/kb/freshdesk-portal.ts`).
@@ -336,13 +460,11 @@ describe("Freshdesk's portal pages", () => {
     ['/en/support/home', '/en'],
     ['/support', '/ar'],
     ['/en/support', '/en'],
-    // The knowledge-base index, and a category standing in until it is looked up.
+    // The knowledge-base index. A category under it has a page of its own, and
+    // goes to the legacy route instead ("Freshdesk's category pages", above).
     ['/support/solutions', '/ar'],
     ['/ar/support/solutions', '/ar'],
     ['/en/support/solutions', '/en'],
-    ['/ar/support/solutions/154000297679', '/ar'],
-    ['/en/support/solutions/154000297680', '/en'],
-    ['/en/support/solutions/154000297680-shipblu-customers', '/en'],
     // The ticket form, a ticket from a Freshdesk email, the sign-in and sign-up.
     ['/support/tickets/new', '/ar#contact'],
     ['/ar/support/tickets/new', '/ar#contact'],
@@ -436,13 +558,15 @@ describe("Freshdesk's portal pages", () => {
     }
   });
 
-  it('still hands Freshdesk articles and folders to the legacy route, language and all', () => {
+  it('still hands Freshdesk articles, folders and categories to the legacy route, language and all', () => {
     setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
     for (const host of [KB_HOST, RENDER_HOST]) {
       for (const path of [
         '/ar/support/solutions/articles/154000189336',
         '/ar/support/solutions/folders/154000518595',
         '/en/support/solutions/folders/154000746959/page/2',
+        '/ar/support/solutions/154000297679',
+        '/en/support/solutions/154000297680-shipblu-customers',
       ]) {
         expect({ path, to: rewrittenTo(visit(`https://${host}${path}`)) }).toEqual({
           path,
@@ -510,7 +634,13 @@ describe("Freshdesk's portal pages", () => {
   // runs ahead of the sign-in check on every host, so a signed-in agent there
   // must reach the console, not the help centre.
   it('leaves a path whose first segment is not one of our languages alone', () => {
-    for (const path of ['/kb/support', '/kb/support/home', '/fr/support/home']) {
+    for (const path of [
+      '/kb/support',
+      '/kb/support/home',
+      '/fr/support/home',
+      '/kb/support/solutions/154000297679',
+      '/fr/support/solutions/154000297102',
+    ]) {
       expect({ path, status: visit(`https://${RENDER_HOST}${path}`).status }).toEqual({
         path,
         status: 307,

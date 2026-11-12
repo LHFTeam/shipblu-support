@@ -623,7 +623,8 @@ rewrites to. The route reads that header, or `?path=` on a direct call
 (PROJECT-STATE §6.115).
 
 - `proxy.test.ts` checks that each of the six shapes, on both hosts, is
-  rewritten with the path in the header.
+  rewritten with the path in the header. The same list holds two category
+  shapes too since the category rule (PR 7, below).
 - `app/help/legacy/route.db.test.ts` builds the request Next actually hands
   the handler. Four of its cases fail against the route as it was.
 - A production build served locally, on a database holding one bilingual
@@ -854,16 +855,19 @@ page from a Freshdesk notification email, opened on an iPhone.
 **Built.** `proxy.ts` answers them itself, after the legacy block and ahead of
 the help-centre host, the locale rewrite and the sign-in check, on every host.
 `lib/kb/freshdesk-portal.ts` decides where each goes and carries the reasons.
-None needs a lookup, so none goes through `/help/legacy`. The language is the
-path's own, then Freshdesk's `url_locale` parameter, then Arabic. A first
-segment of two letters that is not one of our languages (`/kb/support`, which is
-the console's) is not a Freshdesk path of ours and is left alone:
+None of those needs a lookup, so none goes through `/help/legacy`. A category
+does, and since its own pull request it goes there with the articles and the
+folders (below). The language is the path's own, then Freshdesk's `url_locale`
+parameter, then Arabic, for every row but the category's, which reads the path
+alone (below). A first segment of two letters that is not one of our languages
+(`/kb/support`, which is the console's) is not a Freshdesk path of ours and is
+left alone:
 
 | Freshdesk                                            | Here                        |
 | ---------------------------------------------------- | --------------------------- |
 | `[/<l>]/support`, `/support/home`                    | `/<l>`                      |
 | `[/<l>]/support/solutions`                           | `/<l>`                      |
-| `[/<l>]/support/solutions/<category id>`             | `/<l>`, standing in         |
+| `[/<l>]/support/solutions/<category id>[-<title>]`   | `/<l>/c/<slug>`, by lookup  |
 | `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in |
 | `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in |
 | `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`           |
@@ -873,8 +877,9 @@ the console's) is not a Freshdesk path of ours and is left alone:
 is the console's sign-in until `KB_PUBLIC_HOST` names `support.shipblu.com`,
 which production does not yet, and the help centre's 404 from then on.
 
-- **All 302.** The home and the index name the page they land on, so the
-  legacy route's rule would make them 301. A browser keeps a 301 with no expiry,
+- **All 302**, but for the category, which the legacy route now answers
+  (below). The home and the index name the page they land on, so the legacy
+  route's rule would make them 301. A browser keeps a 301 with no expiry,
   though, and these are the paths Freshdesk's own `/` redirects through, so a
   DNS rollback while Freshdesk is live would send every browser that had loaded
   the home here to `/ar` on Freshdesk. A 302 costs little meanwhile: `/ar` is
@@ -899,27 +904,112 @@ which production does not yet, and the help centre's 404 from then on.
   - that a session cookie changes nothing;
   - that `url_locale` names the language where the path does not;
   - that the search carries its term, whole, and nothing else;
-  - that articles and folders still reach the legacy route;
+  - that articles, folders and, since the category rule, categories still
+    reach the legacy route;
   - that the leftovers answer as they did, and so does a two-letter prefix
     that is not one of our languages.
 
-  Eight of its cases fail against `proxy.ts` as it was.
+  Eight of its portal-page cases failed against `proxy.ts` as it was. Nine do
+  since the category rule added two category paths to the legacy-route case,
+  and the file as a whole fails seventeen there, with the category rule's own
+  cases.
 
-- A production build served locally answered each shape with a 302 and a
-  relative `Location` on both hosts, with the variable set and unset:
+- A production build served locally answered each shape, a category then
+  among them, with a 302 and a relative `Location` on both hosts, with the
+  variable set and unset:
   `/ar#contact` with its fragment, `/ar/search?q=` with the term encoded.
 - **The redirect is absolute in the proxy.** Next parses a proxy's `Location`
   with no base, so the relative one `lib/http/redirect.ts` builds would throw
   there (`ERR_INVALID_URL`, a 500). Next relativises a same-host absolute one
   itself, as the measurement shows.
-- **Not covered: a category's own page.** The importer kept Freshdesk's
-  category ids (`kb_categories.external_id`, e.g. `154000297680:en` →
-  `shipblu-customers`), so `/support/solutions/<id>` could go to
-  `/<l>/c/<slug>`. That is a lookup, so it belongs in the legacy route with a
-  database test, and it is left for a pull request of its own. That pull
-  request must leave the internal employee guide (`154000297102`, all four
-  folders agents-only) on the home, not on its own page, and it replaces the
-  category row above.
+- **A category goes to its own page, through the legacy route** (its own pull
+  request, after this one). The importer kept Freshdesk's category ids
+  (`kb_categories.external_id`, `<id>:<locale>`), so the page is a lookup:
+  `proxy.ts` hands `[/<l>]/support/solutions/<id>[-<title>]` to `/help/legacy`
+  by asking `freshdeskCategoryId` (`lib/kb/legacy-path.ts`), the function the
+  route reads the id with. It reads exactly the paths the portal's rules took
+  as a category: one of our languages or none, in any case, and no article's,
+  folder's or help-centre path; its anchors keep out a Freshdesk tail behind
+  another prefix and `/<id>/page/2`. `resolveLegacyPath` finds the page
+  (`resolveCategory`). The rule left `lib/kb/freshdesk-portal.ts`, and the
+  language's shape is one source for both, `FRESHDESK_LANGUAGE`. What production's rows, read on 2026-11-12,
+  make each answer once it is deployed:
+
+  | Freshdesk                                  | Here                          |
+  | ------------------------------------------ | ----------------------------- |
+  | `[/ar]/support/solutions/154000297679[-…]` | `301 /ar/c/شركاء-شيب-بلو`     |
+  | `/en/support/solutions/154000297679[-…]`   | `301 /en/c/shipblu-partners`  |
+  | `[/ar]/support/solutions/154000297680[-…]` | `301 /ar/c/عملاء-شيب-بلو`     |
+  | `/en/support/solutions/154000297680[-…]`   | `301 /en/c/shipblu-customers` |
+  | `[/<l>]/support/solutions/154000297102`    | 404 (the employee guide)      |
+  | any other id                               | 404                           |
+  - The translation is chosen as an article's is: the path's language, then
+    Arabic, then whichever translation answers. Freshdesk's `url_locale`
+    parameter is not read, as it is not for an article or a folder: the
+    route is handed the path alone. So `/support/solutions/<id>?url_locale=en`
+    goes to the Arabic page with a 301, where the portal's rule sent it to
+    `/en`. Its language switch leads to the English home, where the category
+    heads the topic list, and Render's log holds no category URL with the
+    parameter.
+  - Only a category some reader can open answers. A category has no visibility
+    of its own, and its page is a 404 for anybody who can read none of its
+    articles in its language (`getCategory`). So a translation answers when it
+    holds an article in its own language that `someReaderMayOpen` passes:
+    published, and neither it nor its folder agents-only.
+  - The answer is 301 when it is the translation the URL names, and 302 while
+    another stands in for one closed for now (`LegacyAnswer`). A 301 here
+    carries the risk the home's and the index's would. On a DNS rollback, a
+    browser that kept one would ask Freshdesk for `/ar/c/…`, which it does not
+    have. Every article URL has carried that same risk since PR 3, though, and
+    a category URL is not one of the paths Freshdesk's own `/` redirects
+    through, which is what made the home's 301 a loop or a dead end.
+  - **The employee guide answers 404.** This section once asked for the home
+    instead. Four things decide it:
+    - It is what the route already answers for production's four internal
+      articles (PR 3).
+    - It is what the guide's own page answers: `/ar/c/دليل-الموظف` is a 404
+      for every reader.
+    - It answers exactly as an id nothing was imported as does. A redirect
+      home for this id alone would confirm that an internal category exists
+      under it.
+    - The home holds nothing of the guide, so sending readers there is a soft
+      404: a search engine treats it as one, and a reader looks for something
+      that is not there. The guide's readers are agents, whose copy is in the
+      console's knowledge base, which a public route must not point at.
+
+    An id nothing was imported as answers 404 too, where this section's
+    stand-in sent it home. That is the legacy route's rule for an unknown URL.
+    Every category URL Render's log holds from the move to 16:30 UTC on
+    2026-11-12, our own curl checks left out, named one of the two public
+    categories: 8 requests, under `/ar` or `/en`, four from browsers on Windows
+    and a Mac and four from two crawlers.
+
+  - `lib/kb/legacy-resolve.db.test.ts` builds production's three categories,
+    and checks the answers of its shape cases and of a translation closed
+    either way against `getCategory`, so none of those is a page that 404s.
+    It also checks a translation closed either way, the order of the
+    translations, the guide, and a category whose only readable articles are
+    in the other language. `app/help/legacy/route.db.test.ts` checks the
+    encoded Arabic `Location`. `proxy.test.ts` checks the rewrite on both
+    hosts, with the variable set and unset, and that each path it sends is one
+    `freshdeskCategoryId` reads an id from.
+  - A slug is now put in a `Location` a code point at a time
+    (`lib/http/redirect.ts`). `slugify` keeps an emoji, which is two UTF-16
+    units, and matched a unit at a time it threw `URI malformed`, so a
+    category or an article named with one answered its old URL with a 500.
+    None in production is.
+  - **A folder nobody can open answers 404 too.** The folder branch sent every
+    imported folder home with a 301, reading no visibility, so the employee
+    guide's four agents-only folders said, by their 301, what the guide's
+    category no longer does. It now asks of a folder's articles in its
+    category's language what `resolveCategory` asks of a category's
+    (`someReaderMayOpen`), and a folder nobody can open answers as an unknown
+    id does. Production holds 16 public folders and 4 agents-only ones, every
+    one with a Freshdesk id (2026-11-12).
+  - **Left out: a folder's own page.** A folder somebody can open still goes
+    to the home with a 301, which pins the home where the folder's own page,
+    `/<l>/c/<category>/<folder>`, could now answer. That is a change of its
+    own.
 
 ## To-dos outside this repository
 
@@ -1117,8 +1207,9 @@ curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipbl
 
 Until 2026-11-11, `302 https://support.shipblu.com/support/home`, which was
 Freshdesk. Since the move, `307 https://support.shipblu.com/ar`, which is this
-app. `/support/home` answers `302` to `/ar` once PR 7 is
-deployed.
+app. `/support/home` answers `302` to `/ar` once PR 7 is deployed, and
+`/support/solutions/154000297679` answers `301` to `/ar/c/` and the category's
+slug once the category rule is.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/support/solutions/articles/154000189336

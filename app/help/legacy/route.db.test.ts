@@ -116,6 +116,57 @@ describe('GET /help/legacy', () => {
     expect(location(response)).toBe('/ar/a/إرشادات-التعبئة-والتغليف');
   });
 
+  // A category's page is found by its Freshdesk id, as an article's is; the
+  // internal employee guide, every folder agents-only, has none to find.
+  it('redirects a category to its page, and answers 404 for one nobody can open', async () => {
+    await fixtures();
+    const freshdesk = { sourceSystem: 'freshdesk' as const };
+    const [partners, guide] = await db
+      .insert(kbCategories)
+      .values([
+        {
+          ...freshdesk,
+          name: 'شركاء',
+          slug: 'شركاء-شيب-بلو',
+          locale: 'ar',
+          externalId: '154000297679:ar',
+        },
+        {
+          ...freshdesk,
+          name: 'دليل',
+          slug: 'دليل-الموظف',
+          locale: 'ar',
+          externalId: '154000297102:ar',
+        },
+      ])
+      .returning({ id: kbCategories.id });
+    const folders = await db
+      .insert(kbFolders)
+      .values([
+        { categoryId: partners!.id, name: 'المالية', slug: 'financials' },
+        { categoryId: guide!.id, name: 'داخلي', slug: 'internal', visibility: 'agents_only' },
+      ])
+      .returning({ id: kbFolders.id });
+    await db.insert(kbArticles).values(
+      folders.map((folder, n) => ({
+        folderId: folder.id,
+        locale: 'ar',
+        slug: `مقال-${n}`,
+        title: `مقال ${n}`,
+        status: 'published' as const,
+      })),
+    );
+
+    const response = await rewritten('/support/solutions/154000297679-shipblu-partners');
+    expect(response.status).toBe(301);
+    // Arabic in a `Location` is a 500 unless it is encoded (`lib/http/redirect.ts`).
+    expect(response.headers.get('location')).toMatch(/^[\x20-\x7e]+$/);
+    expect(location(response)).toBe('/ar/c/شركاء-شيب-بلو');
+
+    expect((await rewritten('/support/solutions/154000297102')).status).toBe(404);
+    expect((await rewritten('/support/solutions/154000999999')).status).toBe(404);
+  });
+
   it('answers 404 for an id nothing was imported as', async () => {
     await fixtures();
     expect((await rewritten('/support/solutions/articles/999')).status).toBe(404);

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
-import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -162,13 +162,20 @@ export default function proxy(request: NextRequest) {
   const kbHost = process.env.KB_PUBLIC_HOST?.toLowerCase();
 
   // --- Legacy Freshdesk links ---------------------------------------------
-  // Handled before anything else so they resolve on either hostname. The
-  // lookup itself needs the database, so this hands off to a route handler
-  // rather than doing it here.
-  const legacyArticle = LEGACY_ARTICLE.exec(pathname);
-  const legacyFolder = legacyArticle ? null : LEGACY_FOLDER.exec(pathname);
-
-  if (legacyArticle || legacyFolder) {
+  // An article, a folder or a category: each names a row, so finding where it
+  // went is a lookup. Handled before anything else so they resolve on either
+  // hostname, and ahead of the portal's rules below, which no longer read a
+  // category. A category's page is `/<locale>/c/<slug>`, and Render's log
+  // showed its URL followed on `support.shipblu.com` 8 times in the night
+  // after the move. It asks `freshdeskCategoryId`, the function the route reads
+  // the id with, so this cannot send a path the route reads no id from. The
+  // lookup needs the database, so this hands off to a route handler rather
+  // than doing it here.
+  if (
+    LEGACY_ARTICLE.test(pathname) ||
+    LEGACY_FOLDER.test(pathname) ||
+    freshdeskCategoryId(pathname) !== null
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/help/legacy';
     url.search = '';
