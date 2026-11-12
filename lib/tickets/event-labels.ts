@@ -212,6 +212,11 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       if (data.reason === 'filed_under_number') {
         return 'unassigned the ticket: it was filed under its WhatsApp number, and only the number’s owner and agents who can see every ticket can open its tickets';
       }
+      // The same at a deploy, where nothing can ask who sees every ticket, so
+      // the sentence must not say the holder could not open it.
+      if (data.reason === 'filed_under_number_at_deploy') {
+        return 'unassigned the ticket: it was filed under its WhatsApp number, whose tickets are its owner’s, and a ticket filed this way stays only with that owner';
+      }
       return 'unassigned the ticket';
     case 'group_changed':
       return 'moved the ticket to another group';

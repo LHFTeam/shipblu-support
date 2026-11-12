@@ -26,47 +26,71 @@
 -- for a ticket the customer writes to again. That function also lets an agent
 -- who sees every ticket keep one; this cannot, since who sees every ticket is
 -- `can()` over a role and an agent's own overrides, which SQL would have to
--- copy. Nobody is always somebody a ticket may be left with, and whatever
--- next assigns it asks the number's owner first. The one write of `assignee_agent_id` outside
--- that module, named in scripts/ci/rules/assignee-confinement.mjs. The `case`
--- reads the ticket's own row, so a holder changed while this statement waited
--- for the row is judged as it now is.
+-- copy. Nobody is always somebody a ticket may be left with. Nothing assigns
+-- it here: the sweep hands it to the number's owner where its group routes,
+-- and elsewhere it waits for its customer's next message, the phone's reply or
+-- an edit, each of which asks the number's owner first. The one write of
+-- `assignee_agent_id` outside that module, named in
+-- scripts/ci/rules/assignee-confinement.mjs.
+--
+-- Two statements, for the order locks are taken in. A handover locks the
+-- number's row and then collects its tickets (`handOverNumber`), and a ticket
+-- still under no row is not among them. So the first statement takes, on each
+-- coexistence number, the lock a handover waits for, before any ticket's row
+-- is written — the channel, then the ticket, as everywhere — and the second
+-- reads the owner in a snapshot of its own, taken once that lock is held. Read
+-- in one statement, a handover committing while it ran left the ticket filed
+-- under the number and held by the owner it had just left. Only while there is
+-- a ticket to file: a replay with nothing to do locks nothing.
+--
+-- A ticket whose holder changed while the update waited for its row is left
+-- for the next replay (`held_by`): the line written is about the holder the
+-- statement read, and must be about the one it took the ticket from.
 --
 -- Driven from the null tickets, so a replay reads only those still without a
 -- row, not every message. Idempotent: a ticket this has moved no longer
 -- matches, and one whose number has no row stays null until one is added.
+select ch.id
+from channels ch
+where ch.type = 'whatsapp'
+  and jsonb_typeof(ch.config -> 'coexistence') is not distinct from 'object'
+  and exists (
+    select 1 from conversations c where c.channel = 'whatsapp' and c.channel_id is null
+  )
+for key share of ch;
+
 with filed as (
   update conversations c
   set channel_id = src.channel_id,
-      assignee_agent_id = case
-        when src.owner_only and c.assignee_agent_id is distinct from src.active_owner_id then null
-        else c.assignee_agent_id
-      end,
-      assigned_at = case
-        when src.owner_only and c.assignee_agent_id is distinct from src.active_owner_id then null
-        else c.assigned_at
-      end
+      assignee_agent_id = case when src.strands then null else c.assignee_agent_id end,
+      assigned_at = case when src.strands then null else c.assigned_at end
   from (
-    select distinct on (m.conversation_id)
-      m.conversation_id,
-      ch.id as channel_id,
-      jsonb_typeof(ch.config -> 'coexistence') is not distinct from 'object' as owner_only,
-      (select a.id from agents a where a.id = ch.owner_agent_id and a.is_active) as active_owner_id,
-      c2.assignee_agent_id as held_by
-    from conversations c2
-    join messages m on m.conversation_id = c2.id
-    join channels ch on ch.type = 'whatsapp'
-      and ch.is_active
-      and ch.config->>'phoneNumberId' = m.meta->>'phoneNumberId'
-    where c2.channel = 'whatsapp'
-      and c2.channel_id is null
-      and m.direction = 'inbound'
-      and m.meta->>'whatsappType' is distinct from 'reaction'
-    order by m.conversation_id, m.created_at desc, ch.created_at, ch.id
+    select
+      placed.*,
+      placed.owner_only and placed.held_by is distinct from placed.active_owner_id as strands
+    from (
+      select distinct on (m.conversation_id)
+        m.conversation_id,
+        ch.id as channel_id,
+        jsonb_typeof(ch.config -> 'coexistence') is not distinct from 'object' as owner_only,
+        (select a.id from agents a where a.id = ch.owner_agent_id and a.is_active) as active_owner_id,
+        c2.assignee_agent_id as held_by
+      from conversations c2
+      join messages m on m.conversation_id = c2.id
+      join channels ch on ch.type = 'whatsapp'
+        and ch.is_active
+        and ch.config->>'phoneNumberId' = m.meta->>'phoneNumberId'
+      where c2.channel = 'whatsapp'
+        and c2.channel_id is null
+        and m.direction = 'inbound'
+        and m.meta->>'whatsappType' is distinct from 'reaction'
+      order by m.conversation_id, m.created_at desc, ch.created_at, ch.id
+    ) placed
   ) src
   where c.id = src.conversation_id
     and c.channel_id is null
-  returning c.id, c.channel_id, c.assignee_agent_id, src.owner_only, src.held_by
+    and c.assignee_agent_id is not distinct from src.held_by
+  returning c.id, src.channel_id, src.strands, src.held_by
 )
 insert into conversation_events (conversation_id, type, actor_label, data)
 select
@@ -76,10 +100,9 @@ select
   jsonb_build_object(
     'to', null,
     'from', held_by,
-    'reason', 'filed_under_number',
+    'reason', 'filed_under_number_at_deploy',
     'channelId', channel_id
   )
 from filed
-where owner_only
-  and held_by is not null
-  and assignee_agent_id is null;
+where strands
+  and held_by is not null;

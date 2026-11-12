@@ -1138,7 +1138,9 @@ things.** `channels.owner_agent_id` is who owns the number now.
 frozen onto the ticket: ownership changes, and `rollup_metrics` rebuilds the
 last three days from current state, so reading the owner at report time would
 re-file the days before a handover onto somebody who did not hold the phone
-then. Both are written only in `lib/whatsapp/number-owner.ts`, and a ticket's
+then. Both are written only in `lib/whatsapp/number-owner.ts` — but for the
+columns a new ticket starts with, `ownerStamp`, which sits beside the assignee
+it is written with in `lib/tickets/assignee.ts` — and a ticket's
 accountability is written at three moments: ingest creating it on an owned number
 (`ownerStamp`, in the insert, assignee included), `handOverNumber` (the number's
 open and pending native tickets), and its coming back out of resolved or
@@ -1213,21 +1215,27 @@ which asks before it writes:
   reads who may hold a ticket on the number, under the lock a handover waits
   for (FOR KEY SHARE on the channel), inside the transaction that assigns and
   before that transaction locks or writes the ticket's row: the channel, then
-  the ticket, the order `handOverNumber` takes them. `assignTicket(tx,
+  the ticket, the order `handOverNumber` takes them. A writer holding only the
+  ticket's id, or a copy of its row read before the transaction, calls
+  `lockHoldersOf(tx, conversationId)`, which reads the number the ticket is on
+  now: a ticket under no row is filed under one by its customer's next
+  message, and the copy would name the wrong number. `assignTicket(tx,
 holders, …)` then answers `hidden` for an agent the ticket would be hidden
   from, and writes only while the ticket is still on the number that was
   asked — the channel is in the write's own `where`, so a ticket filed under
-  another row between the two answers `missed` and is not written. `onlyIf`
-  is the caller's own guard (the rota's "still held by nobody").
+  another row in the moment between the two answers `missed` and is not
+  written. `onlyIf` is the caller's own guard (the rota's "still held by
+  nobody").
   `unassignTicket` needs neither step: nobody is somebody every ticket may be
   left with. Each caller keeps its own line on the timeline. `ownerStamp`, the
   columns a ticket created on an owned number starts with, lives there too,
   since an object spread into an insert is the one write the rule below
   cannot see. The `assignee-confinement` repo rule refuses the column written
   anywhere else: as a key of what a `.set()` or `.values()` is given, read
-  from the syntax tree so a select or a type passes, and as an unqualified
-  `assignee_agent_id =` in raw SQL, in a source file or under `db/sql/`. A
-  comparison there names its table (`c.assignee_agent_id = …`).
+  from the syntax tree so a select or a type passes, and given a value in raw
+  SQL, in a source file or under `db/sql/` and `db/migrations/`. A comparison
+  there names its table (`c.assignee_agent_id = …`). It cannot see an object
+  another function returns; its header lists what a reviewer still has to.
 - **Putting a ticket on a number is such a write too.** A ticket under no row
   is its group's, and anybody may hold it. `fileUnderNumber`, which
   `findOrAdoptLive` calls, files it and takes it off a holder the row's
@@ -1237,7 +1245,11 @@ holders, …)` then answers `hidden` for an agent the ticket would be hidden
   itself. `db/sql/009` does the same at a deploy, and is the one SQL file the
   rule names: it can only give a ticket to nobody, and takes it off everybody
   but the number's active owner, an agent who sees every ticket included,
-  since SQL cannot ask `can()`.
+  since SQL cannot ask `can()`. It locks the coexistence numbers in a first
+  statement and reads their owners in a second, so a handover cannot commit
+  between the read and the write, and nothing assigns the ticket afterwards:
+  in a group that does not route it waits for its customer, the phone or an
+  edit.
 
 - **The rota never picks for one.** `assignConversation` hands it back to an
   active owner as it does any owned ticket, and otherwise answers `owner_only`,
@@ -1247,9 +1259,9 @@ holders, …)` then answers `hidden` for an agent the ticket would be hidden
   nobody, and one adopted onto the row to somebody else. `takeForNumberOwner`
   makes it the owner's under the channel's lock and then the ticket's, asking
   again that nobody holds it and that it is still work. The rota's own pick
-  asks the number again under that lock, so a ticket filed under a coexistence
-  row since its snapshot answers `owner_only` before a roster is read or a
-  cursor moved.
+  and the hand-back ask the number the ticket is on now, under that lock, so a
+  ticket filed under a coexistence row since the snapshot answers `owner_only`
+  before a roster is read or a cursor moved.
 - **The sweep never reclaims one from the number's active owner**, whoever
   the ticket is accountable to (`reclaimAbandoned`). On a plain number the
   owner is exempt by the ticket's accountability; here the number's word
@@ -1289,9 +1301,11 @@ that phone is still found by name and number with an empty ticket list; a
 report's own lists (CSAT comments, the labelling and review queues), which
 only somebody given a report key without `ticket.view.all` reads; and the
 inbox's live tick, which carries no content. Each is written down in
-`plans/whatsapp-number-ownership.md`, and is a change of its own. Nor a plain
-number's row becoming a coexistence one while colleagues hold its tickets:
-that is a write of `channels.config`, not of the assignee, and each such
+`plans/whatsapp-number-ownership.md`, and is a change of its own. Nor the two
+ways a ticket comes to be hidden from its holder with no write of the
+assignee: a plain number's row becoming a coexistence one (a write of
+`channels.config`), and a holder who stops seeing every ticket — a role
+lowered, the `ticket.view.all` override removed, a deactivation. Each such
 ticket keeps its holder until a handover or its next reopen.
 
 Only a `whatsapp` row may have an owner — a plain number or a coexistence one,

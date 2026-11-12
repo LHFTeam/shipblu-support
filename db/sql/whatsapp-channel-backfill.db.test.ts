@@ -259,7 +259,7 @@ describe('009_whatsapp_channel_backfill.sql', () => {
           {
             type: 'unassigned',
             actorLabel: 'channel_backfill',
-            data: { to: null, from: colleague, reason: 'filed_under_number', channelId },
+            data: { to: null, from: colleague, reason: 'filed_under_number_at_deploy', channelId },
           },
         ],
       });
@@ -279,7 +279,34 @@ describe('009_whatsapp_channel_backfill.sql', () => {
 
     // A deactivated owner counts as nobody (`effectiveOwnerId`), and with no
     // owner at all nobody but an agent who sees every ticket can open it.
-    it('takes one off a deactivated owner, and off anybody when the number has no owner', async () => {
+    it('takes one off anybody when the number has no owner', async () => {
+      const colleague = await person();
+      const channelId = await phone(null);
+      const id = await heldTicket(colleague);
+
+      await run();
+
+      expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+      expect((await held(id)).lines).toHaveLength(1);
+    });
+
+    // Where `fileUnderNumber` lets her keep it: SQL cannot ask who sees every
+    // ticket, and nobody is somebody every ticket may be left with.
+    it('takes one off an agent who sees every ticket, which only TypeScript can ask', async () => {
+      const owner = await person();
+      const supervisor = await person({ role: 'supervisor' });
+      const channelId = await phone(owner);
+      const id = await heldTicket(supervisor);
+
+      await run();
+
+      expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: null });
+      expect((await held(id)).lines).toMatchObject([
+        { data: { from: supervisor, reason: 'filed_under_number_at_deploy' } },
+      ]);
+    });
+
+    it('takes one off a deactivated owner, whom the number counts as nobody', async () => {
       const gone = await person({ isActive: false });
       const channelId = await phone(gone);
       const id = await heldTicket(gone);

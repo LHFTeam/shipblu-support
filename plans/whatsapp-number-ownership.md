@@ -172,7 +172,9 @@ somebody who did not hold the phone then. Null means nobody owned it: a team
 number, a deactivated owner, any other channel, or a ticket from before owners
 existed. Reports then fall back to the assignee, exactly as before.
 
-Both are written only in `lib/whatsapp/number-owner.ts`. A ticket's
+Both are written only in `lib/whatsapp/number-owner.ts`, but for the columns
+a new ticket starts with (`ownerStamp`, in `lib/tickets/assignee.ts` since the
+assignee got one writer). A ticket's
 accountability is set or moved at three moments:
 
 - **Ingest creating a ticket on an owned number.** `lockedOwnerId` reads the
@@ -326,6 +328,11 @@ Left as they are, each a change of its own if it is wanted:
   tickets had, until a handover or each ticket's next reopen. Becoming a
   coexistence number is a write of `channels.config`, which nothing below
   watches.
+- **A holder who stops seeing every ticket** — a role lowered, the
+  `ticket.view.all` override removed, a deactivation — keeps the
+  coexistence-number tickets they hold, until a handover or each ticket's
+  next reopen. A deactivated holder's are also taken back by the sweep where
+  the group reclaims.
 - **The handover's record.** `channel_owner_changes` counts the tickets moved
   and reassigned, and has no column for those a handover to nobody unassigned;
   that count is in the notice and on each ticket's `unassigned` line, which
@@ -348,7 +355,7 @@ to copy.
 
 | Writer                             | Through the helper                                                            |
 | ---------------------------------- | ----------------------------------------------------------------------------- |
-| The rota's pick, `handBackToOwner` | `lockHolders` before the ticket's lock, then `assignTicket`                   |
+| The rota's pick, `handBackToOwner` | `lockHoldersOf` before the ticket's lock, then `assignTicket`                 |
 | `takeForNumberOwner`               | The same, behind `lockedOwnerId`                                              |
 | `updateTicket`, `assign_agent`     | `assignTicket`, or `unassignTicket` for "Unassigned"                          |
 | `handOverNumber`                   | `assignTickets` and `unassignTickets`, behind its own lock on the number      |
@@ -363,7 +370,10 @@ then its tickets, so a writer that locked a ticket and then asked the number
 would wait on a handover waiting on it. `lockHolders` therefore comes before
 the ticket's row is locked or written, and `assignTicket` puts the channel it
 asked about in the write's own `where`: a ticket filed under another row
-between the two is not written, and the caller is told `missed`.
+between the two is not written, and the caller is told `missed`. A writer
+working from a copy of the ticket read earlier asks `lockHoldersOf`, which
+reads the number the ticket is on now, so that only the moment between the
+two steps is left.
 
 What changed for the two writers that did not ask:
 
@@ -374,7 +384,10 @@ What changed for the two writers that did not ask:
   it itself, so with an active owner it is theirs in the same request. An
   agent who sees every ticket keeps it. At a deploy, `db/sql/009` unassigns
   anybody but the number's active owner, since SQL cannot ask who sees every
-  ticket.
+  ticket, and assigns nobody: where the ticket's group routes, the sweep
+  hands it to the owner, and elsewhere it waits for its customer's next
+  message, the phone's reply or an edit. Its line's reason is
+  `filed_under_number_at_deploy`.
 - **Reclaim.** Unassigning was always allowed, so the helper refuses nothing
   there. What the reclaim did not ask was whose number the ticket is on: its
   exemption for an owner reads the ticket's accountability, and on a
@@ -383,8 +396,9 @@ What changed for the two writers that did not ask:
   straight back by the same sweep. The reclaim now asks the number, under its
   lock, and leaves an active owner's ticket alone.
 
-The rule cannot see an object built elsewhere and spread into a write, which
-is why `ownerStamp` lives in the helper's module.
+The rule cannot see an object another function returns, which is why
+`ownerStamp` lives in the helper's module, and it refuses `ownerStamp` in an
+update. Its header lists the shapes a reviewer still has to see.
 
 An agent in no group used to be offered Mine alone, since their Unassigned was
 always empty. The shell now asks `ownsANumber`. An owner in no group is offered

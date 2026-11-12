@@ -9,6 +9,7 @@ import {
   assignTickets,
   fileUnderNumber,
   lockHolders,
+  lockHoldersOf,
   unassignTicket,
 } from './assignee';
 
@@ -181,6 +182,27 @@ describe('assignTicket', () => {
 
     expect(answers).toEqual(['missed', { refused: null, written: [] }]);
     expect(await held(id)).toMatchObject({ assigneeAgentId: null });
+  });
+
+  // A writer holding a copy of the ticket from before it was filed asks the
+  // ticket, not the copy: `lockHoldersOf` reads the number it is on now.
+  it('asks the number a ticket is on now, for a writer that has only its id', async () => {
+    const nayera = await agent();
+    const bob = await agent();
+    const channelId = await phone(nayera);
+    const id = await ticket(channelId);
+
+    const answers = await db.transaction(async (tx) => {
+      const holders = await lockHoldersOf(tx, id);
+      return [
+        holders.channelId,
+        await assignTicket(tx, holders, { conversationId: id, to: bob, at: AT }),
+        await assignTicket(tx, holders, { conversationId: id, to: nayera, at: AT }),
+      ];
+    });
+
+    expect(answers).toEqual([channelId, 'hidden', 'assigned']);
+    expect(await held(id)).toMatchObject({ assigneeAgentId: nayera });
   });
 
   it('applies the caller’s own guard, and gives a ticket to nobody whatever its number', async () => {

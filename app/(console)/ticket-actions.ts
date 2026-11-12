@@ -37,7 +37,7 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
-import { assignTicket, lockHolders, unassignTicket } from '@/lib/tickets/assignee';
+import { assignTicket, lockHoldersOf, unassignTicket } from '@/lib/tickets/assignee';
 import { OWNER_ONLY_REFUSAL } from '@/lib/tickets/owner-only';
 import { changeStatus } from '@/lib/tickets/status';
 import { seesTicket } from '@/lib/tickets/visibility';
@@ -154,11 +154,14 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         // committed after the handover had collected the number's tickets.
         //
         // Both halves are `assignTicket`'s (`lib/tickets/assignee.ts`), the one
-        // writer of the assignee. `missed` is a ticket filed under a number
-        // since this request read it, so the answer above was about no number
-        // at all: nothing is written, and the agent is asked to look again.
+        // writer of the assignee. The number is the one the ticket is on now,
+        // read in here: the row this request loaded may name none, for a
+        // ticket its customer's next message has since filed under one.
+        // `missed` is a ticket filed in the moment between that read and the
+        // write, or deleted: nothing is written, and the agent is asked to
+        // look again.
         if (assigneeAgentId) {
-          const holders = await lockHolders(tx, row.conversation.channelId);
+          const holders = await lockHoldersOf(tx, conversationId);
           const written = await assignTicket(tx, holders, {
             conversationId,
             to: assigneeAgentId,

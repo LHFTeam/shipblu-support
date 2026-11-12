@@ -32,10 +32,11 @@ import { parseCoexistence } from './coexistence';
  * breaches count against, frozen onto the ticket because ownership changes and
  * the nightly rollup rebuilds the last three days from current state.
  *
- * Every write of either column is in this module, so the three moments a
- * ticket's accountability may move are one file to read: ingest creating a
- * ticket on an owned number (`lockedOwnerId`, and `ownerStamp` in
- * `lib/tickets/assignee.ts`), a handover
+ * Every write of either column is in this module but one, so the three
+ * moments a ticket's accountability may move are one file to read: ingest
+ * creating a ticket on an owned number (`lockedOwnerId` here; the columns it
+ * stamps are `ownerStamp` in `lib/tickets/assignee.ts`, beside the assignee
+ * they are written with), a handover
  * (`handOverNumber`), and a customer reopening a ticket after one
  * (`alignAccountable`). Nothing else — not assignment, reclaim, a supervisor's
  * reassignment, an automation or a merge — touches accountability, which is

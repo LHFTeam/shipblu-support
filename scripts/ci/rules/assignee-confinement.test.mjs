@@ -45,13 +45,18 @@ export async function pick(tx, holders, id, agentId, now) {
   // conversations.assignee_agent_id = the agent, in a comment.
   const settings = new Map();
   settings.set('assigneeAgentId', agentId);
+  const shape = { assigneeAgentId: conversations.assigneeAgentId };
+  await tx.select(shape).from(conversations);
+  await db.execute(sql\`select count(*) from \${conversations} c where \${conversations.assigneeAgentId} = \${agentId}\`);
   return assignTicket(tx, holders, { conversationId: id, to: agentId, at: now });
 }
 `,
   'lib/assignment/index.db.test.ts':
     'await db.update(conversations).set({ assigneeAgentId: bob });\nawait db.execute(sql`update conversations set assignee_agent_id = null`);\n',
   'db/sql/001_triggers.sql':
-    'if OLD.assignee_agent_id IS DISTINCT FROM NEW.assignee_agent_id then perform 1; end if;\nselect 1 from conversations c where c.assignee_agent_id = c.accountable_agent_id;\n',
+    'if OLD.assignee_agent_id IS DISTINCT FROM NEW.assignee_agent_id then perform 1; end if;\nIF NEW.assignee_agent_id = OLD.assignee_agent_id THEN return NEW; END IF;\n/* assignee_agent_id = null, in a block comment */\nselect 1 from conversations c where c.assignee_agent_id = c.accountable_agent_id and "c"."assignee_agent_id" = c.id;\n',
+  'db/migrations/0001_init.sql':
+    'CREATE TABLE "conversations" ("id" uuid, "assignee_agent_id" uuid);\nALTER TABLE "conversations" ADD CONSTRAINT "c_fk" FOREIGN KEY ("assignee_agent_id") REFERENCES "agents"("id");\n',
 };
 
 const refusal = (where, message) =>
@@ -145,6 +150,62 @@ describe('assignee-confinement', () => {
       refusal('db/sql/013_unassign_spam.sql:3', expect.stringMatching(/SQL cannot ask who sees/)),
       refusal('db/sql/014_trigger.sql:1', expect.any(String)),
     ]);
+  });
+
+  it('follows a name handed to the builder to a const of the same file', async () => {
+    const found = await runRule('assignee-confinement', {
+      ...TREE,
+      'worker/handlers/reclaim.ts':
+        'const patch = { assigneeAgentId: null, assignedAt: null };\nexport const reclaim = (tx) => tx.update(conversations).set(patch);\nexport const again = (tx) => tx.update(conversations).set({ ...patch });\n',
+    });
+
+    expect(found).toEqual([
+      refusal('worker/handlers/reclaim.ts:2', expect.any(String)),
+      refusal('worker/handlers/reclaim.ts:3', expect.any(String)),
+    ]);
+  });
+
+  // `ownerStamp` is for the insert that creates a ticket on an owned number.
+  // In an update it is an assignment nobody asked about.
+  it('refuses ownerStamp in a .set(), and passes it in an insert', async () => {
+    const found = await runRule('assignee-confinement', {
+      ...TREE,
+      'lib/tickets/realign.ts':
+        'await tx.update(conversations).set({ ...ownerStamp(ownerId, now) });\nawait tx.insert(conversations).values({ subject, ...ownerStamp(ownerId, now) });\n',
+    });
+
+    expect(found).toEqual([refusal('lib/tickets/realign.ts:1', expect.any(String))]);
+  });
+
+  it('refuses the row form, a quoted name, an insert and the column object in a set', async () => {
+    const found = await runRule('assignee-confinement', {
+      ...TREE,
+      'worker/handlers/tidy.ts': [
+        'await db.execute(sql`update conversations set (assignee_agent_id, assigned_at) = (null, null)`);',
+        'await db.execute(sql`UPDATE "conversations" SET "assignee_agent_id" = NULL`);',
+        'await db.execute(sql`insert into conversations (subject, assignee_agent_id) values (${a}, ${b})`);',
+        'await db.execute(sql`update ${conversations} set ${conversations.assigneeAgentId} = ${b}`);',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found.map((f) => f.where)).toEqual([
+      'worker/handlers/tidy.ts:1',
+      'worker/handlers/tidy.ts:2',
+      'worker/handlers/tidy.ts:3',
+      'worker/handlers/tidy.ts:4',
+    ]);
+  });
+
+  // A custom migration is SQL written by hand, like a db/sql file.
+  it('refuses the column written in a migration', async () => {
+    const found = await runRule('assignee-confinement', {
+      ...TREE,
+      'db/migrations/0099_data_fix.sql':
+        'UPDATE "conversations" SET "assignee_agent_id" = NULL WHERE "is_spam";\n',
+    });
+
+    expect(found).toEqual([refusal('db/migrations/0099_data_fix.sql:1', expect.any(String))]);
   });
 
   it('says so when the owner is gone, or no longer writes the column as the rule reads it', async () => {

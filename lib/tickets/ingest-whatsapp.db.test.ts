@@ -1674,7 +1674,28 @@ describe('a customer writing to two of our numbers', () => {
       }
     });
 
-    it('leaves it with nobody when the number has no owner, or a deactivated one', async () => {
+    it('leaves it with nobody when the number has no owner', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const { id, channelId } = await heldUnderNoRow(colleague, null);
+
+        await again();
+
+        const after = await held(id);
+        expect(after).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+        expect(after.lines).toEqual([
+          {
+            type: 'unassigned',
+            data: { to: null, from: colleague, reason: 'filed_under_number', channelId },
+          },
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('and with nobody when its owner is deactivated, whom the number counts as nobody', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         const colleague = await person();
@@ -1691,7 +1712,26 @@ describe('a customer writing to two of our numbers', () => {
       }
     });
 
-    it('leaves it with an agent who sees every ticket, and with the owner', async () => {
+    it('leaves it with the number’s owner, who held it already', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const owner = await person();
+        const { id, channelId } = await heldUnderNoRow(owner, owner);
+
+        await again();
+
+        expect(await held(id)).toMatchObject({
+          channelId,
+          assigneeAgentId: owner,
+          assignedAt: SENT,
+          lines: [],
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('leaves it with an agent who sees every ticket', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         const supervisor = await person({ role: 'supervisor' });
@@ -1719,7 +1759,9 @@ describe('a customer writing to two of our numbers', () => {
 
         await again();
 
-        expect(await held(id)).toMatchObject({ assigneeAgentId: null });
+        const after = await held(id);
+        expect(after).toMatchObject({ assigneeAgentId: null });
+        expect(after.lines.map((line) => line.type)).toEqual(['unassigned']);
       } finally {
         warn.mockRestore();
       }

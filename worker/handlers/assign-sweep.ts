@@ -58,7 +58,10 @@ function routingGroups() {
  * An owned WhatsApp ticket in no group, or in a manual one, is not in this list,
  * and does not need to be: it goes back to its owner on the spot — ingest
  * stamps it, and "Unassign" runs `assignConversation` in the same request — so
- * the sweep is only ever its second chance.
+ * the sweep is only ever its second chance. One exception waits longer: a
+ * ticket `db/sql/009` filed under a coexistence number at a deploy and took
+ * off its holder is assigned by nothing there, and in such a group stays with
+ * nobody until its customer writes, the phone answers, or somebody edits it.
  */
 async function assignWaiting(): Promise<number> {
   const waiting = await db

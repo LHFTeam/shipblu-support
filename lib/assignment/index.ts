@@ -24,7 +24,7 @@ import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { assignTicket, lockHolders } from '@/lib/tickets/assignee';
+import { assignTicket, lockHolders, lockHoldersOf } from '@/lib/tickets/assignee';
 import { onCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -419,8 +419,9 @@ async function routeAndPick(
      */
     // Who may hold a ticket on its number, before the ticket's row is locked:
     // the number's lock first, the order a handover takes them
-    // (`lib/tickets/assignee.ts`).
-    const holders = await lockHolders(tx, conversation.channelId);
+    // (`lib/tickets/assignee.ts`). The number the ticket is on now, not the
+    // one the snapshot read: a ticket under no row may have been filed since.
+    const holders = await lockHoldersOf(tx, conversationId);
     const [current] = await tx
       .select({
         assigneeAgentId: conversations.assigneeAgentId,
@@ -449,15 +450,16 @@ async function routeAndPick(
     }
     if (current.groupId !== groupId) return { assignedTo: null, reason: 'moved' as SkipReason };
     if (isHeld(current, now)) return { assignedTo: null, reason: 'awaiting_route' as SkipReason };
-    // Filed under a number since the snapshot (`fileUnderNumber`), so `holders`
-    // answers for a number the ticket is no longer on; or on a coexistence
-    // number the snapshot did not read as one. Either way the rota picks
-    // nobody, before it reads a roster or moves a cursor: the next pass reads
-    // the ticket as it now is, and asks the number's owner.
+    // On a coexistence number the snapshot did not read as one: filed under it
+    // since (`fileUnderNumber`), or the row became one. The rota picks nobody,
+    // before it reads a roster or moves a cursor, and the next pass asks the
+    // number's owner. A ticket filed in the moment between `holders` and this
+    // lock is no longer on the number that was asked, and is left to the next
+    // pass too.
+    if (holders.ownerOnly) return { assignedTo: null, reason: 'owner_only' as SkipReason };
     if (current.channelId !== holders.channelId) {
       return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     }
-    if (holders.ownerOnly) return { assignedTo: null, reason: 'owner_only' as SkipReason };
 
     /*
      * Serialise this group's assignments against each other.
@@ -783,11 +785,13 @@ async function handBackToOwner(
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
 ): Promise<Picked> {
   return db.transaction(async (tx) => {
-    // The number's lock before the ticket's (`lib/tickets/assignee.ts`).
-    const holders = await lockHolders(tx, channelId);
+    // The number's lock before the ticket's (`lib/tickets/assignee.ts`), and
+    // the number the ticket is on now rather than the snapshot's.
+    const holders = await lockHoldersOf(tx, conversationId);
     const [current] = await tx
       .select({
         assigneeAgentId: conversations.assigneeAgentId,
+        channelId: conversations.channelId,
         accountableAgentId: conversations.accountableAgentId,
         accountableActive: sql<
           boolean | null
@@ -814,10 +818,16 @@ async function handBackToOwner(
       return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     }
 
+    // Filed under a number in the moment since `holders` was read: not the
+    // number that was asked, so the next pass asks again.
+    if (current.channelId !== holders.channelId) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+
     // `hidden` is a ticket on a coexistence number whose accountable agent is
-    // not the number's owner: the snapshot read it before it was filed there,
-    // or before the row became a coexistence number. The number's word
-    // outranks the ticket's (`takeForNumberOwner`), and the next pass asks it.
+    // not the number's owner: filed there, or the row made a coexistence
+    // number, since the snapshot. The number's word outranks the ticket's
+    // (`takeForNumberOwner`), and the next pass asks it.
     const updated = await assignTicket(tx, holders, {
       conversationId,
       to: ownerId,

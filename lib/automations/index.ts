@@ -18,7 +18,7 @@ import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { isCommentTicket, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { assignTicket, lockHolders, unassignTicket } from '@/lib/tickets/assignee';
+import { assignTicket, lockHoldersOf, unassignTicket } from '@/lib/tickets/assignee';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
@@ -384,17 +384,18 @@ async function applyAction(
         // Asked in here, under the channel's lock, so a handover cannot
         // collect the number's tickets between the answer and the write.
         // `assignTicket` is the one writer of the assignee, and the one that
-        // asks (`lib/tickets/assignee.ts`). It also writes nothing for a
-        // ticket filed under a number since this pass read it, whose answer
-        // would be about the wrong number: skipped the same way.
+        // asks (`lib/tickets/assignee.ts`), about the number the ticket is on
+        // now: the pass's own copy may name none, for a ticket filed under
+        // one since. `missed` is a ticket filed in the moment between that
+        // read and the write, or gone.
         if (agentId) {
-          const holders = await lockHolders(tx, ticket.conversation.channelId);
+          const holders = await lockHoldersOf(tx, conversationId);
           const written = await assignTicket(tx, holders, {
             conversationId,
             to: agentId,
             at: new Date(),
           });
-          if (written !== 'assigned') return null;
+          if (written !== 'assigned') return written;
         } else {
           await unassignTicket(tx, { conversationId });
         }
@@ -403,9 +404,15 @@ async function applyAction(
           ? endHold(tx, conversationId, 'rule', { label: `automation:${ruleName}` })
           : false;
       });
-      if (ended === null) {
+      if (ended === 'hidden') {
         log.warn(
           `"${ruleName}" assigns a coexistence number's ticket to an agent it is hidden from`,
+        );
+        return;
+      }
+      if (ended === 'missed') {
+        log.warn(
+          `"${ruleName}" assigned nobody: the ticket was filed under a number, or deleted, as the rule ran`,
         );
         return;
       }

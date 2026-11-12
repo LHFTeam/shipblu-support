@@ -27,8 +27,9 @@ import { ownerOnlyNumber, seesOwnerOnlyTicket } from '@/lib/tickets/owner-only';
  * that held a ticket's row and then asked the number would wait on a handover
  * waiting on it. So:
  *
- *  1. `lockHolders(tx, channelId)`, before the transaction locks or writes the
- *     ticket's row. It reads who may hold a ticket on that number, under the
+ *  1. `lockHolders(tx, channelId)` — or `lockHoldersOf(tx, conversationId)`,
+ *     which reads the ticket's number first — before the transaction locks or
+ *     writes the ticket's row. It reads who may hold a ticket on that number, under the
  *     lock a handover waits for (FOR KEY SHARE on the channel), so the answer
  *     holds until the transaction ends.
  *  2. `assignTicket(tx, holders, …)`, which refuses an agent the ticket would
@@ -90,6 +91,25 @@ export async function lockHolders(tx: Executor, channelId: string | null): Promi
     channelId,
     ownerOnly: { ownerId: owner?.active ? number.ownerId : null },
   } as Holders;
+}
+
+/**
+ * `lockHolders` for the number a ticket is on now, for a writer that has only
+ * the ticket's id — or only a copy of its row read some time ago, which is the
+ * same thing: a ticket under no row is filed under one by its customer's next
+ * message (`fileUnderNumber`), and a writer that asked about the number its
+ * copy named would be told `missed` for an assignment nothing was wrong with.
+ *
+ * The ticket's row is read here and not locked, so the channel's lock still
+ * comes first. A ticket filed in the moment between this read and the write
+ * is still caught by the write's own `where`.
+ */
+export async function lockHoldersOf(tx: Executor, conversationId: string): Promise<Holders> {
+  const [ticket] = await tx
+    .select({ channelId: conversations.channelId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId));
+  return lockHolders(tx, ticket?.channelId ?? null);
 }
 
 /**

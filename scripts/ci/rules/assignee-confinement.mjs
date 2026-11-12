@@ -35,18 +35,28 @@ import {
 //    `.select({ assigneeAgentId: conversations.assigneeAgentId })`, a type, a
 //    snapshot handed to a function — and a pattern over the text cannot tell
 //    those from a write.
-//  - `assignee_agent_id = …` in raw SQL, unqualified, in a source file or in
-//    db/sql/ and db/runbooks/: the left side of a SET. A comparison in a WHERE
+//    A bare name handed to the builder (`.set(patch)`) is followed to a
+//    `const` of the same file. `ownerStamp`, which the owner module exports
+//    for an insert, is refused in a `.set()`: an update is an assignment, and
+//    asks.
+//  - the column given a value in raw SQL, in a source file or under db/sql/,
+//    db/runbooks/ and db/migrations/ (a custom migration is written by hand):
+//    `assignee_agent_id = …` unqualified, quoted or not, which is the left
+//    side of a SET; the row form, `set (assignee_agent_id, assigned_at) = …`;
+//    an `insert into conversations (…)` whose column list names it; a
+//    trigger's `NEW.assignee_agent_id := …`; and, in a `sql` template,
+//    `set … ${conversations.assigneeAgentId} = …`. A comparison in a WHERE
 //    names its table (`c.assignee_agent_id = …`) or goes through the builder,
 //    and passes.
 //
 // Tests are left alone: a fixture builds the ticket a test is about, held by
 // whoever the case needs.
 //
-// What it cannot see: an object built elsewhere and spread in
-// (`.values({ ...stamp })`). `ownerStamp`, the one there is, lives in the
-// owner module for that reason. Nor a statement built from strings at run
-// time, which no reading of the source can resolve.
+// What it cannot see, each a shape a reviewer can: an object another function
+// returns (`.set(reclaimSet())`), one built in another file, or one built
+// from a callback (`.values(rows.map(…))`) — `ownerStamp` lives in the owner
+// module because it is the first of those; and a statement built from strings
+// at run time, which no reading of the source can resolve.
 // ---------------------------------------------------------------------------
 
 const OWNER = 'lib/tickets/assignee.ts';
@@ -75,45 +85,84 @@ const nameOf = (name) =>
  *
  * Followed through what still is that object: a spread, either arm of a
  * conditional or of `&&`, `||` and `??`, parentheses, a cast, the elements of
- * an array, and the `set` of an `onConflictDoUpdate`. Not into a call: what a
- * function is handed is its own argument (`routingWindowValues(plan, {
- * assigneeAgentId }, now)` reads the assignee to decide a window), and what it
- * returns is not in this file to read.
+ * an array, the `set` of an `onConflictDoUpdate`, and a bare name that is a
+ * `const` of this file (`consts`). Not into a call: what a function is handed
+ * is its own argument (`routingWindowValues(plan, { assigneeAgentId }, now)`
+ * reads the assignee to decide a window), and what it returns is not in this
+ * file to read.
  */
-function columnKeys(node, found = []) {
+function columnKeys(node, consts, found = [], seen = new Set()) {
   if (!node) return found;
-  if (ts.isObjectLiteralExpression(node)) {
+  if (ts.isIdentifier(node)) {
+    const declared = consts.get(node.text);
+    if (declared && !seen.has(declared)) {
+      seen.add(declared);
+      // Reported where the write is, since that is the line to change.
+      if (columnKeys(declared, consts, [], seen).length > 0) found.push(node);
+    }
+  } else if (ts.isObjectLiteralExpression(node)) {
     for (const property of node.properties) {
       if (ts.isSpreadAssignment(property)) {
-        columnKeys(property.expression, found);
+        columnKeys(property.expression, consts, found, seen);
       } else if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
         const name = nameOf(property.name);
         if (name === COLUMN || name === SQL_COLUMN) found.push(property);
         else if (name === 'set' && ts.isPropertyAssignment(property)) {
-          columnKeys(property.initializer, found);
+          columnKeys(property.initializer, consts, found, seen);
         }
       }
     }
   } else if (ts.isArrayLiteralExpression(node)) {
-    for (const element of node.elements) columnKeys(element, found);
+    for (const element of node.elements) columnKeys(element, consts, found, seen);
   } else if (ts.isSpreadElement(node) || ts.isParenthesizedExpression(node)) {
-    columnKeys(node.expression, found);
+    columnKeys(node.expression, consts, found, seen);
   } else if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
-    columnKeys(node.expression, found);
+    columnKeys(node.expression, consts, found, seen);
   } else if (ts.isConditionalExpression(node)) {
-    columnKeys(node.whenTrue, found);
-    columnKeys(node.whenFalse, found);
+    columnKeys(node.whenTrue, consts, found, seen);
+    columnKeys(node.whenFalse, consts, found, seen);
   } else if (ts.isBinaryExpression(node)) {
-    columnKeys(node.left, found);
-    columnKeys(node.right, found);
+    columnKeys(node.left, consts, found, seen);
+    columnKeys(node.right, consts, found, seen);
   }
   return found;
 }
 
+/** Every `const name = <object or array literal>` in a file, by name. */
+function constLiterals(source) {
+  const consts = new Map();
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      (ts.isObjectLiteralExpression(node.initializer) ||
+        ts.isArrayLiteralExpression(node.initializer))
+    ) {
+      consts.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return consts;
+}
+
+/** Whether `node` holds a call to `ownerStamp`, outside any nested function. */
+function stampsOwner(node) {
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+    if (node.expression.text === 'ownerStamp') return true;
+  }
+  return ts.forEachChild(node, (child) => stampsOwner(child)) ?? false;
+}
+
 /** The line of every builder write of the column in `file`. */
 function builderWrites(file) {
-  if (!read(file).includes(COLUMN) && !read(file).includes(SQL_COLUMN)) return [];
+  const text = read(file);
+  if (!text.includes(COLUMN) && !text.includes(SQL_COLUMN) && !text.includes('ownerStamp')) {
+    return [];
+  }
   const source = parseSource(file);
+  const consts = constLiterals(source);
   const lines = [];
   const visit = (node) => {
     if (
@@ -122,7 +171,10 @@ function builderWrites(file) {
       WRITERS.has(node.expression.name.text)
     ) {
       for (const argument of node.arguments) {
-        for (const key of columnKeys(argument)) lines.push(lineOfNode(source, key));
+        for (const key of columnKeys(argument, consts)) lines.push(lineOfNode(source, key));
+        if (node.expression.name.text !== 'values' && stampsOwner(argument)) {
+          lines.push(lineOfNode(source, argument));
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -132,19 +184,44 @@ function builderWrites(file) {
 }
 
 /**
- * `assignee_agent_id = …` or `:= …`, unqualified or on a trigger's NEW row:
- * the column being given a value. `==` is a comparison in JavaScript and
- * `c.assignee_agent_id =` one in SQL, and neither matches.
+ * The column given a value in SQL, each a pattern over text with its comments
+ * blanked:
+ *
+ * - `assignee_agent_id = …`, unqualified, quoted or not: the left side of a
+ *   SET. `==` is a comparison in JavaScript and `c.assignee_agent_id =` one in
+ *   SQL, and neither matches.
+ * - `NEW.assignee_agent_id := …`, or `= …` where a statement starts, in a
+ *   trigger. `IF NEW.assignee_agent_id = …` is a comparison.
+ * - `set (assignee_agent_id, assigned_at) = (…)`, the row form.
+ * - `insert into conversations (…, assignee_agent_id, …)`.
+ * - in a `sql` template, `set … ${conversations.assigneeAgentId} =`.
  */
-const SQL_WRITE = /(?<![.\w])(?:new\.)?assignee_agent_id\s*:?=(?!=)/gi;
+const SQL_WRITES = [
+  /(?<![.\w"])"?assignee_agent_id"?\s*=(?!=)/gi,
+  /\bnew\."?assignee_agent_id"?\s*:=/gi,
+  /(?:^|;|\bthen\b|\belse\b|\bbegin\b)\s*new\."?assignee_agent_id"?\s*=(?!=)/gim,
+  /\bset\s*\([^)]*\bassignee_agent_id\b[^)]*\)\s*=/gi,
+  /\binsert\s+into\s+"?conversations"?[^(;]*\([^)]*\bassignee_agent_id\b/gi,
+  /\bset\b[^;`]*?\$\{\s*conversations\.assigneeAgentId\s*\}\s*=(?!=)/gi,
+];
 
-const stripSqlComments = (sql) => sql.replace(/--[^\n]*/g, (m) => ' '.repeat(m.length));
+const blank = (m) => m.replace(/[^\n]/g, ' ');
+const stripSqlComments = (sql) =>
+  sql.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/--[^\n]*/g, blank);
 
 function sqlWrites(file) {
   const raw = read(file);
-  if (!raw.includes(SQL_COLUMN)) return [];
+  if (!raw.includes(SQL_COLUMN) && !raw.includes(COLUMN)) return [];
   const contents = file.endsWith('.sql') ? stripSqlComments(raw) : stripComments(raw);
-  return [...contents.matchAll(SQL_WRITE)].map((match) => lineOf(contents, match.index));
+  const lines = new Set();
+  for (const pattern of SQL_WRITES) {
+    for (const match of contents.matchAll(pattern)) {
+      // The column's own line, not the `set` or `insert` the match began at.
+      const at = match.index + match[0].search(/assignee_?agent_?id/i);
+      lines.add(lineOf(contents, at));
+    }
+  }
+  return [...lines].sort((a, b) => a - b);
 }
 
 export function checkAssigneeConfinement() {
@@ -182,7 +259,7 @@ export function checkAssigneeConfinement() {
     }
   }
 
-  const sqlFiles = tracked.filter((f) => /^db\/(sql|runbooks)\/.*\.sql$/.test(f));
+  const sqlFiles = tracked.filter((f) => /^db\/(sql|runbooks|migrations)\/.*\.sql$/.test(f));
   for (const file of sqlFiles.filter((f) => !SQL_WRITERS.has(f))) {
     for (const line of sqlWrites(file)) {
       fail(
