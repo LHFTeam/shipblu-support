@@ -3,12 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   claimNamesSomebody,
-  identitySigningEnabled,
   identityKey,
   judgeSignature,
   parseIdentity,
   signedClaim,
-  verifyIdentity,
   type WidgetIdentity,
 } from './identity';
 
@@ -117,17 +115,26 @@ describe('identityKey', () => {
   });
 });
 
-describe('verifyIdentity', () => {
+/**
+ * `judgeSignature` is the module's one public decision; what a signature covers
+ * and what it proves is tested through it.
+ */
+describe('judgeSignature', () => {
   function sign(identity: WidgetIdentity, secret = SECRET): string {
     return createHmac('sha256', secret).update(signedClaim(identity)).digest('hex');
+  }
+
+  /** Parsed the way the route parses it, with the raw shape kept beside it. */
+  function judge(raw: Record<string, unknown>, signature: string) {
+    return judgeSignature(parseIdentity(raw)!, signature, raw);
   }
 
   it('accepts what the host backend signed', () => {
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const identity = parseIdentity(dashboardUser())!;
-    expect(verifyIdentity(identity, sign(identity))).toBe(true);
-    expect(verifyIdentity(identity, sign(identity).toUpperCase())).toBe(true);
+    expect(judge(dashboardUser(), sign(identity))).toBe('verified');
+    expect(judge(dashboardUser(), sign(identity).toUpperCase())).toBe('verified');
   });
 
   it('ignores changes to the parts it does not cover', () => {
@@ -137,120 +144,101 @@ describe('verifyIdentity', () => {
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const signature = sign(parseIdentity(dashboardUser())!);
-    const renamed = parseIdentity(dashboardUser({ firstName: 'Someone', phone: '201110000000' }))!;
-
-    expect(verifyIdentity(renamed, signature)).toBe(true);
+    expect(judge(dashboardUser({ firstName: 'Someone', phone: '201110000000' }), signature)).toBe(
+      'verified',
+    );
   });
 
-  it('rejects a claim to a different account or address', () => {
+  it('refuses a claim to a different account or address while signing is on', () => {
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const signature = sign(parseIdentity(dashboardUser())!);
-
-    expect(verifyIdentity(parseIdentity(dashboardUser({ accountId: 4472 }))!, signature)).toBe(
-      false,
-    );
-    expect(
-      verifyIdentity(parseIdentity(dashboardUser({ email: 'someone@else.example' }))!, signature),
-    ).toBe(false);
+    expect(judge(dashboardUser({ accountId: 4472 }), signature)).toBe('refused');
+    expect(judge(dashboardUser({ email: 'someone@else.example' }), signature)).toBe('refused');
+    expect(judge({ email: 'nour@merchant.example' }, 'f'.repeat(64))).toBe('refused');
   });
 
-  it('rejects a signature made with another environment secret', () => {
+  it('refuses a signature made with another environment secret', () => {
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const identity = parseIdentity(dashboardUser())!;
-    expect(verifyIdentity(identity, sign(identity, 'the-staging-secret'))).toBe(false);
+    expect(judge(dashboardUser(), sign(identity, 'the-staging-secret'))).toBe('refused');
   });
 
-  it('verifies nothing when no secret is configured', () => {
+  it('verifies nothing, and refuses nothing, when no secret is configured', () => {
     // The identity is still accepted — it just never becomes a fact, so the
     // account link is not written.
     const identity = parseIdentity(dashboardUser())!;
-
-    expect(identitySigningEnabled()).toBe(false);
-    expect(verifyIdentity(identity, sign(identity))).toBe(false);
+    expect(judge(dashboardUser(), sign(identity))).toBe('unverified');
+    expect(judge(dashboardUser(), 'f'.repeat(64))).toBe('unverified');
   });
 
-  it('verifies nothing for a claim that names nobody, even signed correctly', () => {
+  it('is unverified with no signature, a blank one included', () => {
+    // Trimmed here rather than trusted to the caller, so a blank signature is
+    // no signature whoever passes it.
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
+
+    expect(judge(dashboardUser(), '')).toBe('unverified');
+    expect(judge(dashboardUser(), '   ')).toBe('unverified');
+  });
+
+  it('leaves a phone-only identity unverified with a valid signature of "|", not refused', () => {
     // A phone alone signs the constant "|". One HMAC of it, minted by any
     // integrator's backend for its first phone-only user, would otherwise be a
     // valid signature for every phone number, and `identityKey` keys the
-    // contact on the phone the signature never mentioned.
+    // contact on the phone the signature never mentioned. Unverified rather
+    // than a 401: a deployed integration signing every user it has must not
+    // start failing for the ones without an email.
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
-    const phoneOnly = parseIdentity({ phone: '+20 100 123 4567', name: 'Nour Adel' })!;
-    expect(signedClaim(phoneOnly)).toBe('|');
-    expect(identityKey(phoneOnly)).toBe('phone:201001234567');
-    expect(claimNamesSomebody(phoneOnly)).toBe(false);
-    expect(verifyIdentity(phoneOnly, sign(phoneOnly))).toBe(false);
-
-    const accountNameOnly = parseIdentity({ accountName: 'Acme Trading' })!;
-    expect(verifyIdentity(accountNameOnly, sign(accountNameOnly))).toBe(false);
-  });
-
-  it('still verifies an account alone or an address alone', () => {
-    // Each names somebody; the other half is simply its empty side of the `|`.
-    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
-
-    const accountOnly = parseIdentity({ accountId: 4471, phone: '+20 100 123 4567' })!;
-    const emailOnly = parseIdentity({ email: 'nour@merchant.example' })!;
-
-    expect(signedClaim(accountOnly)).toBe('4471|');
-    expect(verifyIdentity(accountOnly, sign(accountOnly))).toBe(true);
-    expect(signedClaim(emailOnly)).toBe('|nour@merchant.example');
-    expect(verifyIdentity(emailOnly, sign(emailOnly))).toBe(true);
-  });
-});
-
-/** The decision `/api/widget/identify` acts on: 401 only for `refused`. */
-describe('judgeSignature', () => {
-  function sign(identity: WidgetIdentity, secret = SECRET): string {
-    return createHmac('sha256', secret).update(signedClaim(identity)).digest('hex');
-  }
-
-  const phoneOnly = () => parseIdentity({ phone: '+20 100 123 4567' })!;
-
-  it('leaves a phone-only identity unverified with a valid signature of "|", not refused', () => {
-    // Unverified rather than a 401: a deployed integration signing every user
-    // it has must not start failing for the ones without an email.
-    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
-
-    const identity = phoneOnly();
+    const raw = { phone: '+20 100 123 4567', name: 'Nour Adel' };
+    const identity = parseIdentity(raw)!;
+    expect(signedClaim(identity)).toBe('|');
+    expect(identityKey(identity)).toBe('phone:201001234567');
+    expect(claimNamesSomebody(identity)).toBe(false);
     expect(sign(identity)).toBe(createHmac('sha256', SECRET).update('|').digest('hex'));
-    expect(judgeSignature(identity, sign(identity))).toBe('unverified');
+    expect(judge(raw, sign(identity))).toBe('unverified');
   });
 
   it('leaves a phone-only identity unverified with a wrong signature too', () => {
     // It could not have proved anything right, so it is not refused for being wrong.
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
-    expect(judgeSignature(phoneOnly(), 'f'.repeat(64))).toBe('unverified');
-  });
-
-  it('verifies a signed account and address as before', () => {
-    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
-
-    const identity = parseIdentity(dashboardUser())!;
-    expect(judgeSignature(identity, sign(identity))).toBe('verified');
-  });
-
-  it('refuses a bad signature over an account or address while signing is on', () => {
-    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
-
-    const signature = sign(parseIdentity(dashboardUser())!);
-    expect(judgeSignature(parseIdentity(dashboardUser({ accountId: 4472 }))!, signature)).toBe(
-      'refused',
-    );
-    expect(judgeSignature(parseIdentity({ email: 'nour@merchant.example' })!, 'f'.repeat(64))).toBe(
-      'refused',
+    expect(judge({ phone: '+20 100 123 4567' }, 'f'.repeat(64))).toBe('unverified');
+    expect(judge({ accountName: 'Acme Trading' }, sign(parseIdentity({ accountName: 'x' })!))).toBe(
+      'unverified',
     );
   });
 
-  it('is unverified with no signature, and with no secret configured', () => {
-    const identity = parseIdentity(dashboardUser())!;
-    expect(judgeSignature(identity, sign(identity))).toBe('unverified');
-
+  it('still verifies an account alone or an address alone', () => {
+    // Each names somebody; the other half is simply its empty side of the `|`.
     setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
-    expect(judgeSignature(identity, '')).toBe('unverified');
+
+    const accountOnly = { accountId: 4471, phone: '+20 100 123 4567' };
+    const emailOnly = { email: 'nour@merchant.example' };
+
+    expect(signedClaim(parseIdentity(accountOnly)!)).toBe('4471|');
+    expect(judge(accountOnly, sign(parseIdentity(accountOnly)!))).toBe('verified');
+    expect(signedClaim(parseIdentity(emailOnly)!)).toBe('|nour@merchant.example');
+    expect(judge(emailOnly, sign(parseIdentity(emailOnly)!))).toBe('verified');
+  });
+
+  it('refuses when the host named an account id or email the parser dropped', () => {
+    // The host signed the raw value, so its signature is wrong rather than
+    // empty: a broken integration, which the 401 makes visible. Still never
+    // verified, even signed over "|" — that is the replay this module closes.
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
+
+    const badEmail = { email: 'nour@merchant', phone: '+20 100 123 4567' };
+    expect(parseIdentity(badEmail)!.email).toBeNull();
+    expect(
+      judge(badEmail, createHmac('sha256', SECRET).update('|nour@merchant').digest('hex')),
+    ).toBe('refused');
+    expect(judge(badEmail, sign(parseIdentity(badEmail)!))).toBe('refused');
+
+    const punctuationAccount = { accountId: '#/#', phone: '+20 100 123 4567' };
+    expect(parseIdentity(punctuationAccount)!.accountId).toBeNull();
+    expect(judge(punctuationAccount, 'f'.repeat(64))).toBe('refused');
+    expect(judge({ account_id: '#', phone: '+20 100 123 4567' }, 'f'.repeat(64))).toBe('refused');
   });
 });

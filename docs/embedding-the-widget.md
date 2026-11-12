@@ -194,6 +194,10 @@ _unverified_, signed or not: its name and phone still reach the agent, marked as
 the dashboard's word, and no signature over it is refused with a 401 either,
 right or wrong, so an integration that signs every user keeps working for the
 ones without an email. To have a user verified, send their account id or email.
+One exception keeps a broken integration visible: an email or account id you
+sent that the widget could not read — an address without a domain, an account id
+of punctuation alone — is dropped from the identity, but your backend signed it,
+so a signature that does not verify is still a 401.
 A phone-keyed integration that needs the phone itself vouched for gets a second
 accepted claim form, added beside this one; the `<accountId>|<email>` form does
 not change.

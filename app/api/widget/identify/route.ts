@@ -46,7 +46,7 @@ export async function POST(request: Request) {
   if (!identity) return NextResponse.json({ ok: true, verified: false });
 
   const signature = typeof body.signature === 'string' ? body.signature.trim() : '';
-  const verdict = judgeSignature(identity, signature);
+  const verdict = judgeSignature(identity, signature, body.identity);
   if (verdict === 'refused') {
     return NextResponse.json({ error: 'bad signature' }, { status: 401 });
   }
