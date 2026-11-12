@@ -1,5 +1,6 @@
 import { freshdeskPortalRedirect } from './freshdesk-portal';
 import { decodeAttribute, imageSources, onFreshworks } from './image-src';
+import { freshdeskCategoryId, freshdeskFolderId } from './legacy-path';
 
 /**
  * The Freshdesk addresses an article body links to or shows, and the sentence
@@ -16,9 +17,9 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
  * part of the portal nothing here replaces. One on Freshdesk's own hosts breaks
  * the day Freshdesk is disconnected. One on the portal's hostname stopped
  * reaching Freshdesk when that name moved here on 2026-11-11, and gets what
- * this app answers there: an article or folder only through `app/help/legacy`,
- * a page of the portal at most a stand-in (`./freshdesk-portal.ts`), the rest a
- * 404 or the console's sign-in. Each is refused only when the write would *add*
+ * this app answers there: an article, a folder or a category only through
+ * `app/help/legacy`, a page of the portal at most a stand-in
+ * (`./freshdesk-portal.ts`), the rest a 404 or the console's sign-in. Each is refused only when the write would *add*
  * it. One the stored row already carries is left alone: refusing it would make
  * the article unsaveable until somebody found and removed it, whatever the save
  * was for, and leaving it costs nothing the article does not already cost.
@@ -67,9 +68,6 @@ const PORTAL_PATH =
 
 /** A Freshdesk article, by id, in any of the shapes above. */
 const ARTICLE_ID = /\/solutions\/articles\/(\d+)/i;
-
-/** A Freshdesk folder, by id, which `app/help/legacy` answers as it can. */
-const FOLDER_ID = /\/solutions\/folders\/(\d+)/i;
 
 const A_TAG = /<a\b[^>]*>/gi;
 const HREF_ATTR = /\shref="([^"]*)"/i;
@@ -147,31 +145,32 @@ export function freshdeskReferences(html: string): FreshdeskReference[] {
  * Why the console's Save refuses `next`, or null when it may be written.
  *
  * `current` is the stored body, null for a new article: a reference it already
- * carries is not one the save adds.
+ * carries is not one the save adds. `locale` is the article's, so a page of the
+ * portal named with no language is offered in the article's, not the default.
  */
-export function saveRefusal(next: string, current: string | null): string | null {
+export function saveRefusal(next: string, current: string | null, locale: string): string | null {
   const added = addedReference(next, current);
   if (!added) return null;
 
   if (added.kind === 'image') {
-    return `The article shows ${described(added)}. Remove it, or add the picture again with Insert picture, then save.`;
+    return `The article shows ${described(added, locale)}. Remove it, or add the picture again with Insert picture, then save.`;
   }
-  const target = portalPageTarget(added);
-  const instead = target ?? 'an article on this help centre (/<language>/a/<slug>)';
-  return `The article has ${described(added)}. Point it at ${instead} or remove it, then save.`;
+  return `The article has ${described(added, locale)}. Point it at ${instead(added, locale)} or remove it, then save.`;
 }
 
 /**
  * Why Restore refuses to put `next` back, or null when it may.
  *
  * `current` is the body the restore would replace, so a version holding only
- * what the article already holds can still be restored.
+ * what the article already holds can still be restored. `locale` is the
+ * article's, as for `saveRefusal`.
  */
-export function restoreRefusal(next: string, current: string): string | null {
+export function restoreRefusal(next: string, current: string, locale: string): string | null {
   const added = addedReference(next, current);
   if (!added) return null;
 
-  const what = added.kind === 'image' ? `shows ${described(added)}` : `has ${described(added)}`;
+  const said = described(added, locale);
+  const what = added.kind === 'image' ? `shows ${said}` : `has ${said}`;
   const back = added.home === 'portal' ? "an address of Freshdesk's old portal" : 'Freshdesk';
   return `That version ${what}, so restoring it would put ${back} back on the help centre. Restore another version, or edit the article instead.`;
 }
@@ -198,12 +197,10 @@ function key(reference: FreshdeskReference): string {
  * and goes when the account closes, if it has not gone already: the merchant
  * dashboard's links to an older account (`shipblu.freshdesk.com`) 404 now. One
  * on the portal's hostname has not reached Freshdesk since 2026-11-11, and gets
- * what this app answers there: a page of the portal a stand-in, which
- * `./freshdesk-portal.ts` names and the refusal offers in its place; a folder
- * the help centre's home at best (`app/help/legacy`); anything else nothing.
- * Telling the editor such an address goes away later would say it works now.
+ * what this app answers there (`portalAnswer`). Telling the editor such an
+ * address goes away later would say it works now.
  */
-function described(reference: FreshdeskReference): string {
+function described(reference: FreshdeskReference, locale: string): string {
   const { address } = reference;
   if (reference.kind === 'image') {
     return reference.home === 'portal'
@@ -217,28 +214,65 @@ function described(reference: FreshdeskReference): string {
   if (reference.home === 'freshworks') {
     return `a link to Freshdesk, which is being disconnected (${address})`;
   }
-  const target = portalPageTarget(reference);
-  if (target) {
-    return `a link to a page of Freshdesk's old portal, which now only redirects to ${target} here (${address})`;
+  const answer = portalAnswer(address, locale);
+  switch (answer.kind) {
+    case 'page':
+      return `a link to a page of Freshdesk's old portal, which now only redirects to ${answer.target} here (${address})`;
+    case 'folder':
+      return `a link to Freshdesk folder ${answer.id}, which now only redirects to that folder's page here, if it was imported (${address})`;
+    case 'category':
+      return `a link to Freshdesk category ${answer.id}, which now only redirects to that category's page here, if it was imported (${address})`;
+    case 'none':
+      return `a link to Freshdesk's old portal, which nothing here answers (${address})`;
   }
-  const folder = FOLDER_ID.exec(address)?.[1];
-  if (folder) {
-    return `a link to Freshdesk folder ${folder}, which has no page here (${address})`;
-  }
-  return `a link to Freshdesk's old portal, which nothing here answers (${address})`;
 }
 
+/** What Save offers in place of a refused link. */
+function instead(reference: FreshdeskReference, locale: string): string {
+  if (reference.home === 'portal' && !ARTICLE_ID.test(reference.address)) {
+    const answer = portalAnswer(reference.address, locale);
+    if (answer.kind === 'page') return answer.target;
+    if (answer.kind === 'folder') {
+      return "the folder's page on this help centre (/<language>/c/<category>/<folder>)";
+    }
+    if (answer.kind === 'category') {
+      return "the category's page on this help centre (/<language>/c/<category>)";
+    }
+  }
+  return 'an article on this help centre (/<language>/a/<slug>)';
+}
+
+type PortalAnswer =
+  | { kind: 'page'; target: string }
+  | { kind: 'folder'; id: string }
+  | { kind: 'category'; id: string }
+  | { kind: 'none' };
+
 /**
- * Where a link to a page of the portal lands here (`freshdeskPortalRedirect`,
- * which `proxy.ts` answers it with on every host), or null for anything else.
+ * What this app answers a portal link that is not an article with, asked of
+ * the functions `proxy.ts` and the legacy route ask, so the refusal and the
+ * redirect cannot disagree. A page of the portal is the stand-in
+ * `freshdeskPortalRedirect` names; one naming no language, by path or by
+ * Freshdesk's `url_locale`, is read in the article's language, since that is
+ * the reader it is offered to. A folder or a category goes through
+ * `app/help/legacy` to its own page where the import kept its id
+ * (`freshdeskFolderId`, `freshdeskCategoryId`), which takes a lookup this pure
+ * module does not make, so it is named by kind rather than by address.
  */
-function portalPageTarget(reference: FreshdeskReference): string | null {
-  if (reference.kind !== 'link' || reference.home !== 'portal') return null;
+function portalAnswer(address: string, locale: string): PortalAnswer {
   let url: URL;
   try {
-    url = new URL(reference.address.trim(), RELATIVE_BASE);
+    url = new URL(address.trim(), RELATIVE_BASE);
   } catch {
-    return null;
+    return { kind: 'none' };
   }
-  return freshdeskPortalRedirect(url.pathname, url.searchParams);
+  const query = new URLSearchParams(url.searchParams);
+  if (!query.has('url_locale')) query.set('url_locale', locale);
+  const target = freshdeskPortalRedirect(url.pathname, query);
+  if (target) return { kind: 'page', target };
+  const folder = freshdeskFolderId(url.pathname);
+  if (folder) return { kind: 'folder', id: folder };
+  const category = freshdeskCategoryId(url.pathname);
+  if (category) return { kind: 'category', id: category };
+  return { kind: 'none' };
 }

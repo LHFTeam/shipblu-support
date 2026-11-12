@@ -371,9 +371,10 @@ describe("Freshdesk's links and pictures", () => {
     const pictured = await saving(id, folderId, `<p>Step one.</p><p><img src="${PICTURE}" /></p>`);
 
     // A page of the portal, on a hostname that has been this app since
-    // 2026-11-11: refused, and offered the stand-in proxy.ts sends it to.
+    // 2026-11-11: refused, and offered the stand-in proxy.ts sends it to, in
+    // the language of the article it is for, since the link names none.
     expect(linked.error).toContain(
-      "a link to a page of Freshdesk's old portal, which now only redirects to /ar#contact here",
+      "a link to a page of Freshdesk's old portal, which now only redirects to /en#contact here",
     );
     expect(pictured.error).toContain('a picture from Freshdesk');
     expect(await stored(id)).toMatchObject({ bodyHtml: before });

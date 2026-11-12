@@ -206,13 +206,13 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // the old portal carries its links (`pointedHere`). What has no home here is
   // refused, unless the stored row already carries it — Freshdesk is being
   // disconnected, and an address of its added today breaks with it, or, on the
-  // portal's hostname, which moved here on 2026-11-11, already gets at most a
-  // stand-in (`lib/kb/freshdesk-refs.ts`).
+  // portal's hostname, which moved here on 2026-11-11, already reaches only a
+  // redirect here (`lib/kb/freshdesk-refs.ts`).
   //
   // After every other refusal, since it can read the pool twice and a save the
   // folder checks turn away would have spent those reads for nothing.
   const bodyHtml = await pointedHere(body.bodyHtml, locale);
-  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null);
+  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null, locale);
   if (refusal) return { error: refusal };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
@@ -545,7 +545,7 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   const body = articleBody(version.bodyHtml);
   const { bodyText, excerpt } = body;
   const bodyHtml = await pointedHere(body.bodyHtml, current.locale);
-  const refusal = restoreRefusal(bodyHtml, current.bodyHtml);
+  const refusal = restoreRefusal(bodyHtml, current.bodyHtml, current.locale);
   if (refusal) return { error: refusal };
 
   await db.transaction(async (tx) => {
