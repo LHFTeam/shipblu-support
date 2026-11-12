@@ -727,6 +727,13 @@ which production does not yet, and the help centre's 404 from then on.
     hosts, with the variable set and unset, and holds `LEGACY_CATEGORY` and
     `freshdeskCategoryId`, which reads the id out of what it sends, to one
     answer.
+  - **Left out: a folder.** `/support/solutions/folders/<id>` still goes to the
+    home with a 301 whatever the folder's visibility, the employee guide's four
+    included (`resolveLegacyPath`'s folder branch reads none). So a folder id
+    still says a folder was imported under it, and the 301 pins the home where
+    the folder's own page, `/<l>/c/<category>/<folder>`, could now answer. It
+    is the folder branch's own change: production holds 16 public folders and
+    4 agents-only ones, every one with a Freshdesk id (2026-11-12).
 
 ## To-dos outside this repository
 
