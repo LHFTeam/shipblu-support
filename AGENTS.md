@@ -741,9 +741,15 @@ any sender that did not refuse it first. The guard is shared with WhatsApp's
 template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
-that permanently failed. Route a new automated sender through it and through
-`carrierFor`, which is the same lesson twice — `send_csat` kept private copies
-of both and so surveyed Facebook tickets by email.
+that permanently failed. Route a new automated sender through it, through
+`carrierFor` and through `rowIsDelivery`, which is the same lesson three times —
+`send_csat` kept private copies of the first two and so surveyed Facebook tickets
+by email. `carrierFor` answers `send_email` for web chat and the myBlu app
+(`api`) because its return type has no "nothing carries it"; their row is the
+delivery, written `delivered` with no HTML part and no address and queued
+nowhere, and `rowIsDelivery` and `sendsByEmail` are what say so, at every sender
+— never a test naming one channel, which is how the code queued an `api` reply
+as an email at every place that set web chat aside by name.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and

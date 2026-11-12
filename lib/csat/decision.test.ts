@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  anyChannelSurveyed,
   cardRefusalStands,
   channelSurveyed,
   channelSwitch,
@@ -150,9 +151,26 @@ describe('decideSurvey', () => {
       kind: 'send',
       delivery: 'email_link',
     });
-    expect(decideSurvey(input({ channel: 'api', lacksRecipient: true }), ON)).toEqual({
+    expect(decideSurvey(input({ channel: 'portal', lacksRecipient: true }), ON)).toEqual({
       kind: 'skip',
       reason: 'no_address',
+    });
+  });
+
+  // The trap stage 1 of `plans/myblu-ticket-api.md` springs: once an `api`
+  // ticket is not written as email (`sendsByEmail` false), a channel behind a
+  // switch falls past the email and Meta branches to the last line, which
+  // answers `widget_card` for a widget the app does not have. With no switch
+  // until the app can pull its survey, it is refused where WhatsApp is, with
+  // its switch on.
+  it('surveys nothing on the myBlu app until it can pull its survey, whatever its switch says', () => {
+    const app = input({ channel: 'api', byEmail: false });
+    expect(decideSurvey(app, ON)).toEqual({ kind: 'skip', reason: 'channel_unsupported' });
+    // A contact with an address changes nothing: the app's tickets are never
+    // surveyed by email (`api_email_fallback` is not built).
+    expect(decideSurvey({ ...app, lacksRecipient: false }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'channel_unsupported',
     });
   });
 
@@ -309,6 +327,18 @@ describe('channelSurveyed', () => {
     expect(channelSwitch('whatsapp')).toBeNull();
   });
 
+  // The decision and the sidebar ask the same function, so they give one
+  // answer: "not sent on this channel", never "switched off" for a switch an
+  // admin may have turned on.
+  it('gives the myBlu app no switch, with its stored value on or off', () => {
+    expect(channelSwitch('api')).toBeNull();
+    expect(channelSurveyed(ON, 'api')).toBe(false);
+    expect(surveyAvailability(ON, 'api')).toBe('unsupported');
+    expect(surveyAvailability({ ...ON, channels: { ...ON.channels, api: false } }, 'api')).toBe(
+      'unsupported',
+    );
+  });
+
   // Behind their platform's switch, so the survey is still queued and the
   // decision records `comment_thread`, rather than "not sent on this channel"
   // answered before anything is written.
@@ -322,6 +352,39 @@ describe('channelSurveyed', () => {
         'instagram_comment',
       ),
     ).toBe('channel_off');
+  });
+});
+
+describe('anyChannelSurveyed', () => {
+  const only = (...keys: (keyof CsatSettings['channels'])[]): CsatSettings => ({
+    ...ON,
+    channels: {
+      email: false,
+      webchat: false,
+      facebook: false,
+      instagram: false,
+      api: false,
+      ...Object.fromEntries(keys.map((key) => [key, true])),
+    },
+  });
+
+  it('answers yes when a switch puts some channel under a survey', () => {
+    expect(anyChannelSurveyed(ON)).toBe(true);
+    expect(anyChannelSurveyed(only('email'))).toBe(true);
+    expect(anyChannelSurveyed(only('instagram'))).toBe(true);
+  });
+
+  // The CSAT report's "nothing sent" sentence asks this. Counting the stored
+  // `survey_api` would tell an admin a survey goes out once a ticket is
+  // resolved, while the decision skips every one as `channel_unsupported`.
+  it('answers no with only the myBlu app’s switch on, as the decision does', () => {
+    const appOnly = only('api');
+    expect(anyChannelSurveyed(appOnly)).toBe(false);
+    expect(anyChannelSurveyed(only())).toBe(false);
+    expect(decideSurvey(input({ channel: 'api', byEmail: false }), appOnly)).toEqual({
+      kind: 'skip',
+      reason: 'channel_unsupported',
+    });
   });
 });
 

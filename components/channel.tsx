@@ -17,10 +17,11 @@ import type { ConversationChannel } from '@/lib/tickets/channel-policy';
  *
  * The colours are the platforms' hues at tint strength — recognisable without
  * a legend, while a list of them still reads as one interface rather than as a
- * row of logos — and neutral for our own channels (email, portal, API), which
- * have no platform to borrow from. Web chat is cyan rather than the brand blue
- * it used to share with every button: each hue in the console means one thing,
- * and blue already means "act here". Instagram is magenta for the same reason.
+ * row of logos — and neutral for our own channels (email, the portal, the
+ * myBlu app), which have no platform to borrow from. Web chat is cyan rather
+ * than the brand blue it used to share with every button: each hue in the
+ * console means one thing, and blue already means "act here". Instagram is
+ * magenta for the same reason.
  *
  * Each `className` is colour only, its border included, so one string dresses
  * both the badge here and the disc `channelMarkClass` draws on a conversation
@@ -210,6 +211,10 @@ const CHANNELS: Record<ConversationChannel, { label: string; className: string; 
       ),
     },
     api: {
+      // A handset: the myBlu app is ShipBlu's own, so neutral like the other
+      // channels that are ours, and a phone rather than the code brackets
+      // "API" was drawn with, because what an agent needs to know is that the
+      // customer wrote from their phone, in an app.
       label: CHANNEL_LABELS.api,
       className: 'border-transparent bg-(--color-channel-api-bg) text-(--color-channel-api-fg)',
       mark: (
@@ -223,7 +228,8 @@ const CHANNELS: Record<ConversationChannel, { label: string; className: string; 
           aria-hidden
           className="size-3 shrink-0"
         >
-          <path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4" />
+          <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+          <path d="M10.5 18h3" />
         </svg>
       ),
     },
