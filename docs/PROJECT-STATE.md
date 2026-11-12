@@ -1685,7 +1685,8 @@ the rest of the cutover still needs, and some of it is now partly done:_
     18 version rows stay there by design, and a Restore points each one here.
     Freshdesk's old URLs 301 through the proxy. On the deployed build on
     2026-11-11, all six shapes answered 301. A folder URL went to `/ar` when
-    its id is a stored Freshdesk folder (`kb_folders.external_id`). Of the 58
+    its id is a stored Freshdesk folder (`kb_folders.external_id`), an
+    agents-only one included until #515. Of the 58
     imported article ids, 54 went to an article that answers 200. The 4 in
     agents-only folders answer 404 since #504; they are empty placeholders.
     The article editor uploads a picture into `kb_images`, though production
@@ -1705,10 +1706,17 @@ the rest of the cutover still needs, and some of it is now partly done:_
   `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
   paths that are not an article or a folder become the help centre's 404
   rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
-  every host and with the variable set or not, each with a 302. The home, the
-  index and a category go to `/<locale>`, the ticket pages and the sign-in to
-  the home's contact band, and Freshdesk's search to ours. It reaches
-  production with the release after it merges.
+  every host and with the variable set or not, each with a 302. The home and
+  the index go to `/<locale>`, the ticket pages and the sign-in to the home's
+  contact band, and Freshdesk's search to ours. A category goes to its own
+  page, `/<locale>/c/<slug>`, through the legacy route (#515), which finds it
+  by the Freshdesk id the importer kept: a 301, or a 302 while another
+  translation stands in for a closed one. The internal employee guide
+  (`154000297102`), whose folders are all agents-only, answers 404, as an
+  unknown id does, since its own page is a 404 for every reader; so do those
+  four folders, which the legacy route had sent home with a 301, while a
+  folder somebody can open still goes home. Each reaches production with the
+  release after it merges.
 
   **Open outside the repository, as of 2026-11-12:**
 
