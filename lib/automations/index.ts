@@ -18,6 +18,7 @@ import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { isCommentTicket, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
+import { hiddenFromHolder } from '@/lib/tickets/owner-only';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
@@ -374,7 +375,20 @@ async function applyAction(
       // after the assignment's own line, written there too, so the timeline
       // reads it before the `routed` line naming it (`recordIn`).
       const agentId = action.agentId;
+      // A coexistence number's ticket is hidden from everybody but its owner
+      // and the agents who see every ticket (`lib/tickets/owner-only.ts`), and
+      // a rule naming anybody else would leave it held by somebody who cannot
+      // open it. Left as it is, and said, as a rule naming a retired category
+      // is: the rule is not doing what its author asked for.
       const ended = await db.transaction(async (tx) => {
+        // Asked in here, under the channel's lock, so a handover cannot
+        // collect the number's tickets between the answer and the write.
+        if (
+          agentId &&
+          (await hiddenFromHolder(tx, ticket.conversation.channelId, agentId, { lock: true }))
+        ) {
+          return null;
+        }
         await tx
           .update(conversations)
           .set({ assigneeAgentId: agentId, assignedAt: agentId ? new Date() : null })
@@ -384,6 +398,12 @@ async function applyAction(
           ? endHold(tx, conversationId, 'rule', { label: `automation:${ruleName}` })
           : false;
       });
+      if (ended === null) {
+        log.warn(
+          `"${ruleName}" assigns a coexistence number's ticket to an agent it is hidden from`,
+        );
+        return;
+      }
       if (ended) pass.endedHold = true;
       return;
     }

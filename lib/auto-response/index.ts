@@ -133,8 +133,11 @@ async function send(
   if (isWithinBusinessHours(hours, at)) return;
 
   // A person has answered in this closed stretch, so "we are closed" would
-  // contradict them. Reachable only by the held reply: every other caller has
-  // just stored the customer's message. Ending a hold by replying out of hours
+  // contradict them. Reached by the held reply, and by a reply typed outside
+  // the console — a coexistence number's phone, Meta Business Suite — whose
+  // echo was processed before the customer's message it answers, or after an
+  // earlier one this evening; every other caller has just stored the
+  // customer's message, with no reply after it. Ending a hold by replying out of hours
   // claims nothing, so the second half keeps a customer who writes again in
   // the same evening from being told so after the agent's reply either.
   if (answeredInThisStretch(hours, ticket, at)) return;

@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { enqueue, PermanentJobError, type ClaimedJob } from '@/lib/queue';
 import { cairo } from '@/lib/testing/time';
 import { JOB_PAYLOADS, parseJobPayload } from './payloads';
@@ -465,6 +466,78 @@ async function enqueueIsTypedFromTheSchema(messageId: string) {
   await enqueue('backfill_shipment_links', { since: new Date() });
 }
 void enqueueIsTypedFromTheSchema;
+
+describe('send_notification_email', () => {
+  const mail = (to: string) => ({
+    to,
+    subject: 'أكّد بريدك الإلكتروني',
+    textBody: 'https://help.example.test/ar/account/verify/token',
+    htmlBody: '<p>https://help.example.test/ar/account/verify/token</p>',
+  });
+  const parses = (to: string) => {
+    try {
+      parseJobPayload(job(mail(to)), 'send_notification_email');
+      return true;
+    } catch (error) {
+      if (error instanceof PermanentJobError) return false;
+      throw error;
+    }
+  };
+
+  it('refuses the address whose verification link died on 2026-11-12, as the forms now do', () => {
+    // Two dots in a row before the @: the help centre's registration accepted
+    // it, stored the account and queued the link, and this schema refused it
+    // on the job's first attempt (§6.117).
+    expect(() =>
+      parseJobPayload(job(mail('amira..hassan@gmail.com')), 'send_notification_email'),
+    ).toThrow(/^send_notification_email: invalid payload — .*"to"/s);
+    expect(looksLikeEmail('amira..hassan@gmail.com')).toBe(false);
+  });
+
+  it('takes the characters the provider sends to that `z.email()` refused', () => {
+    // A business address can carry one; the job used to send it to `dead`.
+    expect(
+      parseJobPayload(job(mail('sales&billing@merchant.example')), 'send_notification_email').to,
+    ).toBe('sales&billing@merchant.example');
+  });
+
+  // Whatever a form accepts, normalises and queues, this job accepts, and
+  // whatever it refuses the form refused first. Each address carries the answer
+  // both must give, so a change to the pattern itself fails here, not only a
+  // schema that stopped asking it.
+  it.each([
+    ['amira.hassan@gmail.com', true],
+    [' Amira.Hassan@Gmail.com ', true],
+    ['amira.hassan@gmail.com\u200F', true],
+    ['amira+orders@shipblu.com', true],
+    ["o'brien@example.co.uk", true],
+    ["amira'@gmail.com", true],
+    ['amira!hassan@gmail.com', true],
+    ['cairo_hub-2@mail.shipblu.com', true],
+    ['amira@gmail.co', true],
+    ['amira@xn--mgbh0fb.xn--wgbh1c', true],
+    ['amira@جيميل.com', true],
+    ['amira..hassan@gmail.com', false],
+    ['.amira@gmail.com', false],
+    ['amira.@gmail.com', false],
+    ['amira@gmail.c', false],
+    ['amira@gmail.c0m', false],
+    ['amira@gmail..com', false],
+    ['amira@gmail.com.', false],
+    ['amira@mail_box.com', false],
+    ['amira@-gmail.com', false],
+    ['amira@gmail-.com', false],
+    ['amira@[192.0.2.1]', false],
+    ['amira?@gmail.com', false],
+    ['أميرة@gmail.com', false],
+    ['amira@localhost', false],
+    ['amira@', false],
+    ['', false],
+  ] as const)('a form and the job both answer %j with %s', (typed, expected) => {
+    expect(looksLikeEmail(typed)).toBe(expected);
+    expect(parses(normaliseEmail(typed))).toBe(expected);
+  });
+});
 
 describe('complete_coexistence_onboarding', () => {
   const parse = (payload: Record<string, unknown>) =>

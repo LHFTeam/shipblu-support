@@ -358,3 +358,177 @@ describe('the owner of a WhatsApp number', () => {
     expect(await listed(bob)).toEqual([ids.waiting, ids.withBob, ids.otherWithBob].sort());
   });
 });
+
+/**
+ * A coexistence number is one person's phone, so its tickets are its owner's
+ * alone: asked of every path the file asks, and of every way in that a plain
+ * number's ticket has — a group, an assignee, an accountable agent.
+ */
+describe('a coexistence number', () => {
+  let owner: SessionAgent;
+  let bob: SessionAgent;
+  let phone: string;
+  let ids: Record<'waiting' | 'withBob' | 'history' | 'answeredFor', string>;
+  let numberOf: Record<keyof typeof ids, number>;
+
+  async function coexistenceNumber(name: string, ownerAgentId: string | null): Promise<string> {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name,
+        config: {
+          phoneNumberId: name,
+          coexistence: { onboardedAt: '2026-10-01T09:00:00.000Z', wabaId: '1' },
+        },
+        ownerAgentId,
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function onPhone(values: Partial<typeof conversations.$inferInsert> & { status?: string }) {
+    const { status = 'Open', ...rest } = values;
+    const [statusRow] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, status));
+    const [contact] = await db.insert(contacts).values({ name: 'Merchant' }).returning();
+    const [row] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        channelId: phone,
+        statusId: statusRow!.id,
+        requesterContactId: contact!.id,
+        // The number's default group, which `member` belongs to.
+        groupId: customerCare,
+        ...rest,
+      })
+      .returning({ id: conversations.id, number: conversations.number });
+    return row!;
+  }
+
+  beforeEach(async () => {
+    owner = await signedIn('agent', 'nayera@shipblu.test');
+    bob = await signedIn('agent', 'bob@shipblu.test');
+    await db.insert(groupMembers).values({ groupId: customerCare, agentId: bob.id });
+    phone = await coexistenceNumber('Nayera Mohamed', owner.id);
+
+    const rows = {
+      waiting: await onPhone({ accountableAgentId: owner.id }),
+      // Given to a colleague before the rule, or by a writer that forgot it.
+      withBob: await onPhone({ accountableAgentId: owner.id, assigneeAgentId: bob.id }),
+      // The phone's copied chats, resolved in the number's default group.
+      history: await onPhone({ sourceSystem: 'import', status: 'Resolved' }),
+      // Resolved under a previous owner, Bob, and still accountable to him.
+      answeredFor: await onPhone({ accountableAgentId: bob.id, status: 'Resolved' }),
+    };
+    ids = Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, row.id])) as typeof ids;
+    numberOf = Object.fromEntries(
+      Object.entries(rows).map(([key, row]) => [key, row.number]),
+    ) as typeof numberOf;
+  });
+
+  const all = () => Object.values(ids).sort();
+
+  /** The number's tickets among what an agent lists: Bob's group has others. */
+  async function ofPhone(agent: SessionAgent, params: Record<string, string> = {}) {
+    const mine = new Set(Object.values(ids));
+    return (await listed(agent, { status: 'all', ...params })).filter((id) => mine.has(id));
+  }
+
+  it('shows its owner every ticket on it', async () => {
+    expect(await ofPhone(owner)).toEqual(all());
+    expect(await inboxCounts(owner)).toEqual({ mine: 0, unassigned: 1, groups: 0, all: 2 });
+    for (const key of Object.keys(ids) as (keyof typeof ids)[]) {
+      expect(await getConversation(owner, numberOf[key])).not.toBeNull();
+      expect(await seesTicket(owner, ids[key])).toBe(true);
+    }
+  });
+
+  // Each of the three ways in a plain number's ticket has, and none of them
+  // opens: Bob is in the group all four sit in, holds one and is accountable
+  // for another.
+  it('shows a colleague none of them, by any path', async () => {
+    expect(await ofPhone(bob)).toEqual([]);
+    expect(await ofPhone(bob, { view: 'groups' })).toEqual([]);
+    expect(await ofPhone(bob, { view: 'mine' })).toEqual([]);
+    expect(await ofPhone(bob, { group: customerCare })).toEqual([]);
+    // The two tickets the file's own fixtures put in his group, and no more.
+    expect(await inboxCounts(bob)).toEqual({ mine: 0, unassigned: 1, groups: 2, all: 2 });
+    for (const key of Object.keys(ids) as (keyof typeof ids)[]) {
+      expect(await getConversation(bob, numberOf[key])).toBeNull();
+      expect(await loadConversation(bob, ids[key])).toBeNull();
+      expect(await canSubscribeToConversation(bob, ids[key])).toBe(false);
+      expect(await seesTicket(bob, ids[key])).toBe(false);
+    }
+  });
+
+  // `null <> all(…)` is null: negated carelessly, the rule that hides one
+  // number's tickets hid every ticket with no number at all.
+  it('hides nothing that is not on it', async () => {
+    expect(await listed(member)).toEqual(
+      [tickets.careQueue, tickets.mineInMerchant, tickets.othersInCare].sort(),
+    );
+    expect(await inboxCounts(member)).toEqual({ mine: 1, unassigned: 1, groups: 2, all: 3 });
+  });
+
+  it('keeps them off a colleague’s shipment page', async () => {
+    const [shipment] = await db
+      .insert(shipments)
+      .values({ trackingNumber: TRACKING })
+      .returning({ id: shipments.id });
+    await db.insert(conversationShipments).values(
+      [ids.waiting, ids.withBob].map((conversationId) => ({
+        conversationId,
+        shipmentId: shipment!.id,
+      })),
+    );
+
+    const forBob = await conversationsForTrackingNumber(TRACKING, scopeForAgent(bob));
+    expect(forBob).toEqual([]);
+    const forOwner = await conversationsForTrackingNumber(TRACKING, scopeForAgent(owner));
+    expect(forOwner.map((row) => row.id).sort()).toEqual([ids.waiting, ids.withBob].sort());
+  });
+
+  it('shows them to an agent who sees every ticket', async () => {
+    const listedForAdmin = await listed(admin, { status: 'all' });
+    for (const id of all()) expect(listedForAdmin).toContain(id);
+    expect(await getConversation(admin, numberOf.history)).not.toBeNull();
+  });
+
+  // The chats go with the phone: what was the previous owner's is no longer
+  // theirs to read, resolved tickets still accountable to them included.
+  it('moves with the number, whole', async () => {
+    await handOverNumber({
+      channelId: phone,
+      toAgentId: bob.id,
+      actor: { id: admin.id, label: 'Admin' },
+    });
+    expect(await ofPhone(bob)).toEqual(all());
+    expect(await ofPhone(owner)).toEqual([]);
+  });
+
+  it('is nobody’s but theirs with no owner', async () => {
+    await handOverNumber({
+      channelId: phone,
+      toAgentId: null,
+      actor: { id: admin.id, label: 'Admin' },
+    });
+    expect(await ofPhone(owner)).toEqual([]);
+    expect(await ofPhone(bob)).toEqual([]);
+    const listedForAdmin = await listed(admin, { status: 'all' });
+    for (const id of all()) expect(listedForAdmin).toContain(id);
+  });
+
+  // Any object under `coexistence` counts: a row written by hand is hidden
+  // rather than shown (`isCoexistenceNumber`).
+  it('counts a number whose record is incomplete', async () => {
+    await db
+      .update(channels)
+      .set({ config: { phoneNumberId: 'x', coexistence: {} } })
+      .where(eq(channels.id, phone));
+    expect(await ofPhone(bob)).toEqual([]);
+  });
+});

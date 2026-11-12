@@ -13,6 +13,7 @@ import type {
   MetaWebhookPayload,
   NormalisedAppRole,
   NormalisedComment,
+  NormalisedEcho,
   NormalisedFeedback,
   NormalisedInteraction,
   NormalisedMetaWebhook,
@@ -53,7 +54,8 @@ export function parseMetaWebhook(
     interactions: [],
     feedbacks: [],
     appRoles: [],
-    echoes: 0,
+    echoes: [],
+    unreadableEchoes: 0,
     emptyCards: 0,
   };
 
@@ -198,11 +200,17 @@ function readMessagingEvent(
     return;
   }
 
-  // Meta echoes back everything the page sends, including our own agent
-  // replies. Ingesting an echo would file our reply as if the customer had
-  // written it, and then reply to ourselves forever.
+  // Meta echoes back everything the Page or the account sends: our own agent
+  // replies, and what the team types in Meta Business Suite. Read as a message,
+  // an echo would file our reply as if the customer had written it, and then
+  // reply to ourselves forever. So it is never one: it is normalised apart,
+  // with the app that sent it, and `echoDisposition` (`lib/meta/echo.ts`) files
+  // only the team's reply typed somewhere else: Business Suite's on any thread,
+  // a third app's only on a thread this app holds.
   if (message.is_echo) {
-    result.echoes += 1;
+    const echo = readEcho(event, message, platform, connection, accountId, standby);
+    if (echo) result.echoes.push(echo);
+    else result.unreadableEchoes += 1;
     return;
   }
 
@@ -262,10 +270,71 @@ function readMessagingEvent(
     sentAt: fromEpoch(event.timestamp),
     text: displayText(message, attachments),
     attachments: attachments.map(normaliseAttachment),
-    replyToMid: message.reply_to?.mid ?? null,
+    replyToMid: nonEmptyString(message.reply_to?.mid),
     standby,
     raw: event as unknown as Record<string, unknown>,
   });
+}
+
+/**
+ * One echo, whoever sent it — or null for one with no id, no customer to file
+ * it against, or nothing in it to show, none of which could be a reply on a
+ * ticket. Counted as unreadable rather than with the empty cards, which watch
+ * for Instagram's phone-number card (§6.79): a Meta change that left every
+ * echo unreadable then still shows on the log line.
+ *
+ * Read with the rules a customer's message is read with, so the two sides of a
+ * thread draw alike: the same stand-in for a file sent without words, and the
+ * same empty `template` card left out. A message the team unsent
+ * (`is_deleted`) has nothing left to file.
+ */
+function readEcho(
+  event: MetaMessagingEvent,
+  message: NonNullable<MetaMessagingEvent['message']>,
+  platform: MetaPlatform,
+  connection: MetaConnection | null,
+  accountId: string | null,
+  standby: boolean,
+): NormalisedEcho | null {
+  if (message.is_deleted) return null;
+
+  const mid = nonEmptyString(message.mid);
+  const to = nonEmptyString(event.recipient?.id);
+  if (!mid || !to) return null;
+
+  const received = Array.isArray(message.attachments) ? message.attachments : [];
+  const attachments = received.filter((attachment) => !isEmptyCard(attachment));
+  const text = displayText(message, attachments);
+  if (!text) return null;
+
+  return {
+    platform,
+    connection,
+    mid,
+    appId: echoAppId(message.app_id),
+    to,
+    accountId: nonEmptyString(event.sender?.id) ?? accountId,
+    standby,
+    sentAt: fromEpoch(event.timestamp),
+    text,
+    attachments: attachments.map(normaliseAttachment),
+    // A string or nothing, for `text`'s reason: anything else would fail the
+    // insert into a text column on every retry of the batch.
+    replyToMid: nonEmptyString(message.reply_to?.mid),
+    raw: event as unknown as Record<string, unknown>,
+  };
+}
+
+/**
+ * An echo's `app_id` as a string. Meta sends it as a JSON number — every one of
+ * the 257 Messenger echoes stored to 2026-11-12 — and a string is read as the
+ * same id, since the two app ids that matter are far inside a double's exact
+ * integers. Anything else names no app.
+ */
+function echoAppId(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value === 'string' && /^\d+$/.test(value)) return value;
+  return null;
 }
 
 /**
@@ -404,7 +473,10 @@ function displayText(
   message: NonNullable<MetaMessagingEvent['message']>,
   attachments: MetaRawAttachment[],
 ): string {
-  const text = message.text?.trim();
+  // A string or nothing: `trim` on anything else would throw out of the
+  // parser and lose the batch (the header), and Meta signing a payload says
+  // who sent it, not that every field has the type its reference gives.
+  const text = typeof message.text === 'string' ? message.text.trim() : '';
   if (text) return text;
 
   if (message.is_unsupported) return '[unsupported message type]';

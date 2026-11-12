@@ -16,18 +16,25 @@ open, an iframe pointing back at the host it was loaded from — so the chat run
 on **our** origin, where the host page's CSS cannot reach it and where the
 visitor's token lives in storage the host page cannot read.
 
-`<helpdesk-host>` is whichever hostname serves this app: today
-`shipblu-support.onrender.com`, and `support.shipblu.com` once that domain's DNS
-points here. Load it from the same host in every environment — the script frames
-the origin it was served from, so a staging dashboard pointing at production
-opens production's chat.
+`<helpdesk-host>` is whichever hostname serves this app:
+`shipblu-support.onrender.com`, or `support.shipblu.com`, whose DNS has pointed
+here since 2026-11-11. Pick one and keep it. The visitor's token lives in the
+frame's own storage, which belongs to the host the script was loaded from, so
+moving to the other host later starts every visitor afresh: their stored
+conversation stays behind on the first. `support.shipblu.com` is the name to
+pick, since it is the one meant to last. Load it from the same host in every
+environment — the script frames the origin it was served from, so a staging
+dashboard pointing at production opens production's chat.
 
 **A third-party origin must be allowlisted before the frame will load.** The
 `/widget` route answers with `frame-ancestors 'self' …WIDGET_ALLOWED_ORIGINS`,
 so `https://app.shipblu.com` has to be in that variable or the merchant sees a
-launcher that opens an empty box. Measured 2026-08-31, production answers
-`frame-ancestors 'self';` — the variable is unset, and setting it is the first
-step of any rollout.
+launcher that opens an empty box. Measured 2026-08-31, production answered
+`frame-ancestors 'self';`: the variable was unset. Measured 2026-11-12, on both
+hosts, it answers `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`, so those origins can
+frame the widget today, and any other has to be added first.
 
 ## What it puts on your page
 
@@ -181,17 +188,37 @@ or `identify(user, signature)` — and the widget links the person to their
 shipping account, so an agent opens the ticket with the account's shipments
 already in front of them.
 
-Both halves are the values _after_ normalisation: the account id as digits and
-letters only, the email lower-cased and trimmed. Empty fields are still their
-side of the `|`. The signature covers the identifying half only, deliberately:
+Both halves are the values _after_ normalisation, in this order. The account id
+is trimmed and cut to 200 characters, then loses every character that is not
+an ASCII letter, an ASCII digit, `_` or `-`, then is cut to 64; its case is
+kept and so are its hyphens, so `SB-4471` is signed as `SB-4471`, not `SB4471`
+and not `sb-4471`. The email is trimmed and cut to 200 characters, then
+lower-cased, and a value that is not an address counts as empty.
+Empty fields are still their side of the `|`. The signature covers the identifying half only, deliberately:
 name, phone and `meta` are decoration, and covering them would mean a merchant
 renaming themselves in the dashboard silently stops being identified at all.
+
+**A signature proves only an account id or an email.** An identity with neither
+— a phone alone, say — signs the constant `"|"`, and one HMAC of that would be a
+valid signature for every phone number there is. So such an identity is always
+_unverified_, signed or not: its name and phone still reach the agent, marked as
+the dashboard's word, and no signature over it is refused with a 401 either,
+right or wrong, so an integration that signs every user keeps working for the
+ones without an email. To have a user verified, send their account id or email.
+One exception keeps a broken integration visible: an email or account id you
+sent that the widget could not read — an address without a domain, an account id
+of punctuation alone — is dropped from the identity, but your backend signed it,
+so a signature that does not verify is still a 401.
+A phone-keyed integration that needs the phone itself vouched for gets a second
+accepted claim form, added beside this one; the `<accountId>|<email>` form does
+not change.
 
 The secret is `WIDGET_IDENTITY_SECRET`, per environment and never shared with
 staging — a signature minted against one deployment would otherwise be
 replayable at the other. While it is unset, signatures are ignored and every
 identity is unverified; once it is set, a signature that does not verify is a
-401 rather than a quiet downgrade.
+401 rather than a quiet downgrade — except over an identity naming neither an
+account id nor an email, which is unverified whatever its signature (above).
 
 ## What the visitor sees before they type
 
@@ -248,8 +275,9 @@ worse of the two.
 The requester's name, email and phone on the ticket, the shipping account in the
 ticket's Shipping accounts panel when the account id is an SBID, and a line in
 the activity trail saying who the dashboard said this was — marked _the
-dashboard's word, not verified_ when it was not signed, so nobody reads a
-claimed name back to a caller as though we had checked it.
+dashboard's word, not verified_ when it was not signed, or named neither an
+account id nor an email, so nobody reads a claimed name back to a caller as
+though we had checked it.
 
 ## Moving off Freshchat
 

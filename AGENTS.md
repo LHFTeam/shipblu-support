@@ -530,10 +530,12 @@ a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
-duplicate — but note that **a key is spent for good, not until its job
-finishes**: `jobs_dedupe_idx` is a plain unique index over the whole table, so
-the conflict target still matches a job that completed months ago, and a job that
-reached `dead` is never cleaned up at all. Key on the subject only where the work
+duplicate — but note that **a key stays spent after its job finishes**:
+`jobs_dedupe_idx` is a plain unique index over the whole table, so the conflict
+target still matches a completed job until the nightly cleanup deletes it, seven
+days on (`completedJobRetentionFilter` in `worker/handlers/cleanup.ts`), and a
+job that reached `dead` is never cleaned up at all, so its key is spent for
+good. Key on the subject only where the work
 is genuinely once-ever for it (one send, one media download). Anything that might
 legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
@@ -674,8 +676,11 @@ rules follow, each of which has already cost a customer channel:
   a thread whose customer last wrote before it is the new default's, and
   refuses. The Page's own switch supersedes nothing: it named this app
   `default_app` on 2026-11-05 too, and every Messenger message in the day after
-  it still arrived in `standby`, since Freshworks holds that inbox as primary
-  receiver (§6.111). Every reader of a stored message takes both facts from
+  it still arrived in `standby`, while Freshworks held that inbox as primary
+  receiver (§6.111). Since 2026-11-11 Meta hands each new Messenger thread to
+  this app, and whether Freshworks is still primary receiver cannot be read
+  from the deliveries (`docs/PROJECT-STATE.md` §5.1), so a thread opened
+  before then is still the case this rule is for. Every reader of a stored message takes both facts from
   `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the standing
   as a required argument, so the console and `send_meta` cannot weigh different
   ones. The one reader that takes neither is the survey's thanks, which judges a
@@ -1035,6 +1040,34 @@ routing. Nor does a coexistence number route by category, whatever its row
 says: moving its tickets between groups changes nothing about who types the
 replies (`routingModeOf`, **Routing by category**).
 
+**A Messenger reply typed in Meta Business Suite is filed from its echo, the
+same way.** Meta echoes everything the Page sends, and `echoDisposition`
+(`lib/meta/echo.ts`) files an echo only when its `app_id` is named and is not
+`META_APP_ID`. Business Suite's (the Page Inbox app) is filed whichever app
+held the thread. Another app's is filed only from `messaging`, on a thread this
+app held, because in `standby` it is the holder's own send, automations
+included. `ingestMetaEcho` then stores it as the team's reply, outbound and
+with no author, on the customer's live direct-message ticket only. It is
+labelled by `teamEchoLabel` and carries a "Sent from Business Suite" chip
+(`teamEchoChip`, the `elsewhere` badge tone), so it reads as the team's and as
+not typed here. It moves `last_agent_message_at` forward, then `onAgentReply`
+runs, and on a held ticket it ends the hold as an agent's reply does. Our own
+echo is told apart by its app id, never by finding its mid: `send_meta` writes
+the mid after Graph answers, and the echo can race that write. Nor is an
+Instagram echo filed, which names no
+app and includes an automated welcome sent seconds after the customer; with
+`META_APP_ID` unset nothing is filed. Meta sends each Messenger event in a
+delivery of its own, so a reply can be processed before the customer's message
+it answers: an echo that finds no ticket fails its delivery while one of the
+customer's is still unprocessed (`metaDeliveryPendingFrom`), never on the job's
+last run, and one older than every customer message on the ticket is not filed
+there. Nor is one sent within 10 s of the customer's message: no person has
+answered that fast, and Business Suite's automations echo under the same app
+id. Anything that asks whether a person on
+the team answered treats a team echo as one (`teamEchoLabel`; the canned
+suggestion's `authorOf`), never as `automatic_message`
+(`docs/PROJECT-STATE.md` §6.118).
+
 **A Business-app number connected in Meta's own interface is adopted, not
 signed in.** WhatsApp Manager and Business Suite can put a phone's number on
 Cloud API without Meta's window, so no code is exchanged and nothing is stored.
@@ -1120,7 +1153,7 @@ previous owner for good. Six rules hold:
   supervisor's reassignment, an automation and a merge never write
   accountability. A handover or a reopen moves the assignee too, but only off
   the number's previous owner or nobody: a ticket somebody was deliberately
-  given stays with them.
+  given stays with them — on a plain number; a coexistence number's is below.
 - **The owner is outside the rota.** `assignConversation` hands an unassigned
   owned ticket straight back to its active owner — group, hours, presence,
   capacity and skills unasked, the cursor unmoved, though a group a caller
@@ -1134,7 +1167,8 @@ previous owner for good. Six rules hold:
   (`effectiveOwnerId`): new tickets and reopens treat it as a team number — the
   group's rota assigns, and a breach counts against whoever holds the ticket —
   the tickets the owner had stay theirs until a handover, and reactivating them
-  restores the number. `/admin/channels` warns.
+  restores the number. `/admin/channels` warns. A coexistence number is never
+  a team number: there nothing assigns the new tickets (below).
 - **Whose breach it is reads `accountableOrAssignee()`**
   (`lib/tickets/accountable.ts`) everywhere that says so — the rollup's agent
   slices as `accountableOrAssigneeAt` (as of each figure's own instant, from the
@@ -1148,11 +1182,71 @@ previous owner for good. Six rules hold:
   "accountable to me, or on a number I own" on both of its branches, so every
   reader of visibility inherits it; and the inbox asks `ownsANumber`, so an
   owner in no group is offered Unassigned and All open rather than Mine alone.
+  On a coexistence number the number's half is the only one asked (below).
 - **A handover's events carry no `actorAgentId`.** The agent rollup counts every
   event an agent acted in as a ticket they touched, and an admin handing over
   ninety tickets has worked none of them. The admin is named in `data.by` and in
   `channel_owner_changes`, the append-only record of who owned a number when,
   which outlives the channel, the agents and any purged ticket.
+
+**A coexistence number's tickets are its owner's alone**
+(`lib/tickets/owner-only.ts`). It is one person's phone, and its copied history
+is six months of that phone's chats, so a ticket on one is seen by the number's
+owner and by an agent who sees every ticket (`ticket.view.all`), and by nobody
+else: not the members of the group it sits in, not a colleague it was assigned
+to, not a previous owner it is still accountable to. With no owner, or a
+deactivated one, that leaves the agents who see every ticket. Reading is
+`heldByOrInGroupsOf`, which asks every half but the number's own only of a
+ticket `notOnCoexistenceNumber()` — spelled with `channel_id is null or`,
+because most tickets have no number and `null <> all(…)` is null, which hid
+every ticket off WhatsApp when it was negated the short way. Which number
+counts is one SQL fragment, `isCoexistenceNumber`: any object under
+`coexistence`, looser than `parseCoexistence` on a row written by hand, since
+the side to be wrong on is hiding. A rule about who may see a ticket is a rule
+about who may hold it — held by somebody it is hidden from, a ticket is in
+nobody's list, counts against their capacity and reads as taken to everybody
+who can see it — so every writer that hands tickets out asks the same module:
+
+- **The rota never picks for one.** `assignConversation` hands it back to an
+  active owner as it does any owned ticket, and otherwise answers `owner_only`,
+  unrecorded, since its candidates are a group's members. The owner is the
+  number's, read ahead of the ticket's accountable agent, since the two can
+  disagree: a ticket that arrived while the owner was deactivated answers to
+  nobody, and one adopted onto the row to somebody else. `takeForNumberOwner`
+  makes it the owner's under the channel's lock and then the ticket's, asking
+  again that nobody holds it and that it is still work.
+- **The console and a rule leave one only with somebody who sees it.** The
+  Assignee picker offers the owner and the agents who see every ticket
+  (`listAssignableAgents`), `updateTicket` refuses anybody else, and a rule's
+  `assign_agent` naming anybody else is skipped with a warning.
+- **A handover and a reopen move more than they do on a plain number.** Every
+  open or pending ticket held by somebody it is hidden from goes to the new
+  owner, a ticket somebody was deliberately given included; handed to nobody,
+  those tickets are unassigned, with an `unassigned` line naming `from`.
+  `alignAccountable` does the same for a ticket coming back out of resolved or
+  closed, whether or not the number changed hands meanwhile.
+  "Sees every ticket" is `can()` over each active agent's role and overrides
+  (`agentsWhoSeeEveryTicket`), never a role test, so one statement of what a
+  role holds decides it; a deactivated agent sees nothing, whatever their
+  role, to a handover and a reopen alike (`hiddenFromHolder`). The console's
+  copy says "agents who can see every ticket" for the same reason, never
+  "supervisors and admins".
+- **A writer that assigns reads the owner under the channel's lock, inside
+  its transaction and before it writes the ticket** (`ownerOnlyNumber` with
+  `lock`, `lockedOwnerId`): the order a handover takes them. Read ahead of the
+  transaction, an assignment to the owner a handover was replacing passed and
+  committed after the handover had collected the number's tickets.
+- **What a page says about such a ticket asks `hasCoexistenceRecord`**
+  (`lib/whatsapp/coexistence.ts`), the twin of `isCoexistenceNumber`, not
+  `parseCoexistence`: a record written by hand must not be hidden by one rule
+  and offered "Hand to" by another.
+
+What it does not reach: the contact directory, where a person known only from
+that phone is still found by name and number with an empty ticket list; a
+report's own lists (CSAT comments, the labelling and review queues), which
+only somebody given a report key without `ticket.view.all` reads; and the
+inbox's live tick, which carries no content. Each is written down in
+`plans/whatsapp-number-ownership.md`, and is a change of its own.
 
 Only a `whatsapp` row may have an owner — a plain number or a coexistence one,
 never the bot (`channels_owner_only_whatsapp` in `db/sql/003`): the bot and the
@@ -2367,7 +2461,8 @@ picture. `rehost_kb_images` copies
 Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
 rewrites versions in place rather than cutting one, so no Restore can bring
 Freshdesk's address back, and its way back is `revert=true` from
-`kb_images.source_url`. The editor uploads a new picture the same way
+`kb_images.source_url`, which works only while Freshdesk still serves those
+addresses, so never after the account is closed. The editor uploads a new picture the same way
 (`uploadArticlePicture`, PR 4): judged by its bytes, stored with no
 `source_url`, and named by its route.
 
@@ -2521,9 +2616,11 @@ keys=<key,...>`, which replaces only the entries named, and an entry removed
 from the library is reported rather than deleted. `canned-library.test.ts` is
 the style guide.
 Every body is sendable exactly as it stands, because nothing interpolates and an
-automation sends it unread, so it carries no placeholder. It carries no link,
-because `support.shipblu.com` still serves Freshdesk and agents add links from
-the knowledge panel. It is at most 1000 bytes of UTF-8, Instagram's limit for a
+automation sends it unread, so it carries no placeholder. It carries no link:
+agents add links from the knowledge panel. The rule was set while
+`support.shipblu.com` still served Freshdesk, which it stopped doing on
+2026-11-11. Allowing links now would be a change of its own, made together
+with the test that refuses them. It is at most 1000 bytes of UTF-8, Instagram's limit for a
 direct message, so roughly 550 Arabic characters. The Arabic addresses the customer as «حضرتك» and uses no
 imperative, because neither the customer's gender nor the agent's is known. Any
 policy a response states is quoted from the help centre, so a change to a
@@ -2847,6 +2944,13 @@ PR was thrown away.
   for a while before it ships.
 - Claim your seam out loud before starting anything longer than one commit.
 - Prefer rebasing onto `dev` over merging `dev` in.
+- A release — the pull request from `dev` into `main` — is merged with a merge
+  commit, never squashed or rebased: a squash puts one commit on `main` for
+  changes `dev` holds under their own SHAs, and the next merge of `main` back
+  into `dev` resolves every one of them as a conflict
+  (`docs/PROJECT-STATE.md` §6.116). Anything that lands on `main` without
+  passing through `dev`, such as a file uploaded through GitHub's editor, is
+  merged back into `dev` the same day.
 
 `.github/pull_request_template.md` is the PR body's shape: why, how it was
 verified, what deploys with it and what rolls it back. Fill it in rather than
@@ -2913,7 +3017,9 @@ deleting it, and drop the sections that genuinely do not apply.
 
 Back any claim about production with a query or a log line. "Phase N is
 complete" in the docs describes the codebase, never the product — the system
-still cannot take a real human support ticket. But do not read "not configured"
+could not take a real human support ticket until 2026-11-12, when the
+team began answering web chat, Messenger and email from the console (§1 of
+`docs/PROJECT-STATE.md` has the figures). But do not read "not configured"
 as "no data" either: the bot channel has been copying real traffic in since
 August, so there is an archive worth measuring against. `docs/PROJECT-STATE.md`
 §1 carries the current figures; that is the file that gets updated, not this one.

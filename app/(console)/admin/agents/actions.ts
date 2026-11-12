@@ -110,10 +110,11 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const name = text(formData, 'name');
   const role = String(formData.get('role') ?? 'agent');
 
-  // `looksLikeEmail`, not `includes('@')`: the send path validates with
-  // `z.email()`, which rejects `foo@` and `@b.com`. Accepting them here would
-  // commit the invite, tell the admin it was emailed, and leave the job to die
-  // in the worker where they will never see it.
+  // `looksLikeEmail`, not `includes('@')`: it is the app's one definition of
+  // an address, written from the provider's own rule (§6.117), so it refuses
+  // `foo@`, `@b.com` and `a..b@c.com` as Postmark would. Accepting them here
+  // would commit the invite, tell the admin it was emailed, and leave the job
+  // to die in the worker where they will never see it.
   if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
   // `required` on the input is a courtesy to whoever is typing, not a
   // constraint — the action is reachable without it. Checked here because

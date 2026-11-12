@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
-import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
+import { FRESHDESK_FOLDER, freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 
 /**
@@ -75,8 +76,30 @@ const PUBLIC_PREFIXES = [
   '/api/widget',
   '/widget',
   '/_next',
-  '/favicon.ico',
 ];
+
+/**
+ * The files a page's `<head>` names, at the root: Next serves each from a file
+ * in `app/`, and `app/icon.svg` is the `<link rel="icon">` on every page the
+ * root layout renders, the help centre's included. Most of what fetches one
+ * carries no session: a signed-out reader's browser drawing a tab, a crawler, a
+ * link preview. So they are served as themselves on every hostname, signed in or
+ * not. Under the cookie check `/icon.svg` answered 307 to /login on every host,
+ * so no signed-out reader saw the icon (measured 2026-11-12). On the help-centre
+ * host the catch-all would rewrite it to `/help/icon.svg`, where nothing answers.
+ *
+ * The suffixes are the ones Next's own matcher allows (`isMetadataRouteFile`):
+ * a numbered variant (`icon1.png`), the hash a file in a route group is served
+ * under (`/icon-1u176d.svg`), and no extension for an image drawn by code
+ * (`app/icon.tsx` is `/icon`). One that draws several, through
+ * `generateImageMetadata`, is served once per id beneath that (`/icon/small`).
+ * `proxy.test.ts` finds every such file in `app/` through Next's functions, so
+ * a file this pattern misses fails there.
+ * `robots.txt` and `sitemap.xml` are metadata files too, and they are the help
+ * centre's (`CRAWLER_FILES`).
+ */
+const HEAD_FILE =
+  /^\/(?:favicon\.ico|manifest\.(?:webmanifest|json)|(?:icon|apple-icon|opengraph-image|twitter-image)\d?(?:-\w{6})?(?:\.(?:ico|jpe?g|png|svg|gif)|\/[^/]+)?)$/;
 
 /**
  * Freshdesk article URLs, in every prefix variant an account can be configured
@@ -95,7 +118,16 @@ const LEGACY_ARTICLE = /\/solutions\/articles\/(\d+)/;
  * so joining them needs no escaping.
  */
 const LOCALE_PREFIX = new RegExp(`^/(${LOCALES.join('|')})(/|$)`);
-const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
+
+/**
+ * Freshdesk's folder page, `/support/solutions/folders/<id>`, in the same
+ * prefix variants as an article's, and a page of its list (`/<id>/page/2`),
+ * which reads as the folder. Its page here is `/<locale>/c/<category>/<folder>`,
+ * found by a lookup (`resolveLegacyPath`). The pattern is
+ * `lib/kb/legacy-path.ts`'s, the one `freshdeskFolderId` reads the id with,
+ * and that module says why it is anchored at neither end.
+ */
+const LEGACY_FOLDER = FRESHDESK_FOLDER;
 
 /**
  * Paths served as themselves on the help-centre hostname, rather than being
@@ -139,13 +171,20 @@ export default function proxy(request: NextRequest) {
   const kbHost = process.env.KB_PUBLIC_HOST?.toLowerCase();
 
   // --- Legacy Freshdesk links ---------------------------------------------
-  // Handled before anything else so they resolve on either hostname. The
-  // lookup itself needs the database, so this hands off to a route handler
-  // rather than doing it here.
-  const legacyArticle = LEGACY_ARTICLE.exec(pathname);
-  const legacyFolder = legacyArticle ? null : LEGACY_FOLDER.exec(pathname);
-
-  if (legacyArticle || legacyFolder) {
+  // An article, a folder or a category: each names a row, so finding where it
+  // went is a lookup. Handled before anything else so they resolve on either
+  // hostname, and ahead of the portal's rules below, which no longer read a
+  // category. A category's page is `/<locale>/c/<slug>`, and Render's log
+  // showed its URL followed on `support.shipblu.com` 8 times in the night
+  // after the move. It asks `freshdeskCategoryId`, the function the route reads
+  // the id with, so this cannot send a path the route reads no id from. The
+  // lookup needs the database, so this hands off to a route handler rather
+  // than doing it here.
+  if (
+    LEGACY_ARTICLE.test(pathname) ||
+    LEGACY_FOLDER.test(pathname) ||
+    freshdeskCategoryId(pathname) !== null
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/help/legacy';
     url.search = '';
@@ -157,6 +196,34 @@ export default function proxy(request: NextRequest) {
     const headers = new Headers(request.headers);
     headers.set(LEGACY_PATH_HEADER, pathname);
     return NextResponse.rewrite(url, { request: { headers } });
+  }
+
+  // Before the host split, because the help-centre hostname rewrites
+  // everything it does not pass through.
+  if (HEAD_FILE.test(pathname)) return NextResponse.next();
+
+  // --- Freshdesk's portal pages --------------------------------------------
+  // Its home, knowledge-base index, ticket form, sign-in and search, which
+  // customers' bookmarks and Freshdesk's own emails still name. Here, on every
+  // host, because what comes after answers them wrongly: the help-centre
+  // host's catch-all and the locale rewrite with the help centre's 404, and the
+  // console's check with its sign-in. Each has a counterpart that needs no
+  // lookup, so no route handler; `lib/kb/freshdesk-portal.ts` says which, and
+  // why every answer is a 302.
+  const portal = freshdeskPortalRedirect(pathname, request.nextUrl.searchParams);
+  if (portal) {
+    // An absolute URL on `nextUrl`'s origin, and not the relative `Location`
+    // `lib/http/redirect.ts` builds for a route handler. Next parses a proxy's
+    // `Location` with no base, so a relative one throws (`ERR_INVALID_URL`) and
+    // the request answers 500. One on the proxy's own origin it makes relative
+    // before it goes out, so `/ar#contact` is what the browser gets, as for the
+    // sign-in redirect below. That origin is not the host the request named:
+    // under `next start` it is the server's listen address, `localhost:<port>`,
+    // so it is safe only in a `Location` Next relativises. A plain URL rather
+    // than a clone of `nextUrl`, because a clone remembers that the path it was
+    // asked for ended in `/` and puts the slash back on whatever path it is
+    // given.
+    return NextResponse.redirect(new URL(portal, request.nextUrl.origin), 302);
   }
 
   // --- Help centre hostname ------------------------------------------------

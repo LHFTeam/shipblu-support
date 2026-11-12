@@ -1,6 +1,19 @@
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
-import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
+import {
+  normalizeMetadataPageToRoute,
+  normalizeMetadataRoute,
+} from 'next/dist/lib/metadata/get-metadata-route';
+import {
+  DEFAULT_METADATA_ROUTE_EXTENSIONS,
+  STATIC_METADATA_IMAGES,
+  isMetadataRouteFile,
+} from 'next/dist/lib/metadata/is-metadata-route';
+import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
+import { SESSION_COOKIE } from '@/lib/auth/cookie';
+import { freshdeskCategoryId, freshdeskFolderId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { GET as robotsTxt } from '@/app/help/robots.txt/route';
@@ -99,6 +112,119 @@ describe('every other hostname', () => {
 });
 
 /**
+ * The favicon, and every other file a page's `<head>` names from the root.
+ *
+ * `/icon.svg` answered 307 to /login on both hosts until 2026-11-12, so no
+ * signed-out reader of the help centre saw the icon. Once `KB_PUBLIC_HOST`
+ * names the domain, the help-centre host would have rewritten it to
+ * `/help/icon.svg`, which 404s. The routes are named by Next's own functions,
+ * from the files `app/` holds, so a new icon is checked the day it is added,
+ * under the name Next serves it at.
+ */
+describe("the files a page's head names", () => {
+  const DRAWN_BY_CODE = new RegExp(`\\.(?:${DEFAULT_METADATA_ROUTE_EXTENSIONS.join('|')})$`);
+  const IMAGE_NAMES: readonly string[] = Object.values(STATIC_METADATA_IMAGES).map(
+    (image) => image.filename,
+  );
+
+  /**
+   * Where Next serves an `app/` file. One drawn by code loses its extension,
+   * and an image drawn by code that exports `generateImageMetadata` is served
+   * once per id beneath that instead (`/icon/small`). Next tells the two apart
+   * by the file's exports, so an image drawn by code is checked both ways.
+   */
+  function routesOf(file: string): string[] {
+    const page = normalizeMetadataRoute(file.replace(DRAWN_BY_CODE, ''));
+    const name = file
+      .slice(file.lastIndexOf('/') + 1)
+      .replace(DRAWN_BY_CODE, '')
+      .replace(/\d$/, '');
+    const perId = DRAWN_BY_CODE.test(file) && IMAGE_NAMES.includes(name) ? [false, true] : [false];
+    return perId.map((dynamic) =>
+      normalizeAppPath(normalizeMetadataPageToRoute(page, dynamic)).replace(
+        '[__metadata_id__]',
+        'small',
+      ),
+    );
+  }
+
+  /**
+   * The files directly in `app/` and in its route groups, which add no segment.
+   * A file deeper down is served under its segment (`/inbox/icon.png`), which
+   * is that segment's to make public or not. `robots` and `sitemap` are the
+   * help centre's, and are rewritten to it on every host (above).
+   */
+  function headFiles(dir: string, segment = ''): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const file = `${segment}/${entry.name}`;
+      if (entry.isDirectory()) {
+        return /^\(.+\)$/.test(entry.name) ? headFiles(`${dir}/${entry.name}`, file) : [];
+      }
+      const isHeadFile =
+        isMetadataRouteFile(file, DEFAULT_METADATA_ROUTE_EXTENSIONS, true) &&
+        !/^(?:robots|sitemap)\./.test(entry.name);
+      return isHeadFile ? [file] : [];
+    });
+  }
+
+  const present = headFiles(fileURLToPath(new URL('./app', import.meta.url)));
+
+  // The shapes the pattern claims beyond what `app/` holds today: a numbered
+  // variant, a file in a route group, an image drawn by code, and the rest of
+  // Next's head files.
+  const possible = [
+    '/apple-icon.png',
+    '/icon1.png',
+    '/(auth)/icon.png',
+    '/icon.tsx',
+    '/(auth)/apple-icon.tsx',
+    '/opengraph-image.tsx',
+    '/twitter-image.jpg',
+    '/favicon.ico',
+    '/manifest.ts',
+    '/manifest.json',
+  ];
+
+  it('include the icon every page links, so the checks below cannot pass on nothing', () => {
+    expect(present).toContain('/icon.svg');
+    expect(routesOf('/icon.svg')).toEqual(['/icon.svg']);
+    expect(routesOf('/icon.tsx')).toEqual(['/icon', '/icon/small']);
+  });
+
+  it('are what Next calls a metadata file, each of them', () => {
+    for (const file of possible) {
+      expect(isMetadataRouteFile(file, DEFAULT_METADATA_ROUTE_EXTENSIONS, true), file).toBe(true);
+    }
+  });
+
+  it.each([
+    ['the Render host, before KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', undefined],
+    ['the domain, before KB_PUBLIC_HOST is set', KB_HOST, undefined],
+    ['the Render host, once KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', KB_HOST],
+    ['the help-centre host', KB_HOST, KB_HOST],
+  ])('are served as themselves to a signed-out visitor on %s', (_, host, kbHost) => {
+    setTestEnv({ KB_PUBLIC_HOST: kbHost });
+    for (const route of [...present, ...possible].flatMap(routesOf)) {
+      // Neither redirected to /login nor rewritten under /help.
+      expect(visit(`https://${host}${route}`).headers.get('x-middleware-next'), route).toBe('1');
+    }
+  });
+
+  it('are the files themselves, at the root, and nothing that starts like one', () => {
+    for (const path of [
+      '/inbox/icon.svg',
+      '/icon.svg/x',
+      '/icon/small/x',
+      '/icons',
+      '/iconography',
+      '/icon.svg.map',
+    ]) {
+      expect(visit(`https://shipblu-support.onrender.com${path}`).status, path).toBe(307);
+    }
+  });
+});
+
+/**
  * The `Sitemap:` line names `publicBaseUrl()`'s host, which is the Render host
  * until the domain moves and the help centre's after. Either way a crawler
  * reading it must reach the sitemap, so the address is followed through this
@@ -123,11 +249,11 @@ describe('the sitemap robots.txt advertises', () => {
 });
 
 /**
- * Freshdesk's article and folder URLs, on whichever host they arrive.
+ * Freshdesk's article, folder and category URLs, on whichever host they arrive.
  *
  * The rewrite used to put the path in `?path=`, which the route handler never
- * saw: Next hands it the request as it arrived, so every one of these answered
- * the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
+ * saw: Next hands it the request as it arrived, so every article and folder
+ * answered the route's own 404 (PROJECT-STATE §6.115). What reaches the handler is a
  * header set on the rewritten request, which Next sends as
  * `x-middleware-request-<name>` and lists in `x-middleware-override-headers`.
  */
@@ -139,6 +265,8 @@ describe('Freshdesk URLs', () => {
     '/solutions/articles/154000189336',
     '/en/support/solutions/articles/154000189336',
     '/support/solutions/folders/154000050001',
+    '/support/solutions/154000297679',
+    '/en/support/solutions/154000297680-shipblu-customers',
   ];
 
   const legacyPathSent = (response: Response) =>
@@ -178,5 +306,424 @@ describe('Freshdesk URLs', () => {
       'https://shipblu-support.onrender.com/support/solutions/articles/1?utm=x',
     ).headers.get('x-middleware-rewrite');
     expect(new URL(destination!).search).toBe('');
+  });
+});
+
+/**
+ * Freshdesk's category page, `/support/solutions/<id>`, which Render's log
+ * showed followed 8 times in the night after the move on `support.shipblu.com`.
+ * Its page here is found by id, so the proxy hands it to the legacy route, as
+ * it does an article, ahead of the portal's rules, which stood the home in for
+ * it before. Checked on both hosts with `KB_PUBLIC_HOST` set and unset, since
+ * the catch-all, the locale rewrite and the sign-in check would each answer it
+ * otherwise; and every path the proxy sends is checked to be one
+ * `freshdeskCategoryId` reads the id of, as the route will.
+ */
+describe("Freshdesk's category pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+
+  /** Each shape, and the id the legacy route reads out of it. */
+  const CATEGORIES: [string, string][] = [
+    ['/support/solutions/154000297679', '154000297679'],
+    ['/ar/support/solutions/154000297679', '154000297679'],
+    ['/en/support/solutions/154000297680', '154000297680'],
+    ['/en/support/solutions/154000297680-shipblu-customers', '154000297680'],
+    ['/en-US/support/solutions/154000297680', '154000297680'],
+    // One of our languages in any case, as the portal's rules read it.
+    ['/AR/support/solutions/154000297679', '154000297679'],
+    ['/En-us/support/solutions/154000297680', '154000297680'],
+  ];
+
+  const legacyPathSent = (response: Response) =>
+    response.headers.get(`x-middleware-request-${LEGACY_PATH_HEADER}`);
+
+  for (const [label, host, env] of [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    // Production's setup today: the domain moved, the variable not yet set.
+    ['the help-centre host, KB_PUBLIC_HOST unset', KB_HOST, {}],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const) {
+    it(`hands each one to the legacy route in a header, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, id] of CATEGORIES) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, to: rewrittenTo(response), sent: legacyPathSent(response) }).toEqual({
+          path,
+          to: '/help/legacy',
+          sent: path,
+        });
+        expect(response.headers.get('location')).toBeNull();
+        expect({ path, id: freshdeskCategoryId(path) }).toEqual({ path, id });
+      }
+    });
+  }
+
+  it('hands it over for a signed-in agent too, with the query left off', () => {
+    const response = visit(
+      `https://${RENDER_HOST}/support/solutions/154000297679?utm_source=whatsapp`,
+      `${SESSION_COOKIE}=x`,
+    );
+    expect(rewrittenTo(response)).toBe('/help/legacy');
+    expect(new URL(response.headers.get('x-middleware-rewrite')!).search).toBe('');
+    expect(legacyPathSent(response)).toBe('/support/solutions/154000297679');
+  });
+
+  // Next answers a trailing slash with its own 308 before the proxy runs, so
+  // none arrives in production. One that did still reads as the category; the
+  // rewrite's clone puts the slash back on its path, which is why it is apart.
+  it('reads a trailing slash alike', () => {
+    const path = '/support/solutions/154000297679/';
+    const response = visit(`https://${RENDER_HOST}${path}`);
+    expect(rewrittenTo(response)).toMatch(/^\/help\/legacy\/?$/);
+    expect(legacyPathSent(response)).toBe(path);
+    expect(freshdeskCategoryId(path)).toBe('154000297679');
+  });
+
+  // An article or a folder URL is this shape with one more segment, a
+  // help-centre path has no `/support/` segment, and a Freshdesk tail behind
+  // another prefix, or a page of a category's list, is kept out by the
+  // anchors. Each answers as it did before the category rule, and the id
+  // reader reads none of them.
+  it('reads a category only in the shape Freshdesk gives it', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    const NOT_CATEGORIES: [string, string | null][] = [
+      // Ours, with a `solutions` segment: rewritten under /help, or under it
+      // already and served as itself.
+      ['/ar/c/solutions/2024-rates', '/help/ar/c/solutions/2024-rates'],
+      ['/en/c/shipping/solutions/154000297679', '/help/en/c/shipping/solutions/154000297679'],
+      ['/help/ar/support/solutions/154000297679', null],
+      // Freshdesk's, but no category page: the leftovers' answer.
+      [
+        '/ar/support/solutions/articles/most-viewed',
+        '/help/ar/support/solutions/articles/most-viewed',
+      ],
+      [
+        '/ar/support/solutions/154000297679/page/2',
+        '/help/ar/support/solutions/154000297679/page/2',
+      ],
+      ['/en/support/solutions/shipblu-partners', '/help/en/support/solutions/shipblu-partners'],
+      ['/ar/en/support/solutions/154000297679', '/help/ar/en/support/solutions/154000297679'],
+      // Bare, and no category of the portal's: the console's sign-in.
+      ['/a/solutions/154000297679', null],
+      ['/solutions/154000297679', null],
+      ['/supporting/solutions/154000297679', null],
+      // Two letters that are not one of our languages: no ShipBlu portal's,
+      // and `/kb/…` is the console's.
+      ['/fr/support/solutions/154000297102', null],
+      ['/kb/support/solutions/154000297679', null],
+    ];
+    for (const [path, to] of NOT_CATEGORIES) {
+      expect({ path, id: freshdeskCategoryId(path) }).toEqual({ path, id: null });
+      expect({ path, to: rewrittenTo(visit(`https://${RENDER_HOST}${path}`)) }).toEqual({
+        path,
+        to,
+      });
+    }
+    // An article and a folder still go to the legacy route, as themselves.
+    for (const path of [
+      '/support/solutions/articles/154000297679',
+      '/support/solutions/folders/154000297679',
+    ]) {
+      expect(freshdeskCategoryId(path)).toBeNull();
+      expect(legacyPathSent(visit(`https://${RENDER_HOST}${path}`))).toBe(path);
+    }
+  });
+});
+
+/**
+ * Freshdesk's folder pages, `/support/solutions/folders/<id>`, and a page of a
+ * folder's list (`/page/2`): Render's log shows both followed on
+ * `support.shipblu.com` since the move, under `/ar`, `/en` and no language,
+ * crawlers and browsers among them. Each folder's page here is found by id, so
+ * the proxy hands it to the legacy route as it always has. Checked on both
+ * hosts with `KB_PUBLIC_HOST` set and unset, and every path it sends is one
+ * `freshdeskFolderId` reads the id of, as the route will: one pattern
+ * (`FRESHDESK_FOLDER`).
+ */
+describe("Freshdesk's folder pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+
+  /** Each shape, and the id the legacy route reads out of it. */
+  const FOLDERS: [string, string][] = [
+    ['/support/solutions/folders/154000746959', '154000746959'],
+    ['/ar/support/solutions/folders/154000746964', '154000746964'],
+    ['/en/support/solutions/folders/154000746963', '154000746963'],
+    ['/en/support/solutions/folders/154000746959/page/2', '154000746959'],
+    ['/en/support/solutions/folders/154000746959/page/1', '154000746959'],
+    ['/ar/support/solutions/folders/154000746959/page/2', '154000746959'],
+    ['/solutions/folders/154000746962', '154000746962'],
+    ['/a/solutions/folders/154000746962', '154000746962'],
+    ['/support/solutions/folders/154000745060', '154000745060'],
+  ];
+
+  const legacyPathSent = (response: Response) =>
+    response.headers.get(`x-middleware-request-${LEGACY_PATH_HEADER}`);
+
+  for (const [label, host, env] of [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const) {
+    it(`hands each one to the legacy route in a header, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, id] of FOLDERS) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, to: rewrittenTo(response), sent: legacyPathSent(response) }).toEqual({
+          path,
+          to: '/help/legacy',
+          sent: path,
+        });
+        expect(response.headers.get('location')).toBeNull();
+        expect({ path, id: freshdeskFolderId(path) }).toEqual({ path, id });
+      }
+    });
+  }
+
+  // The log's page 2 carries Freshdesk's `?url_locale=`, which the route never
+  // sees: the language it reads is the path's own.
+  it('leaves Freshdesk’s url_locale off, with the rest of the query', () => {
+    const response = visit(
+      `https://${RENDER_HOST}/en/support/solutions/folders/154000746959/page/2?url_locale=en`,
+    );
+    expect(rewrittenTo(response)).toBe('/help/legacy');
+    expect(new URL(response.headers.get('x-middleware-rewrite')!).search).toBe('');
+    expect(legacyPathSent(response)).toBe('/en/support/solutions/folders/154000746959/page/2');
+  });
+
+  it('reads no folder out of an article, a category or a folder with no id', () => {
+    for (const path of [
+      '/support/solutions/articles/154000746959',
+      '/support/solutions/154000746959',
+      '/ar/support/solutions/folders/most-viewed',
+    ]) {
+      expect({ path, id: freshdeskFolderId(path) }).toEqual({ path, id: null });
+    }
+    expect(rewrittenTo(visit(`https://${RENDER_HOST}/ar/support/solutions/folders/x`))).not.toBe(
+      '/help/legacy',
+    );
+  });
+});
+
+/**
+ * Freshdesk's portal pages: its home, knowledge-base index, ticket form,
+ * sign-in and search, which customers' bookmarks and Freshdesk's emails still
+ * name (`lib/kb/freshdesk-portal.ts`).
+ *
+ * Measured on production before this rule: the bare shapes answered the
+ * console's 307 to `/login`, the locale ones the help centre's 404, and with
+ * `KB_PUBLIC_HOST` set the catch-all would have made every one a 404. So each
+ * is checked on the help centre's host and on the Render host, with the
+ * variable set and unset: the rule has to run before all of those see it.
+ */
+describe("Freshdesk's portal pages", () => {
+  const RENDER_HOST = 'shipblu-support.onrender.com';
+  const HOSTS = [
+    ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    // Production's setup today: the domain moved, the variable not yet set.
+    ['the help-centre host, KB_PUBLIC_HOST unset', KB_HOST, {}],
+    ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
+  ] as const;
+
+  /** A Freshdesk path, and where its reader lands here. */
+  const ANSWERS: [string, string][] = [
+    // The front door, as Freshdesk's own `/` sent it and as bookmarks hold it.
+    ['/support/home', '/ar'],
+    ['/ar/support/home', '/ar'],
+    ['/en/support/home', '/en'],
+    ['/support', '/ar'],
+    ['/en/support', '/en'],
+    // The knowledge-base index. A category under it has a page of its own, and
+    // goes to the legacy route instead ("Freshdesk's category pages", above).
+    ['/support/solutions', '/ar'],
+    ['/ar/support/solutions', '/ar'],
+    ['/en/support/solutions', '/en'],
+    // The ticket form, a ticket from a Freshdesk email, the sign-in and sign-up.
+    ['/support/tickets/new', '/ar#contact'],
+    ['/ar/support/tickets/new', '/ar#contact'],
+    ['/en/support/tickets/new', '/en#contact'],
+    ['/support/tickets', '/ar#contact'],
+    ['/en/support/tickets/44105', '/en#contact'],
+    ['/support/login', '/ar#contact'],
+    ['/ar/support/login', '/ar#contact'],
+    ['/ar/support/signup', '/ar#contact'],
+    ['/en/support/signup', '/en#contact'],
+    // A language with a region reads as its language, in any case.
+    ['/en-US/support/home', '/en'],
+    ['/EN/support/home', '/en'],
+    ['/Ar-eg/support/login', '/ar#contact'],
+    // Freshdesk's own language parameter, where the path names none.
+    ['/support/home?url_locale=en', '/en'],
+    ['/support/tickets/new?url_locale=en-US', '/en#contact'],
+    ['/ar/support/home?url_locale=en', '/ar'],
+    ['/support/home?url_locale=fr', '/ar'],
+    ['/support/home/', '/ar'],
+  ];
+
+  /** Where a redirect sends the browser, and on which host. */
+  function landing(response: Response): { host: string; to: string } | null {
+    const location = response.headers.get('location');
+    if (!location) return null;
+    const url = new URL(location);
+    return { host: url.host, to: url.pathname + url.search + url.hash };
+  }
+
+  for (const [label, host, env] of HOSTS) {
+    it(`sends each one to its counterpart here, with a 302, on ${label}`, () => {
+      setTestEnv(env);
+      for (const [path, to] of ANSWERS) {
+        const response = visit(`https://${host}${path}`);
+        // The path rides along so a failure names the shape that failed.
+        expect({ path, status: response.status }).toEqual({ path, status: 302 });
+        expect({ path, landing: landing(response) }).toEqual({ path, landing: { host, to } });
+        expect(rewrittenTo(response)).toBeNull();
+      }
+    });
+  }
+
+  // Never a 301 while Freshdesk could still take the name back, and never a 307
+  // or 308, which would re-send a stale Freshdesk form's body — a password,
+  // from the sign-in — to wherever this points.
+  it('answers every one with a 302, whatever the method', () => {
+    for (const method of ['GET', 'HEAD', 'POST']) {
+      const target = new URL(`https://${RENDER_HOST}/support/login`);
+      const request = new NextRequest(target, { method, headers: { host: target.host } });
+      expect(proxy(request).status).toBe(302);
+    }
+  });
+
+  it('answers the same for a signed-in agent, ahead of the console', () => {
+    const response = visit(`https://${RENDER_HOST}/support/home`, `${SESSION_COOKIE}=x`);
+    expect(response.status).toBe(302);
+    expect(landing(response)?.to).toBe('/ar');
+  });
+
+  it("carries a Freshdesk search's term over as ours, and nothing else", () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    const term = 'شوبيفاى';
+    const response = visit(
+      `https://${KB_HOST}/ar/support/search?term=${encodeURIComponent(term)}&page=2`,
+    );
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location')!);
+    expect(location.pathname).toBe('/ar/search');
+    expect([...location.searchParams]).toEqual([['q', term]]);
+    // Arabic in a `Location` is a 500 unless it is encoded (`lib/http/redirect.ts`).
+    expect(response.headers.get('location')).toMatch(/^[\x20-\x7e]+$/);
+
+    expect(landing(visit(`https://${KB_HOST}/en/support/search/solutions?term=cod`))?.to).toBe(
+      '/en/search?q=cod',
+    );
+    expect(landing(visit(`https://${KB_HOST}/support/search`))?.to).toBe('/ar/search');
+    expect(landing(visit(`https://${KB_HOST}/support/search?term=%20%20`))?.to).toBe('/ar/search');
+
+    // Whole, as our search takes it: no cut can split an emoji in two.
+    const emoji = visit(`https://${KB_HOST}/support/search?term=${encodeURIComponent('cod 📦')}`);
+    expect(new URL(emoji.headers.get('location')!).searchParams.get('q')).toBe('cod 📦');
+  });
+
+  it('drops the rest of the query, which nothing here reads', () => {
+    for (const path of [
+      '/support/home?utm_source=whatsapp',
+      '/support/tickets/new?helpdesk_ticket%5Bsubject%5D=x',
+    ]) {
+      expect(landing(visit(`https://${RENDER_HOST}${path}`))?.to).toMatch(/^\/ar(#contact)?$/);
+    }
+  });
+
+  it('still hands Freshdesk articles, folders and categories to the legacy route, language and all', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    for (const host of [KB_HOST, RENDER_HOST]) {
+      for (const path of [
+        '/ar/support/solutions/articles/154000189336',
+        '/ar/support/solutions/folders/154000518595',
+        '/en/support/solutions/folders/154000746959/page/2',
+        '/ar/support/solutions/154000297679',
+        '/en/support/solutions/154000297680-shipblu-customers',
+      ]) {
+        expect({ path, to: rewrittenTo(visit(`https://${host}${path}`)) }).toEqual({
+          path,
+          to: '/help/legacy',
+        });
+      }
+    }
+  });
+
+  // Sending every unknown URL to the home is how a site makes itself
+  // unsearchable, so what has no counterpart here is answered as it was before.
+  // A locale path gets the help centre's 404 on every host. A bare one gets the
+  // console's sign-in until `KB_PUBLIC_HOST` names the help centre's host, which
+  // is production's setup today, and the help centre's 404 there after it.
+  const LEFTOVERS = {
+    localePaths: [
+      '/ar/support/search/solutions.json',
+      '/en/support/search/tickets',
+      '/en/support/search/topics',
+      '/ar/support/solutions/articles/most-viewed',
+      '/en/support/discussions',
+    ],
+    barePaths: ['/support/sitemap.xml', '/support/recaptcha', '/support/search/solutions.json'],
+  };
+
+  it('leaves what has no counterpart here to the help centre’s 404 on its host', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    for (const path of [...LEFTOVERS.localePaths, ...LEFTOVERS.barePaths]) {
+      const response = visit(`https://${KB_HOST}${path}`);
+      expect({ path, location: response.headers.get('location') }).toEqual({
+        path,
+        location: null,
+      });
+      expect(rewrittenTo(response)).toBe(`/help${path}`);
+    }
+  });
+
+  it('leaves the same paths as they were with KB_PUBLIC_HOST unset, as production runs today', () => {
+    for (const host of [KB_HOST, RENDER_HOST]) {
+      for (const path of LEFTOVERS.localePaths) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, location: response.headers.get('location') }).toEqual({
+          path,
+          location: null,
+        });
+        expect(rewrittenTo(response)).toBe(`/help${path}`);
+      }
+      for (const path of LEFTOVERS.barePaths) {
+        const location = visit(`https://${host}${path}`).headers.get('location');
+        expect({ path, to: location && new URL(location).pathname }).toEqual({
+          path,
+          to: '/login',
+        });
+      }
+    }
+  });
+
+  it('reads `support` only as a whole segment', () => {
+    expect(visit(`https://${RENDER_HOST}/supporting`).status).toBe(307);
+    expect(rewrittenTo(visit(`https://${RENDER_HOST}/ar/supporting`))).toBe('/help/ar/supporting');
+  });
+
+  // Two letters before `/support` that are not one of our languages are not a
+  // Freshdesk path of ours. `/kb/support` is the console's `/kb/[id]`, and this
+  // runs ahead of the sign-in check on every host, so a signed-in agent there
+  // must reach the console, not the help centre.
+  it('leaves a path whose first segment is not one of our languages alone', () => {
+    for (const path of [
+      '/kb/support',
+      '/kb/support/home',
+      '/fr/support/home',
+      '/kb/support/solutions/154000297679',
+      '/fr/support/solutions/154000297102',
+    ]) {
+      expect({ path, status: visit(`https://${RENDER_HOST}${path}`).status }).toEqual({
+        path,
+        status: 307,
+      });
+      const signedIn = visit(`https://${RENDER_HOST}${path}`, `${SESSION_COOKIE}=x`);
+      expect({ path, location: signedIn.headers.get('location') }).toEqual({
+        path,
+        location: null,
+      });
+    }
   });
 });

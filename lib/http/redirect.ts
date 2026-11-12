@@ -17,6 +17,14 @@ import { NextResponse } from 'next/server';
  * only thing that knows which of our three hostnames this is — the custom
  * domain, the Render service URL, or localhost. So it is not merely a
  * workaround for the trap above; it is the form that is correct on all of them.
+ *
+ * Not for `proxy.ts`. Next parses a proxy's `Location` with no base URL, so a
+ * relative one throws `ERR_INVALID_URL` there and the request answers 500. A
+ * proxy redirects to an absolute URL on `request.nextUrl.origin` instead, and
+ * Next makes it relative on the way out, because it compares it with that same
+ * origin: the `Location` this builds, reached the other way round. That origin
+ * is the listen address in the proxy too, the trap above, so it belongs only in
+ * a `Location` Next relativises.
  */
 export function redirectTo(path: string, status: 301 | 302 | 303 | 307 | 308): NextResponse {
   return new NextResponse(null, { status, headers: { Location: headerSafe(path) } });
@@ -38,7 +46,17 @@ export function redirectTo(path: string, status: 301 | 302 | 303 | 307 | 308): N
  * that is *already* encoded: `%` is ASCII, so a `%D8` sequence is left alone
  * rather than becoming `%25D8`. `encodeURI` would double-encode it, and
  * `kb_redirects.to_path` is typed by an admin and may arrive either way.
+ *
+ * Matched a code point at a time (`u`), not a UTF-16 unit: `slugify` keeps an
+ * emoji, which is two units, and either half alone makes `encodeURIComponent`
+ * throw `URI malformed`, the 500 this exists to prevent. A half that arrives
+ * alone, with no pair to make a code point, becomes U+FFFD first, as
+ * `toWellFormed()` would make it (ES2024, past this project's `lib`). Nothing
+ * read back from Postgres can hold one, since a UTF-8 column stores none, but
+ * a path built in code could.
  */
 function headerSafe(path: string): string {
-  return path.replace(/[^\x00-\x7F]/g, (char) => encodeURIComponent(char));
+  return path
+    .replace(/\p{Cs}/gu, '\uFFFD')
+    .replace(/[^\x00-\x7F]/gu, (char) => encodeURIComponent(char));
 }

@@ -5,13 +5,82 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-07, against `main` at `db4268c`. The figures in §1 and §5
+Last updated: 2026-11-12, against `main` at `7605993`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `db4268c`, which deployed itself on 2026-11-07, all six
-services by 16:29:38 UTC:** release #484, which carries #479 — the worker and
+**Production runs `7605993`, which deployed itself on 2026-11-11, all six
+services by 14:19:54 UTC:** release #508, which carries #491 — a form's new
+requester is written in the transaction that opens the ticket, so a refused or
+failed submission leaves no contact behind — #503, `robots.txt` and the sitemap
+answered at the root on every host (PR 5 of `plans/freshdesk-disconnection.md`),
+#504, the knowledge base fixes from the review of that plan's PR 5, and #506 and
+#507, `main` merged back into `dev` and the art comment that merge made stale
+(§6.116). Merged at 14:04:51 with all nine checks green on the pull request; the
+checks on the push to `main` released the deploys at 14:15:52, the four crons
+were live at 14:17:16–14:17:30, the worker at 14:18:21 and the web service at
+14:19:54 (read on Render). It adds no migration: production holds 62, as
+`main`'s journal does (`0000`–`0061`). At 14:27 `/api/health` answered with the
+database at 6 ms, nothing pending or processing, the dead jobs still the 27
+named below and no lost admission on the first pool; on the Render host
+`/robots.txt` and `/sitemap.xml` answered 200, where on 2026-11-10 both were
+404, and Freshdesk's old URLs 301 (PR 3, live since `932e8ea` below). Every
+article shape went to the article, and a folder URL to `/ar` when its id is a
+Freshdesk folder `kb_folders.external_id` holds; `kb_redirects` holds no folder
+rows, and the route does not need any. From the folder rule on, which is not
+deployed until `dev` reaches `main`, a folder somebody can open goes to its
+own page instead (§5.1). Its way back is
+`932e8ea` on each service: a code-only revert through `dev`, or a dashboard
+rollback, which turns that service's auto-deploy off (below); no migration lies
+between the two.
+
+**On the same day `7605993` was deployed twice more, after environment changes
+from the dashboard:** at 16:08:37 UTC, to all six services, the web service
+live at 16:11:17; and at 17:59:50, to all six again (created 17:59:49 to
+17:59:53), the web service live at 18:03:48 (read on Render; nothing has been
+deployed since). Which variables changed cannot be read. Neither change set
+`KB_PUBLIC_HOST` to `support.shipblu.com` on the web service: at 08:50 UTC on
+2026-11-12, `/widget/embed.js` still named the Render host. The worker's value
+cannot be read. **And `support.shipblu.com` moved here**, the first time the
+name has pointed at this app (§5.1 measured in August that it never had). The
+CNAME's TTL already read 1800 at 13:44 UTC. The CNAME was switched between
+about 19:00 and 20:54:12, when the web service logged its first request for the
+host: Freshdesk still answered a sweep at 19:30, but with a 1800 s TTL a
+resolver could have held the old answer for half an hour. By 20:58 resolvers
+answered
+`shipblu-support.onrender.com`, with a TTL of 14400 again. With the published
+base still the Render host (`KB_PUBLIC_HOST` unset or naming it), the domain is
+served as a console host rather than as the help centre's (§5.1). See
+`plans/freshdesk-disconnection.md`, "Where it stands".
+
+**Before it, production ran `932e8ea`, which deployed itself on 2026-11-10, the
+web service live at 18:16:28 UTC and the worker at 18:15:10** (the crons were
+not read): release #502, a squash of #496 — Freshdesk's old URLs reach the
+legacy route through a request header the rewrite actually delivers (§6.115,
+PR 3) — #498, Save, Restore and the import keep Freshdesk's links and pictures
+out (PR 2), and #499, a picture uploaded in the article editor (PR 4). Being a
+squash, it put one commit on `main` that `dev` did not have, over the same
+changes `dev` carried under their own SHAs, and the merge back (#506) met ten
+conflicts over it (§6.116). Its checks are not recorded here, and it adds no
+migration. Between it and #497 sits `8b03e61`, one help-centre drawing
+uploaded straight to `main` through GitHub on 2026-11-06, which reached `dev`
+only with #506.
+
+**Before it, production ran `918ac12`, which deployed itself on 2026-11-08, the
+web service live at 21:05:01 UTC and the worker at 21:04:13** (the crons were
+not read), and was deployed again on 2026-11-10, the web service live at
+08:43:28 after an environment variable was changed on it from the dashboard and
+the worker at 08:42:40 in the same minute: release #497, which carries #494 —
+Freshdesk's images copied into our bucket, migration `0061_kb_images` (PR 1,
+§5.1) — #492, a WhatsApp handover moves a ticket set pending while it waited
+(§6.114), #489, the SLA clock writers lock the ticket and then read it
+(§6.114), #487, the New ticket form resolves the contact after its refusals,
+and the docs of #486 and #488. Its checks are not recorded here. `0061` is the
+one migration between `db4268c` and `main`.
+
+**Before those, production ran `db4268c`, which deployed itself on 2026-11-07,
+all six services by 16:29:38 UTC:** release #484, which carries #479 — the worker and
 every `npm run job` wait at startup for their build's newest migration (§2) —
 #481, Jev's `category_agreed` (§5.1), and #483, the phone layout and the
 Tajawal font metrics. The four crons were live at 16:27:06–09, the worker at
@@ -230,10 +299,11 @@ settings are unchanged since the switch, 36 tickets carry a category (`sales`
 20, `customer_support` 14, `merchant_support` 1, `courier_jobs` 1), every one
 of the 36 `category_changed` events is Jev's, and `ai_category_runs` holds 195
 `live` answers under `apply`, the last at 20:28 UTC; no person has labelled a
-ticket or moved a filing. Nothing has routed yet: Web Chat has been in
+ticket or moved a filing. Nothing had routed by then (the first decisions were
+written on 2026-11-12; §5.1 has the count): Web Chat has been in
 `category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
-channel to route, and every other channel is on `default_group`; the widget has
-opened no ticket since 14:15 UTC on 2026-10-20, so at 21:20 UTC on 2026-11-07
+channel to route, and every other channel is on `default_group`; the widget
+opened no ticket between 14:15 UTC on 2026-10-20 and 2026-11-12, so at 21:20 UTC on 2026-11-07
 `routing_decisions` held no row and no `settle_routing` job existed (the plan's
 item 10 has the staffing a routed chat lands on). The backlog
 (`backfill_category_ai mode=apply`) waits for the user's go-ahead; the week of
@@ -433,8 +503,11 @@ ticket one more way to find its group: its category, on a channel an admin has
 moved off `default_group`, with the ticket held unassigned for a few minutes
 while the classifier files it (README, "Ticket assignment"; §5.1 below). Web
 Chat has been in `category` mode since 2026-10-30, with the classifier in
-`apply`, and every other channel is on `default_group`; no ticket has routed
-yet, because no web chat ticket has opened since 2026-10-20 (read 2026-11-07).
+`apply`, and every other channel is on `default_group`. Nothing routed until
+2026-11-12, because no web chat ticket opened between 2026-10-20 and that
+morning; the first decision was written at 08:24 UTC that day, and §5.1 has
+the count. That is the day the merchant dashboard began loading the widget, on
+the owner's word: which page each chat was opened from was not read.
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -720,7 +793,9 @@ Arabic and English packaging guides are images and nothing else — and the pane
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
 _Still true on 2026-11-07, and of every image in the knowledge base — 214 in 61
-articles. `plans/freshdesk-disconnection.md` is the plan for copying them._
+articles. No longer true since 2026-11-08: `rehost_kb_images` copied all 207
+pictures into our bucket, and every article and version now names
+`/api/kb/images/<id>` (§5.1, `plans/freshdesk-disconnection.md`)._
 
 And now **the widget knows who it is talking to, and opens with answers rather
 than a blank box.** Both were found by the same question: what does a merchant
@@ -863,8 +938,9 @@ time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
 Every human channel put together holds **173 conversations** — 140 Facebook, 18
-Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat are still
-test traffic from 18–21 August, but **Facebook and Instagram are not**: those 158
+Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat were still
+test traffic from 18–21 August when this was counted (web chat no longer: below,
+2026-11-12), but **Facebook and Instagram are not**: those 158
 threads are real people writing to a page and an account the public can already
 reach, filed under bare numeric ids and none of them answered by anybody.
 
@@ -877,7 +953,11 @@ nine rows, all active, and none defaults to `Support` since 2026-10-30. The
 mailbox, Web Chat, the Facebook Page, Instagram, WhatsApp Support and ShipBlu
 Admin default to Customer Care, the two coexistence numbers (Magdy Mohamed and
 Nayera Mohamed) to Merchant Care, and the bot to no group; still no `portal`
-row, and no comment row. Seven web chat tickets exist in all.
+row, and no comment row. Seven web chat tickets existed in all then. _Read
+2026-11-12 at 15:16 UTC:_ 33, 26 of them created that day, the first at 08:23
+UTC, the day the merchant dashboard began loading the widget (the owner's
+word; which page each chat was opened from was not read); the one before it
+was opened at 14:15 UTC on 2026-10-20. So web chat is no longer test traffic.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
 tickets after 3 days", §6.30), so both crons finally have work. `locations` holds
@@ -952,7 +1032,8 @@ which also closes the race that opened two tickets for one chat, §6.100), and a
 ticket carries the person accountable for it beside the person working it.
 Reassigning moves the work and leaves the breach with the owner; reports, the
 live board and the hourly sample all file breaches that way; an owner sees every
-ticket on their number; and the ticket page names our number and who is
+ticket on their number, and on a coexistence number nobody else but an agent
+who sees every ticket does (`lib/tickets/owner-only.ts`); and the ticket page names our number and who is
 accountable. The threading changed with the deploy. The rest waits for an admin
 to hand a number over, and none has been yet: no row had an owner at 21:35 UTC.
 §5.1 has the steps for Nayera's, and the two configuration fixes that decide
@@ -961,7 +1042,9 @@ whether her figures mean anything; §5.5 has what they still leave out. See
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
-verification, and cutover. But the team has started arriving: **11 agents** as of
+verification, and cutover. _2026-11-12: no longer true of web chat, Messenger
+and email, which the team began answering from the console that day (§5.1).
+The cutover is under way, not done._ But the team has started arriving: **11 agents** as of
 2026-09-20, up from 3, of whom 10 have signed in at least once, and 161
 conversations now carry an assignee. The capture tables the productivity report
 reads are filling accordingly — 5,203 backlog snapshots, 479 presence intervals
@@ -1159,7 +1242,9 @@ deleted from the dashboard on 2026-09-26.
 
 Service-level entries exist only as deliberate exceptions, each commented in
 `render.yaml`: `LOG_ALL_INCOMING_WEBHOOKS` on the web service, the two
-`FRESHDESK_*` keys on the worker (the importer is a queued job),
+`FRESHDESK_*` keys on the worker (the importer is a queued job; they go with it
+in PR 6 of `plans/freshdesk-disconnection.md`, and whether they are still set
+on the worker could not be read on 2026-11-11),
 and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on the web and
 worker services. Confirmed against the dashboard on 2026-09-26.
 `LOG_ALL_INCOMING_WEBHOOKS` is declared with the literal `false` since
@@ -1459,15 +1544,22 @@ row will look for.
 ### 5.1 Configuration and cutover — the real remaining work
 
 The system cannot take a single real ticket until this is done, and none of it
-is code:
+is code. _2026-11-12: the team began answering real tickets from the console.
+By about 16:20 UTC that day, agents had sent 57 web chat replies in 24
+conversations, 33 Messenger replies in 10 and 6 email replies in 5, where the
+day before there were none. `help@shipblu.com` mail has reached this app since
+14:28 UTC on 2026-11-11 (the knowledge-base bullet below). What follows is what
+the rest of the cutover still needs, and some of it is now partly done:_
 
-- **Freshworks is still the live support service, and it is still the default
-  Meta app on the account.** This is the fact that explains the single most
-  confusing thing about the Meta channels, and it is deliberate rather than
-  broken: ShipBlu is still being supported out of Freshworks while this app is
-  under construction, so the Freshworks app (Freshchat — `app_id`
-  576817601276249, `metadata: "freshchannel"`) is the Page's default app and
-  **holds thread control on the Messenger inbox**. _Since 2026-11-05 10:30:24
+- **Freshworks is still the live support service, and until November it was
+  the default Meta app on the account.** This is the fact that explains the
+  single most confusing thing about the Meta channels, and it is deliberate
+  rather than broken: ShipBlu is still being supported out of Freshworks while
+  this app is under construction, so the Freshworks app (Freshchat — `app_id`
+  576817601276249, `metadata: "freshchannel"`) was the Page's default app and
+  **held thread control on the Messenger inbox**. _What holds now is dated
+  below: Instagram has been this app's since 2026-11-05, and new Messenger
+  threads since 2026-11-11._ _Since 2026-11-05 10:30:24
   UTC it no longer holds Instagram's: this app (1009187740467732) was made the
   Instagram account's default app in the Page's Advanced messaging settings —
   Meta's `app_roles` webhook on the `instagram` object says so — and Instagram
@@ -1475,18 +1567,71 @@ is code:
   (§6.108). That was Instagram's point of no return; Messenger's is still
   ahead._
 
+  _**Messenger moved part of the way on 2026-11-11, and nothing here records
+  who moved it.** The Page's `app_roles` events gave this app no role at
+  09:50:03 UTC and `default_app` again at 09:50:17. From then on, Meta has
+  handed each new Messenger thread to this app. By 16:22 UTC, five threads
+  had begun with a `pass_thread_control` naming it the new owner (metadata
+  `new message`, no previous owner), and their messages arrive in
+  `messaging`, so the console may answer them. These are the first such
+  events in the 30 days of deliveries kept, and the 2026-11-05 switch
+  produced none: all 19 inbound Messenger messages stored in the day after it
+  arrived in `standby`. (§6.111 said 23 until 2026-11-12: that is the day's
+  Facebook deliveries, not its messages.) Threads opened before 09:50 still
+  arrive in
+  `standby`, the last at 12:29:51. Freshchat's app id (576817601276249)
+  appears in none of the 1,497 Facebook and 397 Instagram deliveries kept,
+  back to 2026-10-12. So whether it is still the Page's primary receiver
+  cannot be read from here; the Page's Advanced messaging settings, or
+  Graph's `thread_owner` with the Page token, would answer it._
+
+  _On 2026-11-11 the team answered those new threads in Business Suite, and the
+  console never saw the answers. Page Inbox (app 263902037430900) had sent 13
+  replies in `messaging` on threads this app owns by 16:22.
+  `parseMetaWebhook` counts every echo and drops it (`lib/meta/parse.ts`), so
+  no outbound Facebook message was stored that day. By 16:22, six
+  conversations had messages in `messaging` since the switch: five new
+  threads, and one opened earlier that an agent had taken control of in the
+  console at 09:51:47. All six read as unanswered (`first_responded_at` and
+  `last_agent_message_at` null). Business Suite had replied on five of them:
+  on four in `messaging` since the switch, and on the older one in `standby`
+  that morning, before it was taken. So their SLA clocks ran as though nobody
+  had replied. A ticket answered in
+  Business Suite keeps reading as unanswered until one of two things changes:
+  the team answers in the console, or the echo of a reply typed elsewhere is
+  filed, as WhatsApp's coexistence echoes are._
+
+  _On 2026-11-12 the team began answering Messenger from the console. Between
+  09:39:46 and 15:20 UTC, agents sent 30 Messenger replies in 10
+  conversations: 27 delivered, 1 sent, and 2 refused by Meta (14:39 and 14:40)
+  with code 100, subcode 2018276,
+  "Cannot tag messages with 'HUMAN_AGENT' without prior approval". Those two
+  were outside the 24 hours, where the reply goes out tagged `HUMAN_AGENT`,
+  and the feature is still not approved (§5.2). This app's previous Messenger
+  reply had gone out on 2026-11-09. By 15:20 UTC, three of the six
+  conversations above had a console reply, one of them the reply Meta refused
+  at 14:39. A fourth had only an internal note, and two had nothing from the
+  console._
+
   The consequence is that every Meta event reaches this system in the handover
   protocol's `standby` array rather than `messaging`. A secondary receiver may
   **read** a thread and may not **send** on it, so the console can show every
   Facebook and Instagram conversation and answer none of them, and
   `lib/meta/thread.ts` refuses those sends before Graph does (§6.22). Nothing
   about that is a credential, an approval or a bug — do not go looking for one.
+  _Since 2026-11-05 this no longer holds for Instagram. Since 09:50 UTC on
+  2026-11-11 it holds only for Messenger threads opened before then that no
+  agent has taken with Take control (`thread_control_taken`); new threads
+  arrive in `messaging` (above)._
 
   **The plan is a swap, not a negotiation.** When this service is ready, the
   Freshworks app is removed from the Meta account and this service's Meta app
   becomes the default; thread control follows the default app. Until that
-  happens, treat **Messenger** as read-only in practice however the code is
-  configured.
+  happens, a Messenger thread opened before 2026-11-11 09:50 UTC arrives in
+  `standby`, and the console can answer it only after an agent takes it with
+  Take control (`thread_control_taken`), as agents did on 2026-11-07,
+  2026-11-09, 2026-11-11 and 2026-11-12. Newer threads are this app's to
+  answer without that step (above).
 
   **Instagram is the exception as of 2026-08-30, and it is the way out of this
   paragraph.** _(The route changed on 2026-11-04: the Instagram Login token
@@ -1503,42 +1648,122 @@ is code:
   answered from here before the swap — which also means the Instagram App Review
   screencast can be recorded before it. `standby` on a Page delivery no longer
   refuses an Instagram send; see §6.36 and `lib/meta/connection.ts`. Messenger
-  has no equivalent second route and still waits for the swap.
+  has no equivalent second route. Its threads opened before 2026-11-11 arrive
+  in `standby` until an agent takes control of them in the console; newer ones
+  are this app's from the start (above).
 
   Two things follow that are easy to get wrong. **The App Review screencasts
   cannot be recorded before the swap** — `pages_messaging` and the comment
   permissions all require footage of the app _sending_, and a recording of a
   reply Graph refuses is a rejected submission
-  (`plans/meta-app-review-submission.md`). And **the swap is the cutover's point
-  of no return** for these channels: the moment Freshworks stops being default,
-  the Meta inboxes are answered here or not at all, so the channel rows, the
-  agents and the groups below need to be in place first rather than after.
+  (`plans/meta-app-review-submission.md`). _Since 2026-11-11 a send on a new
+  Messenger thread can be filmed, and on Instagram since 2026-11-05 (above)._
+  And **the swap is the cutover's point of no return** for these channels: the
+  moment Freshworks stops being default, the Meta inboxes are answered here or
+  not at all, so the channel rows, the agents and the groups below need to be
+  in place first rather than after. _On 2026-11-11 the new Messenger threads
+  had a third answer: Business Suite, where the console never sees it (above).
+  On 2026-11-12 the team began answering them here as well, but Business Suite
+  still sent 6 replies that day, the last at 13:55 UTC, while the console was
+  in use._
 
-- **The knowledge base's images no longer depend on Freshdesk, and closing
-  the account has a checklist.** Audited 2026-11-07: no article links to
-  Freshworks, but all 214 images in 61 of the 112 articles load from
-  Freshdesk's attachment bucket, and so do the same 214 in the version
-  history. 18 versions still hold the 29 old Freshdesk links, which one Restore
-  or one re-import puts back. Freshdesk's old article URLs 404 here through the
-  proxy (§5.2). And the phone's quick replies, the merchant dashboard and its
-  Freshchat widget still send customers to the Freshdesk copy.
-  `plans/freshdesk-disconnection.md` has the measurements, the follow-up pull
-  requests and the order: the images are copied before the account closes,
-  because afterwards there is nothing to copy them from, and the redirects work
-  before `support.shipblu.com` moves. PR 1, the copy, is deployed and has
-  run: `main` took it at 21:05 UTC on 2026-11-08 (#497), and
-  `rehost_kb_images` copied all 207 pictures at 21:13. No article or version
-  loads a picture from Freshdesk now; every one comes from
-  `/api/kb/images/<id>`, and all 207 answered there on 2026-11-09. PR 2 is
-  built: Save, Restore and the import point Freshdesk's pictures and article
-  links here as they write, and Save and Restore refuse to add one that has no
-  home here. Until it ships, the 29 old links in 18 version rows are one
-  Restore from the help centre. PR 4 is built on top of it: the article editor
-  uploads a picture (button, paste or drop) into `kb_images`, so a new
-  screenshot is ours rather than hot-linked.
+- **The knowledge base no longer depends on Freshdesk, and
+  `support.shipblu.com` answers from this app. What is left of the
+  disconnection is setting `KB_PUBLIC_HOST`, deciding whether to run the
+  import once more, writing the domain into `render.yaml`, and work owned
+  outside this repository.** The record and the
+  checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
+  stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
+  images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
+  and Freshdesk's old article URLs 404'd here through the proxy (§6.115).
+  Every PR the plan needed before the disconnection is now live:
+
+  - **PR 1, the copy** (#497, 2026-11-08). `rehost_kb_images` copied all 207
+    pictures at 21:13 UTC. No article or version loads a picture from
+    Freshdesk: every one of the 214 comes from `/api/kb/images/<id>`, measured
+    again across all 61 articles on 2026-11-11.
+  - **PRs 2, 3 and 4** (#502, 2026-11-10). Save, Restore and the import point
+    Freshdesk's pictures and article links here as they write, and Save and
+    Restore refuse to add one that has no home here. So the 29 old links in
+    18 version rows stay there by design, and a Restore points each one here.
+    Freshdesk's old URLs 301 through the proxy. On the deployed build on
+    2026-11-11, all six shapes answered 301. A folder URL went to `/ar` when
+    its id is a stored Freshdesk folder (`kb_folders.external_id`), an
+    agents-only one included until #515. Of the 58
+    imported article ids, 54 went to an article that answers 200. The 4 in
+    agents-only folders answer 404 since #504; they are empty placeholders.
+    The article editor uploads a picture into `kb_images`, though production
+    holds no upload yet.
+  - **PR 5, the crawler files on every host, with its review fixes** (#508,
+    2026-11-11).
+
+  **The domain moved on 2026-11-11**, between about 19:00 and 20:54 UTC (the
+  header). `KB_PUBLIC_HOST` still does not name it, so the host is served as a
+  console host. Freshdesk's bookmarks there, `/support/home` and
+  `/support/tickets/new`, go to the console's sign-in, and so does `/inbox`.
+  The widget's `BASE`, the sitemap and the canonicals still name the Render
+  host. The favicon is behind sign-in on every host, a separate bug:
+  `/icon.svg` is not a public path, and once the variable is set the help
+  centre's host rewrites it to `/help/icon.svg`, which 404s. It is fixed on
+  `dev` in #510 (`7074dee`), and reaches production with the next release. Setting the variable is the next step (the
+  `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
+  paths that are not an article or a folder become the help centre's 404
+  rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
+  every host and with the variable set or not, each with a 302. The home and
+  the index go to `/<locale>`, the ticket pages and the sign-in to the home's
+  contact band, and Freshdesk's search to ours. A category goes to its own
+  page, `/<locale>/c/<slug>`, through the legacy route (#515), which finds it
+  by the Freshdesk id the importer kept: a 301, or a 302 while another
+  translation stands in for a closed one. The internal employee guide
+  (`154000297102`), whose folders are all agents-only, answers 404, as an
+  unknown id does, since its own page is a 404 for every reader; so do those
+  four folders, which the legacy route had sent home with a 301. A folder
+  somebody can open goes to its own page, `/<locale>/c/<category>/<folder>`,
+  found by the Freshdesk id the importer kept and read with the category it
+  is in now, and a page of its list (`/page/2`, followed by crawlers since the
+  move) goes with it. It went home with a 301 before: Render's log holds 37
+  folder URLs answered that way between the move and 16:50 UTC on
+  2026-11-12, every one for a public folder, our own curl checks left out
+  (`plans/freshdesk-disconnection.md`, PR 7). Each reaches production with
+  the release after it merges.
+
+  **Open outside the repository, as of 2026-11-12:**
+
+  - **The phone's quick replies.** 32 Freshdesk links sent from one
+    coexistence number, 5 of them in the 7 days to 2026-11-11 10:49 UTC. Each
+    now 301s to its article here.
+  - **The merchant dashboard.** Its 16 help links land here through the move,
+    but they still depend on the legacy route, and its 2 links to an older
+    Freshdesk account (`shipblu.freshdesk.com`) still 404. It still loads
+    Freshchat, and a Zendesk widget besides. shipblu.com loads the same
+    Zendesk widget.
+  - **Mail.** `help@` (in 15 articles) has reached this app since 14:28 UTC
+    on 2026-11-11: 182 of the 195 inbound deliveries Postmark brought by 16:08
+    on 2026-11-12 name it. Whether Zoho still also delivers it to Freshdesk
+    was not read. Nobody has read where `support@` and `tech@` (in 2) deliver,
+    and SPF still includes `email.freshdesk.com`.
+  - **Article wording.** "Support Portal" is in 2 articles, and the chat
+    instruction in 16 (the plan counted 15).
+  - **Messenger's swap** (the bullet above).
+  - **Freshdesk's notification emails** still link
+    `support.shipblu.com/support/tickets/<n>`, and one was followed here from
+    a phone on 2026-11-11. No redirect here can show that ticket. While the
+    team still answers in Freshdesk, its portal URL belongs back on its own
+    `*.freshdesk.com` address (the plan's to-dos).
+
+  The "Support" links on the marketing site, go.shipblu.com and the App Store
+  listing need nothing more: `https://support.shipblu.com/` now lands here.
+
+  **After the disconnection:** PR 6, which retires the importer; SPF; a re-run
+  of the plan's audit, where `links, versions` stays at 29 by design; and the
+  date, recorded here. None of these has happened.
 
 - **Instagram through Unified Login — the next configuration task, and none of
-  it is a deploy.** The direct connection's token expired on 2026-10-29 (the
+  it is a deploy.** _Done by 2026-11-05 (§6.108): the token is
+  set, and Instagram has been answered over Unified Login since. What is left
+  of this bullet is its tail, disconnecting the Instagram Login connection and
+  unsetting its variables in §6.29's order, which was not read on 2026-11-12._
+  The direct connection's token expired on 2026-10-29 (the
   header), so Instagram answers nothing until a credential is in place, and
   the one to put in place is the Unified Login connection
   (`plans/instagram-unified-login.md`), whose system-user token never expires
@@ -1796,8 +2021,11 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
      §5.5) opens at the open tickets that had already breached, because a
      figure is filed under whoever is accountable on the day it is measured. If the team wants her figures to
      start from the handover, triage those first. To undo it, hand the number
-     to "Nobody — team number": accountability clears, and the tickets stay with
-     her until somebody reassigns them.
+     to Nobody. It is a coexistence number, so since 2026-11-12 that reads
+     "Nobody — only agents who see every ticket": accountability clears, every open
+     or pending ticket she holds is unassigned, and until the number has an
+     owner again only agents who see every ticket see its tickets, and nothing
+     assigns them (`lib/tickets/owner-only.ts`).
 
   5. _Done 2026-10-30, at the user's go-ahead (the plan's 0.2 reorder): the
      group conditions name the groups' uuids. Not re-read since._ **The SLA
@@ -1937,12 +2165,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   **Both were what stood between the widget and the merchant dashboard.**
   Measured 2026-08-31, `https://shipblu-support.onrender.com/widget` answered
   `content-security-policy: frame-ancestors 'self';`. Measured 2026-11-06 it
-  answers `frame-ancestors 'self' https://app.shipblu.com
+  answered `frame-ancestors 'self' https://app.shipblu.com
 https://app.staging.shipblu.com https://merchant.staging.shipblu.com
-https://merchant-web-production.onrender.com`. The new merchant app's
-  production domain, `https://merchant.shipblu.com`, is not on that list,
-  although its `render.yaml` sets `NEXT_PUBLIC_SUPPORT_WIDGET_URL`: the
-  launcher there opens an empty box until the origin is added. `WIDGET_IDENTITY_SECRET` is the
+https://merchant-web-production.onrender.com`, without the new merchant app's
+  production domain, `https://merchant.shipblu.com`, where the launcher
+  therefore opened an empty box. Measured 2026-11-12, on
+  `support.shipblu.com` and on the Render host alike, it answers
+  `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`:
+  `merchant.shipblu.com` and `business.shipblu.com` are on the list and
+  `merchant-web-production.onrender.com` is off it. Nobody recorded the
+  change; it was read from the header. `WIDGET_IDENTITY_SECRET` is the
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
@@ -1972,8 +2206,27 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   the CSAT and portal-email links. It is dormant while CSAT is off, so check it
   before CSAT is switched on. Set it to `support.shipblu.com` again only once
   that name answers from this app, on both services together
-  (`plans/freshdesk-disconnection.md`). What follows is the record of
-  August and September._
+  (`plans/freshdesk-disconnection.md`)._
+
+  _**That name has answered from this app since 20:54 UTC on 2026-11-11 at
+  the latest, so the variable can be set now.** On 2026-11-12 it was still
+  not set to the domain: `/widget/embed.js`, the sitemap, the `Sitemap:` line
+  and every canonical named `shipblu-support.onrender.com`, on both hosts.
+  With the published base still the Render host (the variable unset or naming
+  it), `support.shipblu.com` is served the way the Render host is, as a
+  console host. `/inbox` and Freshdesk's `/support/home` answer 307 to
+  `/login` there. Only the help centre's locale paths, `/help/…`, `/`,
+  `robots.txt`, the sitemap and Freshdesk's article and folder URLs (through
+  the legacy route) reach the help centre. The blueprint lists the key in
+  `shipblu-support-production`, which the web service and the worker both
+  link, with no service-level entry on either. So one change to the group
+  should set both, and Render redeploys every service that links the group,
+  unless the dashboard holds a service-level entry on either service that the
+  blueprint does not show. Read a survey link built on the worker before CSAT
+  is switched on.
+  Once it is set, the domain serves only the help centre, and the console
+  stays on the Render host. What follows is the record of August and
+  September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2153,8 +2406,8 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   ticket already carries writes a `category_agreed` event, which the router
   reads and Filed by Jev counts as Jev's filing.
 
-- **Routing by category is deployed; Web Chat routes, and no ticket has routed
-  yet** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
+- **Routing by category is deployed; Web Chat routes, and its first tickets
+  routed on 2026-11-12** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
   all six services on `1470902` by 06:35:36 UTC on 2026-10-29, and amended by
   #477 and #481, on all six with `db4268c` since 16:29:38 UTC on 2026-11-07;
   `lib/routing/`). A channel's mode on
@@ -2165,10 +2418,18 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   to a category mode _while the classifier is in `apply`_. The classifier has
   been in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
   `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
-  every other channel is on `default_group`. No web chat ticket has opened
-  since 14:15 UTC on 2026-10-20, and a customer writing again on an existing
+  every other channel is on `default_group`. No web chat ticket opened
+  between 14:15 UTC on 2026-10-20 and 2026-11-12, and a customer writing again on an existing
   one never routes, so at about 21:20 UTC on 2026-11-07 there was no
-  `routing_decisions` row and no `settle_routing` job. Since 14:10 UTC
+  `routing_decisions` row and no `settle_routing` job. _That ended on
+  2026-11-12, the day the merchant dashboard began loading the widget (the
+  owner's word; which page each chat was opened from was not read): the first
+  web chat ticket in three weeks opened at 08:23 UTC and its decision was
+  written at 08:24. Read at 15:16 UTC that day, 26 web chat tickets had opened
+  and `routing_decisions` held 26 rows, every one decided, with a
+  `settle_routing` job each: 15 `rule`, 6 `no_route_for_category`, 3
+  `fallback` and 2 `category`. Whether the 15 are the two web chat rules below
+  ending the hold has not been read._ Since 14:10 UTC
   on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
@@ -2320,7 +2581,11 @@ nobody has run, that somebody has to actually watch against the real provider:
   Outlook, confirm it threads rather than opening a new ticket. Threading is the
   thing naive helpdesks get wrong, and the two bugs in §6.4 were both found by
   reading the API docs rather than by testing — there may be a third.
-- **The widget on a genuine third-party origin**, not localhost. The
+- **The widget on a genuine third-party origin**, not localhost. _Since
+  2026-11-12 the allowlist names five origins that are not this app's, and 26
+  web chats opened that day (§5.1); whether any of them came from one of those
+  origins has not been read, nor has a signed identity, so this is still to
+  watch._ The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.
@@ -2333,9 +2598,9 @@ nobody has run, that somebody has to actually watch against the real provider:
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
   which was read as "nothing links to them" and was not: 29 links **inside the
-  articles** pointed at those legacy paths until 2026-09-03, and `support.
-shipblu.com` still serves Freshdesk, so each one took a reader out of this
-  help centre and into the old portal. They are now `/{locale}/a/{slug}`
+  articles** pointed at those legacy paths until 2026-09-03, and
+  `support.shipblu.com` served Freshdesk until 2026-11-11, so each one took a
+  reader out of this help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
 
@@ -2355,9 +2620,24 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   arrived, so the query the rewrite added never reached it. The fix, PR 3,
   passes the path in a request header instead. A local production build of
   the fix answers 301 for all six shapes, where the same build of `dev`
-  answered 404. Not yet measured on the deployed service: check the six
-  shapes there once it ships, with the curl in the plan's "Re-running this
-  audit".
+  answered 404.
+
+  **Shipped in #502 (2026-11-10), and measured on the deployed build on
+  2026-11-11.** All six shapes answer 301 on the Render host. A folder URL
+  goes to `/ar` when its id is a stored Freshdesk folder, until the folder
+  rule (§5.1) is deployed, and an unknown id answers 404. Of the 58 imported article ids, 54 answer with a 301 to an
+  article that answers 200. The 4 in agents-only folders answer 404 since
+  #504 (#508): they are empty placeholders, and a 301 to a page that 404s
+  would have been a dead link a browser keeps. **The domain moved the same
+  evening** (§5.1), and since 20:54 UTC at the latest the same holds on
+  `support.shipblu.com`. Every `support.shipblu.com` link the phone and the
+  merchant dashboard send now lands on its article here: the 32 phone sends to
+  date name 9 ids, and the dashboard's 16 links 8. The dashboard's 2 links to
+  the older account, `shipblu.freshdesk.com/a/solutions/articles/80001070415`,
+  still 404. What still answers the console's sign-in
+  there, until `KB_PUBLIC_HOST` names the domain, is Freshdesk's portal paths
+  that are not an article or a folder, such as `/support/home` and
+  `/support/tickets/new`.
 
 - ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
   console no longer replies on WhatsApp at all, template or free text
@@ -2538,7 +2818,12 @@ RESPONSE` was on every one of those bodies and the accepted one, so it is
   channel that is most of them. What is missing is the approval on the
   **Instagram Login** submission, the connection the send is routed over, whose
   permissions are spelled `instagram_business_*`; an approval on the Page
-  connection is a different grant and does not reach that host.
+  connection is a different grant and does not reach that host. _2026-11-12:
+  Instagram now sends over Unified Login, on `graph.facebook.com` (§6.108),
+  and two Messenger replies over the Page connection were refused with code
+  100, subcode 2018276, "Cannot tag messages with 'HUMAN_AGENT' without prior
+  approval" (§5.1). So the request has to cover the Page's Messenger product
+  as well as Instagram._
 
   **It also retires the request-shape candidate.** The 2026-08-20 refusal named
   nothing, so the Messenger-shaped body — `messaging_type: MESSAGE_TAG` on an
@@ -2922,14 +3207,59 @@ on node type (User)` with no subcode, which that predicate declines by design,
   `comment_hidden` / `comment_unhidden` / `comment_deleted` event.
   `plans/instagram-comment-management.md` has the whole order of operations.
 
-- **The portal's verification and reset emails through Postmark.** The whole
-  flow has been driven end to end against a local Postgres with
-  `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
-  exercised — but nothing has yet been delivered by a real provider to a real
-  inbox. Watch two things in particular: that the link survives corporate link
-  scanners (verification tolerates a replayed token for exactly this reason, a
-  reset deliberately does not), and that `Auto-Submitted: auto-generated` keeps
-  autoresponders from opening a ticket per verification email.
+- **The portal's verification and reset emails through Postmark.** _First
+  live on 2026-11-12._ Five customers registered that day, each answered with
+  the Arabic verification email. Postmark accepted four — queued at 08:40,
+  10:22, 13:08 and 16:23 UTC, each sent within half a second — and one of
+  those accounts was verified and has signed in by 16:36 UTC. The fifth,
+  queued at 15:51, went to `dead` on its first attempt with
+  `PermanentJobError: send_notification_email: invalid payload` on `to`:
+  registration had accepted a Gmail address with two dots in a row before the
+  `@`, which the job's schema refused, so the customer was told to check an
+  inbox nothing was sent to (§6.117). Registration, the job, the other portal
+  forms and the side conversations now ask one definition of an address,
+  `isEmailAddress` / `looksLikeEmail` in `lib/auth/normalise.ts`, written from
+  Postmark's published rule; a form refuses such an address with a sentence
+  naming the usual mistakes.
+
+  **The account that registration left, and what it needs.** Identity
+  `00759db7-4157-446a-b74b-65297b34db26` (contact
+  `09ad6e78-d870-496b-b3f1-a6f062ac498a`, made by that registration, no
+  tickets): unverified, a password set, one unused `verify_email` token that
+  expires at 15:51 UTC on 2026-11-13, and the dead job
+  `21d823cf-efd7-4187-9116-64eb1ce7df53`. Nothing needs writing to production,
+  and nothing was written. No link can ever reach that spelling — Postmark
+  refuses it and Gmail never issues one — so retrying the job or minting a
+  new token would only make another dead row, and the identity can never be
+  verified or sign in. The token is deleted by `cleanup` once it expires; the
+  dead row stays, its link expired with the token. The way forward is the
+  customer's: registering again with the address spelt the way Gmail issued
+  it, which works today and needed no deploy — a correct spelling passed both
+  checks all along. Once this release is live, trying the doubled-dot
+  spelling again on the registration, sign-in or forgotten-password form
+  answers "Enter a valid email address — check for … two dots in a row…"
+  rather than "check your inbox", which logs nothing; a sign-in from the
+  console (which has no format check) mints nothing for it and logs
+  `[portal_accounts] not issuing verify_email: … identity=00759db7-…`. If support wants to reach them first, it is a person's
+  call and a person's email: Gmail ignores dots in the local part, so any
+  single-dot spelling of the same letters is the mailbox they meant. If they
+  register again under that spelling it is a separate contact; the old one
+  holds nothing to merge.
+
+  Still to watch: that the link survives corporate link scanners
+  (verification tolerates a replayed token for exactly this reason, a reset
+  deliberately does not), and that `Auto-Submitted: auto-generated` keeps
+  autoresponders from opening a ticket per verification email. No reset email
+  has been sent yet.
+
+  **Customers began registering on 2026-11-12**, the day after
+  `support.shipblu.com` moved here: four identities with a password and four
+  `verify_email` tokens by 16:00 UTC. The first link was followed 18 seconds
+  after it was issued, once its `send_notification_email` job had completed.
+  The next two were sent and not followed. The fourth was never sent: its job
+  went `dead` on its first attempt, because the job's payload schema refused
+  an address the registration form had accepted. That customer cannot verify
+  until registration and the job agree on what an address is.
 
 ### 5.3 Phase 7 — ticket, conversation and contact importers
 
@@ -3151,7 +3481,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
   _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
-  either; §5.1 has the measurement.)_
+  either; §5.1 has the measurement. The domain has answered from this app
+  since 2026-11-11, and the variable is to be set to it again; §5.1.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
@@ -7141,6 +7472,28 @@ still waiting for it` one whose outcome is not known yet.
   version in Freshdesk — so nothing is missing. Its 4 folders are the only
   `agents_only` ones; every other folder is public. That visibility came from
   Freshdesk and matches the category's meaning, so it needs no decision.
+- **The knowledge base off Freshdesk, measured on production.** _2026-11-08
+  to 2026-11-12, read-only._ `rehost_kb_images` ran at 21:13 UTC on
+  2026-11-08 and copied 207 pictures, 30,171,562 bytes, 205 PNG and 2 JPEG.
+  It rewrote 214 `src` in 61 articles and 61 version rows, and cut no version.
+  On 2026-11-11, on `7605993`:
+  - All 207 `/api/kb/images/<id>` routes answered 307 to an image, and an
+    unknown id answered 404.
+  - Full navigations of all 61 articles with pictures drew all 214 from the
+    route and none from Freshdesk.
+  - The plan's audit query read 0 for both image rows and for `links, live`,
+    and 29 in 18 rows for `links, versions`, which is by design.
+  - All six legacy URL shapes answered 301 on the Render host.
+  - `/robots.txt` and `/sitemap.xml` answered 200 at the root.
+
+  After the domain moved that evening, the legacy URLs, `robots.txt`, the
+  sitemap, an article page and an image route answered the same on
+  `support.shipblu.com`. A second sweep re-checked the first sweep's findings
+  and tried to refute them. Where the release of `7605993` had changed the
+  answer (the crawler files, the agents-only URLs), the figures above are the
+  second sweep's. The 61-article navigation is the second sweep's alone. The
+  measurements and their queries are in `plans/freshdesk-disconnection.md`.
+
 - **Production health**, checked 2026-08-21 on `98ec9d4`: `status: ok`, 2 ms
   database latency, queue empty. **One dead job** — the `send_meta` row in §5.2,
   which is a real undelivered customer reply and not a transient failure.
@@ -8109,8 +8462,10 @@ dryRun=true`, then without, gives those two theirs back from their
       (`lib/meta/app-roles.ts`) reads it into the verdict, which supersedes an
       Instagram `standby` older than the switch as it supersedes one older
       than a `thread_control_taken`. It is Instagram only. The Page's event
-      named this app `default_app` too, yet the 23 Messenger messages received
-      in the day after it all arrived in `standby`. A `standby` newer than the
+      named this app `default_app` too, yet the 19 Messenger messages stored
+      in the day after it all arrived in `standby`. (This said 23 until
+      2026-11-12, which is the day's Facebook deliveries: 21 of them came in
+      `standby`.) A `standby` newer than the
       switch still refuses, worded as another app having taken the thread
       since. A switch away from this app is weighed the other way: a thread
       whose customer last wrote before it reads as the new default's, and
@@ -8390,6 +8745,225 @@ found"}` and not Next's page. The same route called by its own URL
       at all. A value meant for a handler rides in a request header. Nothing
       else in `proxy.ts` added a query to a rewrite. The `?next=` it adds is
       on a redirect, which the browser follows as a new request.
+
+      Shipped in #502 (`932e8ea`, 2026-11-10). On the deployed build on
+      2026-11-11, all six shapes answered 301 on the Render host. #504 then
+      refined the route (#508, 2026-11-11): it answers only with an article
+      some reader may open, uses a 302 while a stand-in translation answers
+      for a closed one, and answers 404 for the 12 URLs of the 4 agents-only
+      articles. That evening `support.shipblu.com` moved here, and the same
+      URLs answered there too (§5.2).
+
+116.  **A release squash-merged into `main` makes `main` and `dev` disagree
+      about history, and the merge back pays for it in conflicts.**
+      _2026-11-11._ Release #502 was merged with "Squash and merge", so `main`
+      took one commit, `932e8ea`, holding the changes `dev` carried as #496,
+      #498 and #499 under their own SHAs. `git log origin/dev..origin/main`
+      then listed 30 commits `main` had and `dev` did not — 28 of them the
+      release merges of `dev` into `main`, harmless, plus the squash and
+      `8b03e61`, a drawing uploaded straight to `main` on 2026-11-06 — and
+      merging `main` back into `dev` (#506) met ten conflicts in files both
+      sides had changed identically. Each was resolved to `dev`'s side, and
+      `git diff --stat origin/dev HEAD` listing only the drawing was the proof
+      that the result was `dev` plus the one file `main` alone had. A release
+      merged with a merge commit puts `dev`'s own commits on `main`, so the
+      merge back has nothing to resolve. So a release pull request from `dev`
+      into `main` takes "Create a merge commit", never a squash and never a
+      rebase, and a change made on `main` directly — a file uploaded through
+      GitHub's web editor is the one way it has happened — is merged back into
+      `dev` the same day, before `dev` moves on. `AGENTS.md` says so now, under
+      Git.
+
+117.  **Two checks of what an email address is disagreed, and a customer's
+      verification link died between them.** _2026-11-12._ The help centre's
+      registration asked `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` of the address,
+      and the `send_notification_email` job it queued parsed `to` with
+      `z.email()`. A Gmail address with two dots in a row before the `@`
+      passed the first and failed the second: registration made a contact and
+      an identity, stored the password, minted a `verify_email` token, queued
+      the email and answered "check your inbox", and the job went to `dead` on
+      its first attempt as an invalid payload, a zod `invalid_format` on `to`
+      (`PermanentJobError` from `parseJobPayload`). Nobody
+      reads a dead job, so the only sign was a customer who never got a link.
+      The other forms asked a third check (`looksLikeEmail`, as loose), the
+      side conversations and their recipient directory a fourth, and the
+      first-admin setup none at all.
+
+      Neither side was simply right. Registration was too loose: Postmark
+      documents that it refuses a leading, trailing or doubled dot in the local
+      part, citing RFC 5322, and Gmail's username rules forbid all three. But
+      `z.email()` was too strict the other way: it is Gmail's username rules,
+      so it refused `&`, `#`, `/` and the rest of RFC 5322's set, which a
+      business address can carry and Postmark sends to — exactly what the side
+      conversations' check had kept itself loose to avoid. So the one
+      definition, `isEmailAddress` in `lib/auth/normalise.ts` (and
+      `looksLikeEmail`, which normalises first), is Postmark's published rule —
+      its local-part characters, no dot at either end or two in a row, letter,
+      digit and hyphen labels — plus what DNS can route and RFC 5321's
+      lengths. Every form that stores an address or sends to one and the
+      job's schema ask it, and nothing stored in production failed it but the
+      one account above (§5.2 says what that account needs, which is nothing
+      written). `normaliseEmail` drops the bidi and zero-width marks an address
+      copied out of an RTL chat carries, and writes a domain in another script
+      in its `xn--` form, so the address a form checks is the one Postmark can
+      send to. It stays a plain pattern rather than a zod schema because the
+      widget's iframe imports it. `issueToken` mints nothing for an address it
+      refuses, since a stored one can still reach it on a resend, and logs the
+      identity. `EMAIL_FROM_ADDRESS` is asked the same question where mail is
+      sent from it (`senderAddress`), and `env()` no longer asks it anything:
+      it was `z.email()` there, a format rule that would have stopped every
+      service at its first `env()` over one variable (§2).
+
+      The lesson is the general one this file keeps relearning: two
+      definitions of one thing drift, and the drift surfaces where nobody
+      looks. The `email-check` repo rule now refuses a `z.email()` or an
+      address-shaped regex (`[^\s@`) anywhere but the definition.
+
+118.  **Every Messenger echo was dropped, so a reply typed in Meta Business
+      Suite never reached its ticket, which read as unanswered.**
+      _2026-11-11 to 2026-11-12._ From 09:50 UTC on 2026-11-11 Meta hands each
+      new Messenger thread to this app: it opens with a `pass_thread_control`
+      naming this app (16 by 12:37 on the 12th), and its messages arrive in
+      `messaging`. The team answers those threads in Business Suite, whose
+      inbox is Meta's Page Inbox app (`263902037430900`). `parseMetaWebhook`
+      counted every `is_echo` and dropped it, to keep our own replies from
+      being filed as the customer's, so by 15:15 UTC on the 12th 19 Business
+      Suite replies on 8 tickets were stored nowhere. Each ticket read as
+      unanswered, `first_responded_at` and `last_agent_message_at` null, its
+      clocks running. Ticket 96283, answered in Business Suite at 12:29 on the
+      11th, recorded its first response at 14:39 on the 12th, from a console
+      reply.
+
+      **Measured, read-only, over every Meta delivery kept (2026-10-13 to
+      2026-11-12 15:15 UTC):**
+
+      - Every Messenger echo names its app, as a JSON number. 37 were this
+        app's, and each matched a row `send_meta` had stored; in the 14 timed,
+        the mid was written 0.3–1.3 s before the echo reached us. 220 were Page
+        Inbox's, none stored: 49 in `messaging` and 171 in `standby`. No other
+        app appeared, Freshchat (576817601276249) included.
+      - No Instagram echo names one: 99 of 99, 45 in `messaging` and 54 in
+        `standby`. 15 are one automated welcome (431 characters, and a
+        474-character English twin), each sent 2–5.4 s after the customer's
+        message, still firing on 11-09 and 11-11. Our own Instagram sends
+        matched by mid, 4 of 4 direct messages and the private reply, and none
+        of the 19 since 11-09 was ours.
+      - No `take_thread_control` followed a Page Inbox reply: the thread stays
+        this app's.
+
+      **The decision, in `echoDisposition` (`lib/meta/echo.ts`):** an echo is
+      filed when it names its app and the app is not `META_APP_ID`. Page
+      Inbox's is filed whichever app held the thread. Another app's is filed
+      only from `messaging`, on a thread this app held. Everything else stays
+      dropped and is counted by reason on the job's log line, as
+      `echo(es) filed` and `echo(es) ignored` with the reasons beside it.
+
+      - **Page Inbox's in `standby` is filed** (decided 2026-11-12: "answered
+        in business suite should be filed and shown on the ticket"). Another
+        app held those threads, but the team answering in Business Suite still
+        answered the customer. All 171 read as typed: none within 10 s of the
+        customer, the same signed greetings. They fall on 101 tickets, 94
+        never answered in the console, 93 of them still open or pending, which
+        read as unanswered until the replay below files them. Only one has
+        arrived since the switch.
+      - **Ours** is dropped, told apart by its app id, not by finding its mid:
+        `send_meta` writes the mid after Graph answers, and a match would race
+        that write.
+      - **A third app's in `standby`** is dropped. It is the holder's own
+        send, automations included, and its id says which app sent it, not
+        whether a person typed it. None has been seen.
+      - **Instagram**, because with no app id our own send could be told apart
+        only by racing `send_meta`'s write, and the welcome not at all. Filed,
+        it would record a first response 4 seconds into every thread it greets.
+        Revisit when Instagram's echoes name their app and the welcome is off,
+        or the team answers Instagram here, as it can since 2026-11-05.
+      - **`META_APP_ID` unset** files nothing: our own replies would read as
+        another app's and be filed twice.
+
+      A filed echo is the team's reply, as a coexistence number's phone reply
+      is (`ingestMetaEcho`, modelled on `ingestWhatsAppEcho`). It is stored as
+      an outbound reply with no author, so `HUMAN_AGENT` is never derived from
+      it. Its author line reads "Meta Business Suite" (`teamEchoLabel`), and
+      a "Sent from Business Suite" chip beside it (`teamEchoChip`, the
+      `elsewhere` tone, an external-link glyph) tells it from an agent's reply
+      at a glance. The phone's echoes on a coexistence number now carry "Sent
+      from the phone" the same way. It moves
+      `last_agent_message_at` forward only, never `last_customer_message_at`,
+      and `onAgentReply` follows. It never reopens a ticket or opens one. On a
+      ticket held for the router it ends the hold as an agent's reply does
+      (`endHold` as `manual`, then `afterHoldEnded`), so it does not read
+      "Routing…" once answered. Facebook's row routes by `default_group`
+      (2026-11-12), but nothing stops an admin moving it to `category`. It
+      files only on the customer's live direct-message ticket: one of the 19
+      had no contact here at all. Echoes left out as unreadable (unsent, or
+      with no id, no customer or nothing to show) are counted on the log
+      line, so a payload change that hid every echo would show. What Jev
+      is shown before a canned suggestion now calls such a reply, and a
+      coexistence phone's, `support_agent` rather than `automatic_message`, for
+      the same reason.
+
+      **Order is handled, not assumed.** Meta sends every Messenger event in a
+      delivery of its own (838 of 838 Page deliveries kept), and Business Suite
+      answered one thread 4.9 s after its first message. So the reply can be
+      processed while the customer's message waits on its retry, or beside it
+      after a deploy. An echo that finds no ticket fails its delivery, for the
+      queue to try again, while a delivery from that customer is stored and
+      unprocessed (`metaDeliveryPendingFrom`), and never on the job's last run.
+      A follow-up to a customer whose ticket is closed, or whom this app never
+      heard from, costs no retry. And an echo files only onto a ticket with a
+      customer message no newer than itself. Without that, a follow-up to a
+      closed ticket, processed after the customer's answer opened a new one,
+      would become the new ticket's first response, before its question.
+
+      **Nothing sent within 10 s of the customer's message is filed**
+      (`TYPED_REPLY_FLOOR_MS`). Business Suite's automations, such as an
+      instant reply or an away message, echo under the Page Inbox's id, as a
+      person's reply does. Of all 220 Page Inbox echoes, timed against the
+      customer's message before each, two came sooner than 10 s: a card at
+      4.9 s and a 270-character "thanks for contacting us" at 8.6 s, both
+      shaped like an automation. The quickest typed reply took 13.2 s.
+      Instagram's welcome went 2–5.4 s after the customer. A reply refused
+      here leaves its ticket reading as unanswered, which somebody sees. One
+      filed wrongly reads as answered, which nobody does.
+
+      **Cost accepted:** the echo names no person, so the rollup credits the
+      first response to whoever holds the ticket then
+      (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
+      name by the Sales team, most on Customer Care tickets.
+
+      **The 220 Page Inbox echoes are still in `webhook_events`**, one per
+      delivery: 49 in `messaging` and 171 in `standby`, received 2026-10-13 to
+      2026-11-12 13:55 UTC, all marked processed. The nightly cleanup deletes a
+      processed delivery 30 days after it was processed. 13 go at 00:00 UTC on
+      2026-11-13, then a few most nights, and the last on 2026-12-13. Once this
+      is deployed, a replay files them, and a replay is a production write:
+      `process_webhook` skips a processed row. The deliveries are listed by:
+
+      ```sql
+      select distinct w.id from webhook_events w
+      cross join lateral jsonb_array_elements(case jsonb_typeof(w.payload->'entry')
+        when 'array' then w.payload->'entry' else '[]' end) en(entry)
+      cross join lateral (values ('messaging'), ('standby')) arr(k)
+      cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
+        when 'array' then en.entry->arr.k else '[]' end) e(value)
+      where w.provider = 'meta' and w.payload->>'object' = 'page'
+        and (e.value->'message'->>'is_echo')::boolean
+        and e.value->'message'->>'app_id' = '263902037430900';
+      ```
+
+      A replayed echo files only on its customer's live ticket, and only when
+      the ticket has a customer message no newer than the echo. So an old reply
+      whose customer has written again since, on a new ticket, stays out. One
+      whose ticket is closed stays out too.
+
+      For each id: set its `processed_at` to null, then run
+      `npm run job -- process_webhook webhookEventId=<id>`. Every other item in
+      a delivery is idempotent on a second run (`process-meta-webhook.ts`).
+      Then run `rollup_metrics from=2026-10-13` so the reports take the first
+      responses. The way back is deleting the rows the replay filed (`messages`
+      whose `meta->>'echoSource'` is `meta_business_suite`), which leaves the
+      tickets' `last_agent_message_at` and `first_responded_at` where the
+      replay moved them.
 
 ### Tooling notes for this environment
 

@@ -18,10 +18,10 @@ export async function GET(request: Request) {
   // none (`lib/kb/legacy-path.ts`, PROJECT-STATE §6.115).
   const answer = await resolveLegacyPath(legacyPathOf(request));
 
-  // 301 wherever the answer is the article the URL names: these URLs are never
-  // coming back, and a permanent redirect is what transfers the old page's
-  // search ranking to the new one. 302 while another translation stands in
-  // for one closed for now (`LegacyAnswer`).
+  // 301 wherever the answer is the article, folder or category the URL names:
+  // these URLs are never coming back, and a permanent redirect is what
+  // transfers the old page's search ranking to the new one. 302 while another
+  // translation stands in for one closed for now (`LegacyAnswer`).
   //
   // That permanence is also why the relative `Location` matters more here than
   // anywhere else: a browser caches a 301 indefinitely, so the internal listen

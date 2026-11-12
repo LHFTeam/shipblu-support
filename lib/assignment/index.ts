@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import {
   agentSkills,
   agents,
+  channels,
   conversationEvents,
   conversations,
   contacts,
@@ -23,11 +24,12 @@ import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { onCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
-import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
+import { alignAccountable, lockedOwnerId, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
@@ -90,6 +92,14 @@ export type SkipReason =
   | 'none_available'
   | 'all_at_capacity'
   | 'no_skill_match'
+  /**
+   * On a coexistence number, whose tickets only its owner and the agents who
+   * see every ticket can open (`lib/tickets/owner-only.ts`): with no active
+   * owner to hand it back to, the rota would give it to a group member it is
+   * hidden from. Left unassigned, it is in the Unassigned view of everybody
+   * who can see it. Never recorded, since the sweep asks again every pass.
+   */
+  | 'owner_only'
   /**
    * Held for the router (`lib/routing/hold.ts`): the ticket's group is not
    * settled yet, and whatever ends the hold assigns it then. Never recorded —
@@ -214,6 +224,12 @@ async function routeAndPick(
       requesterEmail: contacts.primaryEmail,
       formSlug: ticketForms.slug,
       accountableActive: accountable.isActive,
+      ownerOnly: sql<boolean | null>`${onCoexistenceNumber()}`,
+      // The number's owner while they are active (`effectiveOwnerId`), read
+      // without a lock: `takeForNumberOwner` reads it again under one.
+      numberOwnerId: sql<
+        string | null
+      >`(select ${channels.ownerAgentId} from ${channels} inner join ${agents} on ${agents.id} = ${channels.ownerAgentId} where ${channels.id} = ${conversations.channelId} and ${agents.isActive})`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -289,6 +305,25 @@ async function routeAndPick(
    */
   if (!endedHold && isHeld(conversation, now)) {
     return keepForHold(conversationId, options, pickFor);
+  }
+
+  // A coexistence number's ticket is its owner's or nobody's: it is hidden
+  // from the rota's candidates, a group's members. Asked ahead of the
+  // accountable agent below, and of the number rather than the ticket, because
+  // the two can disagree — a ticket that arrived while the owner was
+  // deactivated answers to nobody, and one adopted onto the row, or stamped
+  // before a handover it missed, to somebody who is not the owner — and here
+  // the number's word is the one that says who can open it. No owner is read
+  // off the snapshot, so the sweep, which comes back to an ownerless number's
+  // tickets on every pass, opens no transaction to learn it again.
+  if (ticket.ownerOnly) {
+    if (!ticket.numberOwnerId || !conversation.channelId) {
+      return { assignedTo: null, reason: 'owner_only' };
+    }
+    return takeForNumberOwner(conversationId, conversation.channelId, {
+      actorLabel: options.actorLabel,
+      now,
+    });
   }
 
   // The number's owner, ahead of everything the rota would ask — see the
@@ -767,6 +802,84 @@ async function handBackToOwner(
       .returning({ id: conversations.id });
     if (updated.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
 
+    await recordOwnerAssigned(tx, {
+      conversationId,
+      ownerId,
+      channelId,
+      actorLabel: actorLabel ?? 'auto_assign',
+    });
+    return { assignedTo: ownerId, reason: null };
+  });
+}
+
+/**
+ * Give an unassigned ticket on a coexistence number to the number's active
+ * owner, and make it theirs to answer for where it is not already.
+ *
+ * `handBackToOwner` for a number whose word outranks the ticket's. The owner
+ * is read under the channel's lock (`lockedOwnerId`), the one a handover
+ * waits on, and then the ticket's, the order a handover takes them; and the
+ * ticket is asked again whether anybody holds it and whether it is still work,
+ * as the hand-back asks and for its reasons. Taken off the snapshot, a ticket
+ * a supervisor picked up meanwhile was made accountable to the owner and
+ * reported unassignable, and one resolved meanwhile was handed to the owner
+ * with an `assigned` line after the resolve.
+ *
+ * A ticket accountable to somebody else, or to nobody, is realigned by
+ * `alignAccountable`, the one writer of accountability, which assigns it too
+ * since nobody holds it. Nothing else would: only a handover or a reopen
+ * writes accountability, and neither happens when an owner is reactivated.
+ */
+async function takeForNumberOwner(
+  conversationId: string,
+  channelId: string,
+  { actorLabel, now }: { actorLabel: string | undefined; now: Date },
+): Promise<Picked> {
+  return db.transaction(async (tx) => {
+    const ownerId = await lockedOwnerId(tx, channelId);
+    if (!ownerId) return { assignedTo: null, reason: 'owner_only' as SkipReason };
+
+    const [current] = await tx
+      .select({
+        assigneeAgentId: conversations.assigneeAgentId,
+        accountableAgentId: conversations.accountableAgentId,
+        channel: conversations.channel,
+        channelId: conversations.channelId,
+        statusId: conversations.statusId,
+        statusCategory: statusCategoryOf(),
+        deletedAt: conversations.deletedAt,
+        isSpam: conversations.isSpam,
+        mergedIntoId: conversations.mergedIntoId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .for('no key update');
+    if (!current || current.channelId !== channelId) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+    if (current.assigneeAgentId) {
+      return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    }
+    const statusCategory = await lockedStatusCategory(tx, current);
+    if (!isWorkToHandOut({ ...current, statusCategory })) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+
+    if (current.accountableAgentId !== ownerId) {
+      await alignAccountable(tx, {
+        conversationId,
+        ownerId,
+        channelId,
+        reason: 'owner_returned',
+        now,
+      });
+      return { assignedTo: ownerId, reason: null };
+    }
+
+    await tx
+      .update(conversations)
+      .set({ assigneeAgentId: ownerId, assignedAt: now })
+      .where(eq(conversations.id, conversationId));
     await recordOwnerAssigned(tx, {
       conversationId,
       ownerId,

@@ -19,7 +19,12 @@ import {
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
-import type { NormalisedComment, NormalisedDirectMessage } from '@/lib/meta/types';
+import { PAGE_INBOX_APP_ID } from '@/lib/meta/echo';
+import type {
+  NormalisedComment,
+  NormalisedDirectMessage,
+  NormalisedEcho as NormalisedMetaEcho,
+} from '@/lib/meta/types';
 import { settleRouting } from '@/lib/routing/apply';
 import type { RoutingMode } from '@/lib/routing/mode';
 import { SETTLE_ROUTING_PRIORITY } from '@/lib/routing/start';
@@ -29,7 +34,7 @@ import { appendVisitorMessage } from '@/lib/widget/conversation';
 import type { NormalisedEcho, NormalisedInboundMessage } from '@/lib/whatsapp/types';
 import { resolveContact } from './contacts';
 import { ingestInboundEmail } from './ingest';
-import { ingestMetaComment, ingestMetaMessage } from './ingest-meta';
+import { ingestMetaComment, ingestMetaEcho, ingestMetaMessage } from './ingest-meta';
 import { ingestWhatsAppEcho, ingestWhatsAppMessage } from './ingest-whatsapp';
 import { ingestWhatsAppHistoryChunk } from './ingest-whatsapp-history';
 
@@ -559,6 +564,55 @@ describe.each(PATHS)('$name', (path) => {
 });
 
 // --- What never routes ------------------------------------------------------
+
+describe('a reply typed in Meta Business Suite on a held Messenger ticket', () => {
+  // As an agent's reply in the console does (`storeAgentReply`): a person
+  // answered, so the hold ends with the reply, the ticket stays in its group,
+  // and the hold's follow-ups run.
+  it('ends the hold as manual and assigns the ticket through the rota', async () => {
+    const group = await staffedGroup();
+    await channel({
+      type: 'facebook',
+      name: 'Facebook',
+      defaultGroupId: group.id,
+      routingMode: 'category',
+    });
+    const opened = await ingestMetaMessage(dm());
+    expect((await ticketRow(opened.conversationId)).assigneeAgentId).toBeNull();
+
+    const echo: NormalisedMetaEcho = {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      mid: 'm_suite',
+      appId: PAGE_INBOX_APP_ID,
+      to: PSID,
+      accountId: 'page-1',
+      standby: false,
+      sentAt: new Date(SENT.getTime() + 2 * MINUTE),
+      text: 'هيتم التواصل خلال اليوم',
+      attachments: [],
+      replyToMid: null,
+      raw: { mid: 'm_suite' },
+    };
+    expect(await ingestMetaEcho(echo)).toMatchObject({ outcome: 'filed' });
+
+    expect(await decisions()).toMatchObject([
+      { conversationId: opened.conversationId, stage: 'decided', outcome: 'manual' },
+    ]);
+    expect(await events(opened.conversationId, 'routed')).toMatchObject([
+      { data: { outcome: 'manual' } },
+    ]);
+    expect(await ticketRow(opened.conversationId)).toMatchObject({
+      groupId: group.id,
+      assigneeAgentId: group.agentId,
+    });
+    expect((await ticketRow(opened.conversationId)).routingDecidedAt).toBeInstanceOf(Date);
+
+    // The window's end finds it decided and records nothing new.
+    expect(await settleRouting(opened.conversationId)).toBe('none');
+    expect(await events(opened.conversationId, 'routed')).toHaveLength(1);
+  });
+});
 
 describe('what starts nothing, whatever the column says', () => {
   it.each([

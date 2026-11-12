@@ -4,6 +4,7 @@ import {
   type MetaMessageMeta,
 } from '@/lib/meta/visibility';
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
+import { teamEchoChip, teamEchoLabel } from './team-echo';
 
 /**
  * How the ticket thread reads a message: whose voice it is, and what became
@@ -50,38 +51,39 @@ export type Voice = {
   kind: 'message' | 'note' | 'bot';
   author: string;
   avatar: 'contact' | 'agent' | 'bot' | 'business-app';
-  badges: { tone: 'note' | 'automated' | 'public' | 'private'; label: string }[];
+  badges: { tone: 'note' | 'automated' | 'public' | 'private' | 'elsewhere'; label: string }[];
 };
 
 export function voiceOf(message: ThreadMessage, meta: MessageMeta): Voice {
   const isInbound = message.direction === 'inbound';
   const isNote = message.kind === 'note';
-  const businessApp = meta.echo === true && meta.echoSource === 'business_app';
+  const typedElsewhere = teamEchoLabel(meta);
 
   /*
     An echo has no author on either side: no agent wrote it and the customer
     did not send it. "Automation" would be technically true and useless — it
-    was the customer bot, or the business typing on the WhatsApp Business app
-    of a number connected through coexistence, and saying which one matters
-    most. The bot's echoes predate `echoSource`, so its absence is the bot.
+    was the customer bot, or the team typing somewhere other than this console:
+    the WhatsApp Business app of a number connected through coexistence, or
+    Meta Business Suite on a Messenger thread this app holds. Saying which one
+    matters most. The bot's echoes predate `echoSource`, so its absence is the
+    bot (`teamEchoLabel`).
   */
   const author =
     message.authorName ??
-    (meta.echo
-      ? businessApp
-        ? 'WhatsApp Business app'
-        : 'Customer bot'
-      : isInbound
-        ? 'Customer'
-        : 'Automation');
+    (meta.echo ? (typedElsewhere ?? 'Customer bot') : isInbound ? 'Customer' : 'Automation');
 
-  // A person typed the business-app echo, on the phone; everything else on
-  // our side with no agent behind it was written by a machine, and says so.
-  const machine = !isInbound && !isNote && !message.authorIsAgent && !businessApp;
+  // The team typed an echo it filed as its reply, on the phone or in Business
+  // Suite; everything else on our side with no agent behind it was written by
+  // a machine, and says so.
+  const machine = !isInbound && !isNote && !message.authorIsAgent && !typedElsewhere;
 
   const badges: Voice['badges'] = [];
   if (isNote) badges.push({ tone: 'note', label: 'Private note' });
   if (machine) badges.push({ tone: 'automated', label: 'Automated' });
+  // The team's reply, typed outside this console: said in so many words, so it
+  // is told from an agent's reply at a glance and not only by its author line.
+  const sentFrom = teamEchoChip(meta);
+  if (sentFrom) badges.push({ tone: 'elsewhere', label: sentFrom });
   // Whether a reply was public is the thing an agent most needs to be sure of
   // on a social ticket, so it is stated rather than implied by which side the
   // bubble is on.
@@ -106,7 +108,7 @@ export function voiceOf(message: ThreadMessage, meta: MessageMeta): Voice {
         ? 'bot'
         : isInbound
           ? 'contact'
-          : businessApp
+          : typedElsewhere
             ? 'business-app'
             : 'bot',
     badges,

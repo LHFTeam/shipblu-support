@@ -256,8 +256,9 @@ export async function applySlaOnCreate(conversationId: string): Promise<void> {
  * reporting measures response time whether or not anyone committed to a target.
  *
  * `at` is when the reply was written, and it need not be the newest thing on
- * the ticket. A reply typed on the WhatsApp Business app arrives as an echo,
- * and deliveries are processed in no order (`docs/PROJECT-STATE.md` §6.77), so
+ * the ticket. A reply typed on the WhatsApp Business app, or in Meta Business
+ * Suite on a Messenger thread, arrives as an echo (`ingestWhatsAppEcho`,
+ * `ingestMetaEcho`), and deliveries are processed in no order (`docs/PROJECT-STATE.md` §6.77), so
  * a phone reply typed at 10:00 can be processed after the customer's 10:05
  * message. It answered what came before it, not that message, so the clocks
  * come out as they would have in arrival order — the SLA must not depend on

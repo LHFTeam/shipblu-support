@@ -39,7 +39,7 @@ describe('realtime SQL producer contract', () => {
     );
   });
 
-  // Who answers for a ticket decides who may see it (`answerableBy`), so a
+  // Who answers for a ticket decides who may see it (`heldByOrInGroupsOf`), so a
   // handover that moves only that column must reach the queues as a
   // reassignment does — or the new owner's list lacks the tickets that now
   // count against them until they reload.
