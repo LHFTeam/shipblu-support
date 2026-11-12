@@ -337,14 +337,14 @@ the cutover swaps the default app, and a recording of a reply Graph refuses is a
 rejected submission. `docs/PROJECT-STATE.md` §5.1 has the arrangement; it is
 deliberate and temporary, not a fault to chase.
 
-_2026-11-12: Instagram has been this app's since 2026-11-05, and Meta has
-handed each new Messenger thread to it since 09:50 UTC on 2026-11-11, so a send
-on a new thread can now be filmed. Agents answered Messenger from the console
-on 2026-11-12. Threads opened before the switch still arrive in `standby`
-(`docs/PROJECT-STATE.md` §5.1)._
+That reordered the whole list below: the seven unlock calls and the permission
+edits could be done at once, and the recording only after the swap.
 
-That reorders the whole list below: the seven unlock calls and the permission
-edits can be done now, and the recording cannot.
+_2026-11-12: that is no longer true for Instagram, which has been this app's
+since 2026-11-05, or for Messenger. Meta has handed each new Messenger thread to
+this app since 09:50 UTC on 2026-11-11, and an older thread can be answered once
+an agent takes it with Take control. Agents answered Messenger from the console
+on 2026-11-12. So a send can now be filmed (`docs/PROJECT-STATE.md` §5.1)._
 
 The rest of this section moved. The blockers are live-infrastructure state, they changed
 twice while this file was being written, and keeping a second copy of them here
@@ -648,7 +648,9 @@ flow below.
 **What is different, and it is good news: the comment screencast is not blocked
 by thread control.** Every _messaging_ screencast on this submission is blocked
 until the Freshworks cutover, because another app holds thread control and every
-send is refused. Comments do not go through the handover protocol at all —
+send is refused. _2026-11-12: no longer true for Instagram (since 2026-11-05) or
+for a Messenger thread opened since 2026-11-11 09:50 UTC, or taken with Take
+control; see the note under "The other blocker is not a permission"._ Comments do not go through the handover protocol at all —
 `deliver()` in `worker/handlers/send-meta.ts` returns on the `comment_reply`
 branch before it ever consults `thread.canSend`, because a comment is answered
 on the comment edge. So a Facebook comment ticket can be worked end to end as
@@ -1196,16 +1198,22 @@ What the reviewer has to see is a person answering between 24 hours and 7 days
 after the customer wrote. Three facts decide how that can be filmed, and none
 of them are obvious from the dashboard:
 
-- **Film it on Instagram, not Messenger.** Freshworks still holds thread control
-  on the Page (`docs/PROJECT-STATE.md` §5.1), so every Messenger send is refused
-  before the tag is even read. The direct Instagram connection is outside the
-  Page's handover protocol and can send today. That is also the connection the
+- **Film it on Instagram, not Messenger.** Until 2026-11-11 another app held
+  thread control on the Page (`docs/PROJECT-STATE.md` §5.1), so every Messenger
+  send on a thread nobody had taken was refused before the tag was even read;
+  the note at the end of this bullet says what changed. The direct Instagram connection was outside the
+  Page's handover protocol and could send until its token expired on
+  2026-10-29; Instagram now sends over Unified Login, with this app the
+  account's default app since 2026-11-05. That is also the connection the
   09-06 refusal came back on, so it is the connection the feature request has
   to cover. _2026-11-12: a new Messenger thread is this app's since
   2026-11-11, and two console replies outside the 24 hours came back from
   `graph.facebook.com` as "Cannot tag messages with 'HUMAN_AGENT' without prior
-  approval" (code 100, subcode 2018276). So Messenger can be filmed too, on a
-  thread opened since then._ Check in the dashboard that the request is filed against the
+  approval" (code 100, subcode 2018276). One of the two was on a thread
+  opened before the switch, which an agent had taken with Take control, and
+  the same refusal came back on taken threads on 2026-11-07. So Messenger can
+  be filmed too: on a thread opened since then, or on an older one once it is
+  taken._ Check in the dashboard that the request is filed against the
   Instagram product as well as Messenger; `FEATURES` lists one entry per
   connection because Meta treats them separately.
 - **The role-holder exemption does not apply.** It covers permissions at

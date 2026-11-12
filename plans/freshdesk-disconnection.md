@@ -26,10 +26,11 @@ account to close.
   2026-11-10), and PR 5 with #504 in #508 (`7605993`, all six services live by
   14:19:54 UTC on 2026-11-11). PR 6 waits for the disconnection.
 - **The domain moved on 2026-11-11.** The CNAME's TTL already read 1800 at
-  13:44 UTC. The CNAME was switched between 19:30, when Freshdesk last
-  answered there, and 20:54:12, when the web service logged its first request
-  for the host. By 20:58 resolvers answered `shipblu-support.onrender.com`,
-  with a TTL of 14400 again. Freshdesk's copy of the knowledge base is no longer
+  13:44 UTC. The CNAME was switched between about 19:00 and 20:54:12, when the
+  web service logged its first request for the host: Freshdesk still answered
+  a sweep at 19:30, but with a 1800 s TTL a resolver could have held the old
+  answer for half an hour. By 20:58 resolvers answered
+  `shipblu-support.onrender.com`, with a TTL of 14400 again. Freshdesk's copy of the knowledge base is no longer
   reachable there. Of the 58 legacy article ids, 54 answer with a 301 to an
   article that answers 200, and the 4 agents-only ones answer 404. Every
   outside link in the tables below now lands here: the phone's nine ids, the
@@ -319,7 +320,12 @@ Zoho, which receives the domain's mail (MX `mx.zoho.com`), and nobody has read
 it. On 2026-11-12 the SPF record still read
 `v=spf1 include:zoho.com include:_spf.google.com include:email.freshdesk.com include:_spf.odoo.com ~all`.
 Treat all three addresses as "probably Freshdesk" until somebody reads the
-routing.
+routing. _Since 14:28 UTC on 2026-11-11, `help@shipblu.com` has reached this
+app: 182 of the 195 inbound deliveries Postmark brought by 16:08 UTC on
+2026-11-12 name it, the first Postmark deliveries in the 30 days kept. Whether
+Zoho still also delivers it to Freshdesk was not read. None named `tech@`, and
+one named `support@` beside another address, so where those two deliver is
+still unread._
 
 **Wording.** `en/file-a-claim` and `ar/الشحنات-التالفة` send readers to "our
 Support Portal" / "بوابة الدعم", without a link. The only portal customers know
@@ -510,8 +516,9 @@ ids in all.
 
 **Measured again on 2026-11-11, on `7605993`.** All 207 routes answered 307
 to an image, again 205 PNG and 2 JPEG. Full navigations of all 61 articles
-with pictures drew all 214 from the route and none from Freshdesk. That held
-on `support.shipblu.com` too, once the domain had moved.
+with pictures drew all 214 from the route and none from Freshdesk, on the
+Render host. After the domain moved, an article page and an image route
+answered the same on `support.shipblu.com`.
 
 ### 2. Keep Freshdesk links from coming back
 
@@ -590,8 +597,11 @@ row has been cut since 2026-09-03, and no article has been updated after the
 copy job at 21:14 UTC on 2026-11-08. A Save that changes nothing, or one that
 is refused, leaves no trace, so this cannot say none was tried. #504, deployed
 in #508, added `freshservice` to the pattern the copy job selects pictures by
-(`isFreshworksImage`), so every picture Save refuses is one the copy job would
-copy. The guard already refused `freshservice.com`.
+(`isFreshworksImage`), so every picture on a Freshworks host that Save refuses
+is one the copy job selects (it copies those it may fetch over HTTPS). The
+guard already refused `freshservice.com`. A picture under a Freshdesk portal
+path, such as `/helpdesk/attachments/…` with no host or on
+`support.shipblu.com`, is refused by Save and not selected; none is stored.
 
 ### 3. Freshdesk's old URLs resolve through the proxy — blocking the domain move
 
@@ -829,9 +839,9 @@ The state column is as measured on 2026-11-11 and 2026-11-12.
 | Merchant dashboard (app.shipblu.com) | Point the 16 help links at this help centre (table above) and replace the Freshchat loader with this app's widget, per `docs/embedding-the-widget.md`. `app.shipblu.com` is already in the widget's `frame-ancestors`.                                                       | Open. The 16 links land here through the domain move. Freshchat is still loaded, and so is a Zendesk widget. The 2 links to the older Freshdesk account still 404.                                                    |
 | Marketing site and go.shipblu.com    | Point "Support" somewhere that is not Freshdesk, or leave it on `support.shipblu.com` and let the domain move fix it.                                                                                                                                                        | Done by the domain move: `https://support.shipblu.com/` now answers 307 to `/ar` here.                                                                                                                                |
 | App Store Connect                    | The myBlu listing's support URL, as above.                                                                                                                                                                                                                                   | Done by the domain move, as above.                                                                                                                                                                                    |
-| Mail admin (Zoho)                    | Say where `support@shipblu.com`, `help@shipblu.com` and `tech@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing (after the disconnection). | Open. Nobody has read the routing. SPF still includes `email.freshdesk.com`.                                                                                                                                          |
+| Mail admin (Zoho)                    | Say where `support@shipblu.com`, `help@shipblu.com` and `tech@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing (after the disconnection). | Partly. `help@` has reached this app since 2026-11-11 14:28 UTC (above). Where `support@` and `tech@` deliver is unread. SPF still includes `email.freshdesk.com`.                                                    |
 | Meta (the Page's settings)           | Messenger's swap, per §5.1 of `docs/PROJECT-STATE.md`.                                                                                                                                                                                                                       | Not confirmed. Since 09:50 UTC on 2026-11-11, new Messenger threads have been handed to this app. Older threads still arrive in `standby`, and nothing here can read whether Freshchat is still the primary receiver. |
-| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME was switched between 19:30 and 20:54 UTC. The first request reached the web service at 20:54:12, and by 20:58 resolvers answered with the Render host.                                  |
+| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                                                                    | Done on 2026-11-11: the CNAME was switched between about 19:00 and 20:54 UTC. The first request reached the web service at 20:54:12, and by 20:58 resolvers answered with the Render host.                            |
 
 ## Checklist before Freshdesk is disconnected
 
@@ -896,19 +906,12 @@ Order matters. The check beside each item is what proves it, not the merge.
       host. Done: deployed 2026-11-10 (#502), and measured on 2026-11-11.
 - [x] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead. It
       already read 1800 at 13:44 UTC on 2026-11-11, more than one 14400 s TTL
-      before the switch (after 19:30), and has been 14400 again since the
+      before the switch (after about 19:00), and has been 14400 again since the
       switch.
 - [x] **Add `support.shipblu.com` as a custom domain** on the
       `shipblu-support` web service, then switch the CNAME and wait for the
       certificate. Done 2026-11-11. The web service logged its first request
       for the host at 20:54:12 UTC, and HTTPS answers there.
-- [ ] **Write the domain into `render.yaml`.** It was added in the
-      dashboard, and the blueprint declares no `domains:` for
-      `shipblu-support`, so the file no longer describes the running service
-      (AGENTS.md, **Land config in the repo too**). Its own small change into
-      `dev`: `render.yaml` reaches production by the merge into `main`, and a
-      Blueprint sync applies what it says (`docs/PROJECT-STATE.md` §2). Say
-      so in §2's service table in the same change.
 - [ ] **Only then** set `KB_PUBLIC_HOST=support.shipblu.com` — a bare
       hostname, because `proxy.ts` compares it with `Host` as written — on the
       web service **and** the worker, which builds the survey and portal-email
@@ -928,6 +931,15 @@ Order matters. The check beside each item is what proves it, not the merge.
       variable: the article answers 200 and the Freshdesk URLs 301. `BASE`,
       the sitemap and the canonicals name the Render host, and `/inbox` goes
       to the console's sign-in._
+
+- [ ] **Write the domain into `render.yaml`**, independent of the variable
+      and of its check. It was added in the dashboard, and the blueprint
+      declares no `domains:` for `shipblu-support`, so the file no longer
+      describes the running service (AGENTS.md, **Land config in the repo
+      too**). Its own small change into `dev`: `render.yaml` reaches
+      production by the merge into `main`, and a Blueprint sync applies what
+      it says (`docs/PROJECT-STATE.md` §2). Say so in §2's service table in
+      the same change.
 
 **After the disconnection**
 
@@ -966,7 +978,8 @@ What "zeros where it says" means after the disconnection:
 The link patterns no longer name `support.shipblu.com`, since the domain is
 ours: a `/<locale>/a/<slug>` link there is a good one. The path alternatives
 are the portal shapes Save refuses (`PORTAL_PATH` in
-`lib/kb/freshdesk-refs.ts`), so they catch every Freshdesk shape on that host.
+`lib/kb/freshdesk-refs.ts`), ending where a path ends, at a `/`, a `?`, a `#`
+or the end of the link, so they catch every Freshdesk shape on that host.
 On 2026-11-12 this pattern counted exactly what the old one did, because
 nothing of the other shapes is stored.
 
@@ -981,11 +994,11 @@ where m[1] ~* '(freshdesk|freshworks|freshchat|freshservice|fwcdn|fw-cdn|fwuserc
 union all
 select 'links, live', count(*), count(distinct a.id)
 from kb_articles a, regexp_matches(a.body_html, 'href="([^"]*)"', 'gi') m
-where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$)|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$)|/helpdesk/attachments(/|$))'
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$|[?#])|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$|[?#])|/helpdesk/attachments(/|$|[?#]))'
 union all
 select 'links, versions', count(*), count(distinct v.id)
 from kb_article_versions v, regexp_matches(v.body_html, 'href="([^"]*)"', 'gi') m
-where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$)|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$)|/helpdesk/attachments(/|$))'
+where m[1] ~* '(fresh(desk|works|chat|service)|myfreshworks|fwcdn|fw-cdn|/solutions/(articles|folders|categories)(/|$|[?#])|/support/(solutions|home|tickets|login|search|signup|profile|discussions|topics)(/|$|[?#])|/helpdesk/attachments(/|$|[?#]))'
 union all
 select 'phone/app sends, 7 days', count(*), count(distinct conversation_id)
 from messages
@@ -1026,5 +1039,5 @@ set, it should read `https://support.shipblu.com`.
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/inbox
 ```
 
-On 2026-11-12, `307` to `/login`: the console, because `KB_PUBLIC_HOST` is not
-set. It should become the help centre's `404`.
+On 2026-11-12, `307` to `/login`: the console, because `KB_PUBLIC_HOST` is
+unset or names the Render host. It should become the help centre's `404`.

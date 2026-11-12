@@ -530,10 +530,12 @@ a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
-duplicate — but note that **a key is spent for good, not until its job
-finishes**: `jobs_dedupe_idx` is a plain unique index over the whole table, so
-the conflict target still matches a job that completed months ago, and a job that
-reached `dead` is never cleaned up at all. Key on the subject only where the work
+duplicate — but note that **a key stays spent after its job finishes**:
+`jobs_dedupe_idx` is a plain unique index over the whole table, so the conflict
+target still matches a completed job until the nightly cleanup deletes it, seven
+days on (`completedJobRetentionFilter` in `worker/handlers/cleanup.ts`), and a
+job that reached `dead` is never cleaned up at all, so its key is spent for
+good. Key on the subject only where the work
 is genuinely once-ever for it (one send, one media download). Anything that might
 legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
@@ -2926,7 +2928,9 @@ deleting it, and drop the sections that genuinely do not apply.
 
 Back any claim about production with a query or a log line. "Phase N is
 complete" in the docs describes the codebase, never the product — the system
-still cannot take a real human support ticket. But do not read "not configured"
+could not take a real human support ticket until 2026-11-12, when the
+team began answering web chat, Messenger and email from the console (§1 of
+`docs/PROJECT-STATE.md` has the figures). But do not read "not configured"
 as "no data" either: the bot channel has been copying real traffic in since
 August, so there is an archive worth measuring against. `docs/PROJECT-STATE.md`
 §1 carries the current figures; that is the file that gets updated, not this one.

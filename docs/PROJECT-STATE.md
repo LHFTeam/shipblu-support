@@ -43,8 +43,10 @@ deployed since). Which variables changed cannot be read. Neither change set
 cannot be read. **And `support.shipblu.com` moved here**, the first time the
 name has pointed at this app (§5.1 measured in August that it never had). The
 CNAME's TTL already read 1800 at 13:44 UTC. The CNAME was switched between
-19:30, when Freshdesk last answered there, and 20:54:12, when the web service
-logged its first request for the host, and by 20:58 resolvers answered
+about 19:00 and 20:54:12, when the web service logged its first request for the
+host: Freshdesk still answered a sweep at 19:30, but with a 1800 s TTL a
+resolver could have held the old answer for half an hour. By 20:58 resolvers
+answered
 `shipblu-support.onrender.com`, with a TTL of 14400 again. With the published
 base still the Render host (`KB_PUBLIC_HOST` unset or naming it), the domain is
 served as a console host rather than as the help centre's (§5.1). See
@@ -1028,7 +1030,9 @@ whether her figures mean anything; §5.5 has what they still leave out. See
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
-verification, and cutover. But the team has started arriving: **11 agents** as of
+verification, and cutover. _2026-11-12: no longer true of web chat, Messenger
+and email, which the team began answering from the console that day (§5.1).
+The cutover is under way, not done._ But the team has started arriving: **11 agents** as of
 2026-09-20, up from 3, of whom 10 have signed in at least once, and 161
 conversations now carry an assignee. The capture tables the productivity report
 reads are filling accordingly — 5,203 backlog snapshots, 479 presence intervals
@@ -1528,7 +1532,12 @@ row will look for.
 ### 5.1 Configuration and cutover — the real remaining work
 
 The system cannot take a single real ticket until this is done, and none of it
-is code:
+is code. _2026-11-12: the team began answering real tickets from the console.
+By about 16:20 UTC that day, agents had sent 57 web chat replies in 24
+conversations, 33 Messenger replies in 10 and 6 email replies in 5, where the
+day before there were none. `help@shipblu.com` mail has reached this app since
+14:28 UTC on 2026-11-11 (the knowledge-base bullet below). What follows is what
+the rest of the cutover still needs, and some of it is now partly done:_
 
 - **Freshworks is still the live support service, and until November it was
   the default Meta app on the account.** This is the fact that explains the
@@ -1572,8 +1581,10 @@ is code:
   conversations had messages in `messaging` since the switch: five new
   threads, and one opened earlier that an agent had taken control of in the
   console at 09:51:47. All six read as unanswered (`first_responded_at` and
-  `last_agent_message_at` null). Business Suite had replied on four of them,
-  so their SLA clocks ran as though nobody had replied. A ticket answered in
+  `last_agent_message_at` null). Business Suite had replied on five of them:
+  on four in `messaging` since the switch, and on the older one in `standby`
+  that morning, before it was taken. So their SLA clocks ran as though nobody
+  had replied. A ticket answered in
   Business Suite keeps reading as unanswered until one of two things changes:
   the team answers in the console, or the echo of a reply typed elsewhere is
   filed, as WhatsApp's coexistence echoes are._
@@ -1585,8 +1596,10 @@ is code:
   "Cannot tag messages with 'HUMAN_AGENT' without prior approval". Those two
   were outside the 24 hours, where the reply goes out tagged `HUMAN_AGENT`,
   and the feature is still not approved (§5.2). This app's previous Messenger
-  reply had gone out on 2026-11-09. By 15:20 UTC, four of the six
-  conversations above had a console reply._
+  reply had gone out on 2026-11-09. By 15:20 UTC, three of the six
+  conversations above had a console reply, one of them the reply Meta refused
+  at 14:39. A fourth had only an internal note, and two had nothing from the
+  console._
 
   The consequence is that every Meta event reaches this system in the handover
   protocol's `standby` array rather than `messaging`. A secondary receiver may
@@ -1595,15 +1608,18 @@ is code:
   `lib/meta/thread.ts` refuses those sends before Graph does (§6.22). Nothing
   about that is a credential, an approval or a bug — do not go looking for one.
   _Since 2026-11-05 this no longer holds for Instagram. Since 09:50 UTC on
-  2026-11-11 it holds only for Messenger threads opened before then; new
-  threads arrive in `messaging` (above)._
+  2026-11-11 it holds only for Messenger threads opened before then that no
+  agent has taken with Take control (`thread_control_taken`); new threads
+  arrive in `messaging` (above)._
 
   **The plan is a swap, not a negotiation.** When this service is ready, the
   Freshworks app is removed from the Meta account and this service's Meta app
   becomes the default; thread control follows the default app. Until that
-  happens, treat **Messenger threads opened before 2026-11-11 09:50 UTC** as
-  read-only in practice however the code is configured. Newer threads are this
-  app's to answer (above).
+  happens, a Messenger thread opened before 2026-11-11 09:50 UTC arrives in
+  `standby`, and the console can answer it only after an agent takes it with
+  Take control (`thread_control_taken`), as agents did on 2026-11-07,
+  2026-11-09, 2026-11-11 and 2026-11-12. Newer threads are this app's to
+  answer without that step (above).
 
   **Instagram is the exception as of 2026-08-30, and it is the way out of this
   paragraph.** _(The route changed on 2026-11-04: the Instagram Login token
@@ -1620,8 +1636,9 @@ is code:
   answered from here before the swap — which also means the Instagram App Review
   screencast can be recorded before it. `standby` on a Page delivery no longer
   refuses an Instagram send; see §6.36 and `lib/meta/connection.ts`. Messenger
-  has no equivalent second route. Its threads opened before 2026-11-11 still
-  wait for the swap; newer ones do not (above).
+  has no equivalent second route. Its threads opened before 2026-11-11 arrive
+  in `standby` until an agent takes control of them in the console; newer ones
+  are this app's from the start (above).
 
   Two things follow that are easy to get wrong. **The App Review screencasts
   cannot be recorded before the swap** — `pages_messaging` and the comment
@@ -1634,12 +1651,15 @@ is code:
   not at all, so the channel rows, the agents and the groups below need to be
   in place first rather than after. _On 2026-11-11 the new Messenger threads
   had a third answer: Business Suite, where the console never sees it (above).
-  From 2026-11-12 the team answers them here._
+  On 2026-11-12 the team began answering them here as well, but Business Suite
+  still sent 6 replies that day, the last at 13:55 UTC, while the console was
+  in use._
 
 - **The knowledge base no longer depends on Freshdesk, and
   `support.shipblu.com` answers from this app. What is left of the
-  disconnection is setting `KB_PUBLIC_HOST`, writing the domain into
-  `render.yaml`, and work owned outside this repository.** The record and the
+  disconnection is setting `KB_PUBLIC_HOST`, deciding whether to run the
+  import once more, writing the domain into `render.yaml`, and work owned
+  outside this repository.** The record and the
   checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
   stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
   images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
@@ -1664,7 +1684,7 @@ is code:
   - **PR 5, the crawler files on every host, with its review fixes** (#508,
     2026-11-11).
 
-  **The domain moved on 2026-11-11**, between 19:30 and 20:54 UTC (the
+  **The domain moved on 2026-11-11**, between about 19:00 and 20:54 UTC (the
   header). `KB_PUBLIC_HOST` still does not name it, so the host is served as a
   console host. Freshdesk's bookmarks there, `/support/home` and
   `/support/tickets/new`, go to the console's sign-in, and so does `/inbox`.
@@ -1686,8 +1706,11 @@ is code:
     Freshdesk account (`shipblu.freshdesk.com`) still 404. It still loads
     Freshchat, and a Zendesk widget besides. shipblu.com loads the same
     Zendesk widget.
-  - **Mail.** Nobody has read where `support@`, `help@` (in 15 articles) and
-    `tech@` (in 2) deliver, and SPF still includes `email.freshdesk.com`.
+  - **Mail.** `help@` (in 15 articles) has reached this app since 14:28 UTC
+    on 2026-11-11: 182 of the 195 inbound deliveries Postmark brought by 16:08
+    on 2026-11-12 name it. Whether Zoho still also delivers it to Freshdesk
+    was not read. Nobody has read where `support@` and `tech@` (in 2) deliver,
+    and SPF still includes `email.freshdesk.com`.
   - **Article wording.** "Support Portal" is in 2 articles, and the chat
     instruction in 16 (the plan counted 15).
   - **Messenger's swap** (the bullet above).
@@ -1700,7 +1723,11 @@ is code:
   date, recorded here. None of these has happened.
 
 - **Instagram through Unified Login — the next configuration task, and none of
-  it is a deploy.** The direct connection's token expired on 2026-10-29 (the
+  it is a deploy.** _Done by 2026-11-05 (§6.108): the token is
+  set, and Instagram has been answered over Unified Login since. What is left
+  of this bullet is its tail, disconnecting the Instagram Login connection and
+  unsetting its variables in §6.29's order, which was not read on 2026-11-12._
+  The direct connection's token expired on 2026-10-29 (the
   header), so Instagram answers nothing until a credential is in place, and
   the one to put in place is the Unified Login connection
   (`plans/instagram-unified-login.md`), whose system-user token never expires
@@ -2734,7 +2761,12 @@ RESPONSE` was on every one of those bodies and the accepted one, so it is
   channel that is most of them. What is missing is the approval on the
   **Instagram Login** submission, the connection the send is routed over, whose
   permissions are spelled `instagram_business_*`; an approval on the Page
-  connection is a different grant and does not reach that host.
+  connection is a different grant and does not reach that host. _2026-11-12:
+  Instagram now sends over Unified Login, on `graph.facebook.com` (§6.108),
+  and two Messenger replies over the Page connection were refused with code
+  100, subcode 2018276, "Cannot tag messages with 'HUMAN_AGENT' without prior
+  approval" (§5.1). So the request has to cover the Page's Messenger product
+  as well as Instagram._
 
   **It also retires the request-shape candidate.** The 2026-08-20 refusal named
   nothing, so the Messenger-shaped body — `messaging_type: MESSAGE_TAG` on an

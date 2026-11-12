@@ -29,9 +29,12 @@ dashboard pointing at production opens production's chat.
 **A third-party origin must be allowlisted before the frame will load.** The
 `/widget` route answers with `frame-ancestors 'self' …WIDGET_ALLOWED_ORIGINS`,
 so `https://app.shipblu.com` has to be in that variable or the merchant sees a
-launcher that opens an empty box. Measured 2026-08-31, production answers
-`frame-ancestors 'self';` — the variable is unset, and setting it is the first
-step of any rollout.
+launcher that opens an empty box. Measured 2026-08-31, production answered
+`frame-ancestors 'self';`: the variable was unset. Measured 2026-11-12, on both
+hosts, it answers `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`, so those origins can
+frame the widget today, and any other has to be added first.
 
 ## What it puts on your page
 
