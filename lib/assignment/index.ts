@@ -24,6 +24,7 @@ import { recordHeldAssignment } from '@/lib/routing/held-assignment';
 import { isHeld } from '@/lib/routing/hold';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { assignTicket, lockHolders } from '@/lib/tickets/assignee';
 import { onCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
@@ -416,9 +417,14 @@ async function routeAndPick(
      * FOR UPDATE would also stop every message inserted on the ticket — whose
      * foreign key takes KEY SHARE — until the pick below had committed.
      */
+    // Who may hold a ticket on its number, before the ticket's row is locked:
+    // the number's lock first, the order a handover takes them
+    // (`lib/tickets/assignee.ts`).
+    const holders = await lockHolders(tx, conversation.channelId);
     const [current] = await tx
       .select({
         assigneeAgentId: conversations.assigneeAgentId,
+        channelId: conversations.channelId,
         groupId: conversations.groupId,
         routingWindowEndsAt: conversations.routingWindowEndsAt,
         routingDecidedAt: conversations.routingDecidedAt,
@@ -443,6 +449,15 @@ async function routeAndPick(
     }
     if (current.groupId !== groupId) return { assignedTo: null, reason: 'moved' as SkipReason };
     if (isHeld(current, now)) return { assignedTo: null, reason: 'awaiting_route' as SkipReason };
+    // Filed under a number since the snapshot (`fileUnderNumber`), so `holders`
+    // answers for a number the ticket is no longer on; or on a coexistence
+    // number the snapshot did not read as one. Either way the rota picks
+    // nobody, before it reads a roster or moves a cursor: the next pass reads
+    // the ticket as it now is, and asks the number's owner.
+    if (current.channelId !== holders.channelId) {
+      return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    }
+    if (holders.ownerOnly) return { assignedTo: null, reason: 'owner_only' as SkipReason };
 
     /*
      * Serialise this group's assignments against each other.
@@ -490,12 +505,14 @@ async function routeAndPick(
     // Still guarded, the module's one invariant, though the row is locked; and
     // checked, so a write that matched nothing advances no cursor and records
     // no assignment that did not happen.
-    const taken = await tx
-      .update(conversations)
-      .set({ assigneeAgentId: agentId, assignedAt: now })
-      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)))
-      .returning({ id: conversations.id });
-    if (taken.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    const taken = await assignTicket(tx, holders, {
+      conversationId,
+      to: agentId,
+      at: now,
+      onlyIf: isNull(conversations.assigneeAgentId),
+    });
+    if (taken === 'hidden') return { assignedTo: null, reason: 'owner_only' as SkipReason };
+    if (taken === 'missed') return { assignedTo: null, reason: 'already_assigned' as SkipReason };
 
     await tx.update(groups).set({ lastAssignedAgentId: agentId }).where(eq(groups.id, groupId));
 
@@ -766,6 +783,8 @@ async function handBackToOwner(
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
 ): Promise<Picked> {
   return db.transaction(async (tx) => {
+    // The number's lock before the ticket's (`lib/tickets/assignee.ts`).
+    const holders = await lockHolders(tx, channelId);
     const [current] = await tx
       .select({
         assigneeAgentId: conversations.assigneeAgentId,
@@ -795,12 +814,18 @@ async function handBackToOwner(
       return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     }
 
-    const updated = await tx
-      .update(conversations)
-      .set({ assigneeAgentId: ownerId, assignedAt: now })
-      .where(and(eq(conversations.id, conversationId), isNull(conversations.assigneeAgentId)))
-      .returning({ id: conversations.id });
-    if (updated.length === 0) return { assignedTo: null, reason: 'already_assigned' as SkipReason };
+    // `hidden` is a ticket on a coexistence number whose accountable agent is
+    // not the number's owner: the snapshot read it before it was filed there,
+    // or before the row became a coexistence number. The number's word
+    // outranks the ticket's (`takeForNumberOwner`), and the next pass asks it.
+    const updated = await assignTicket(tx, holders, {
+      conversationId,
+      to: ownerId,
+      at: now,
+      onlyIf: isNull(conversations.assigneeAgentId),
+    });
+    if (updated === 'hidden') return { assignedTo: null, reason: 'owner_only' as SkipReason };
+    if (updated === 'missed') return { assignedTo: null, reason: 'already_assigned' as SkipReason };
 
     await recordOwnerAssigned(tx, {
       conversationId,
@@ -838,6 +863,7 @@ async function takeForNumberOwner(
   return db.transaction(async (tx) => {
     const ownerId = await lockedOwnerId(tx, channelId);
     if (!ownerId) return { assignedTo: null, reason: 'owner_only' as SkipReason };
+    const holders = await lockHolders(tx, channelId);
 
     const [current] = await tx
       .select({
@@ -876,10 +902,8 @@ async function takeForNumberOwner(
       return { assignedTo: ownerId, reason: null };
     }
 
-    await tx
-      .update(conversations)
-      .set({ assigneeAgentId: ownerId, assignedAt: now })
-      .where(eq(conversations.id, conversationId));
+    const taken = await assignTicket(tx, holders, { conversationId, to: ownerId, at: now });
+    if (taken !== 'assigned') return { assignedTo: null, reason: 'not_assignable' as SkipReason };
     await recordOwnerAssigned(tx, {
       conversationId,
       ownerId,

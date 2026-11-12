@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { logger } from '@/lib/log';
@@ -14,7 +14,7 @@ import {
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
-import { lockedOwnerId, ownerStamp, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
+import { lockedOwnerId, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -22,6 +22,8 @@ import type {
   NormalisedStatus,
 } from '@/lib/whatsapp/types';
 import { windowState } from '@/lib/whatsapp/window';
+import { assignConversation } from '@/lib/assignment';
+import { fileUnderNumber, ownerStamp } from './assignee';
 import { isReadOnlyChannel } from './channel-policy';
 import { findContactByIdentity, resolveContact } from './contacts';
 import { UNNAMED_SUBJECT } from './customer-text';
@@ -370,10 +372,12 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
   const { contactId } = await resolveContact({ channel: 'whatsapp', identifier: echo.to });
   const thread = threadKey(channel);
 
-  const result = await db.transaction(async (tx) => {
+  const stored = await db.transaction(async (tx) => {
     let conversationId: string;
     let conversationNumber: number;
     let createdConversation = false;
+    // Whether filing the ticket under this number took it off its holder.
+    let lostHolder = false;
 
     // The same lock as an inbound message's, on the same key: the customer's
     // message and the phone's reply to it, processed at once, would otherwise
@@ -385,6 +389,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
     if (existing) {
       conversationId = existing.id;
       conversationNumber = existing.number;
+      lostHolder = existing.lostHolder === true;
     } else {
       // The business writing first from the phone files a resolved
       // conversation, not an open one. Nothing is owed on it — the team's own
@@ -460,8 +465,22 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       conversationNumber,
       messageId: insertedMessage[0]!.id,
       createdConversation,
+      lostHolder,
     };
   });
+  const { lostHolder: assignAgain, ...result } = stored;
+
+  // A ticket filed under this number as the echo arrived, and taken off a
+  // holder it is hidden from there (`findOrAdoptLive`): the number's owner
+  // takes it now, rather than at the customer's next message. Best-effort, as
+  // every assignment after a stored message is: the echo is stored.
+  if (assignAgain) {
+    try {
+      await assignConversation(result.conversationId);
+    } catch (error) {
+      log.error(`could not assign conversation ${result.conversationId} after filing it`, error);
+    }
+  }
 
   if (echo.media) {
     await enqueue(
@@ -878,13 +897,21 @@ async function numberOwner(tx: Tx, channel: ResolvedChannel): Promise<string | n
  * none, as nothing under no row is anybody's — until its next reopen or a
  * handover. The no-row thread's lock is taken after the row's, always in that
  * order, so two adoptions cannot wait on each other.
+ *
+ * It does not always keep its holder. Under no row a ticket is its group's,
+ * and anybody may have been given it; on a coexistence row it is the number's
+ * owner's alone (`lib/tickets/owner-only.ts`), so a holder it is hidden from
+ * there loses it as it is filed (`fileUnderNumber`), and `lostHolder` says so.
+ * A customer's message then assigns it in the pass every inbound message runs
+ * (`afterInboundMessage`), which asks the number's owner first; the echo path,
+ * which runs none, assigns it itself.
  */
 async function findOrAdoptLive(
   tx: Tx,
   contactId: string,
   thread: ThreadKey,
   phoneNumberId: string | null,
-): Promise<LiveConversation | null> {
+): Promise<(LiveConversation & { lostHolder?: boolean }) | null> {
   const live = await findLiveConversation(contactId, thread, tx);
   if (live || thread.channel !== 'whatsapp' || !thread.channelId || !phoneNumberId) return live;
 
@@ -893,11 +920,11 @@ async function findOrAdoptLive(
   const orphan = await findLiveConversation(contactId, unfiled, tx);
   if (!orphan || (await lastInboundPhoneNumberId(orphan.id)) !== phoneNumberId) return null;
 
-  await tx
-    .update(conversations)
-    .set({ channelId: thread.channelId })
-    .where(and(eq(conversations.id, orphan.id), isNull(conversations.channelId)));
-  return orphan;
+  const { unassigned } = await fileUnderNumber(tx, {
+    conversationId: orphan.id,
+    channelId: thread.channelId,
+  });
+  return { ...orphan, lostHolder: unassigned };
 }
 
 /**

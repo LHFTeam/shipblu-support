@@ -12,6 +12,7 @@ import { assignConversation, type AssignmentOutcome, type SkipReason } from '@/l
 import { runAutomations } from '@/lib/automations';
 import { logger } from '@/lib/log';
 import { afterRoutingChanged } from '@/lib/sla';
+import { unassignTicket } from '@/lib/tickets/assignee';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
@@ -348,10 +349,7 @@ export async function handToRouteGroup(
     });
 
     if (ticket.assigneeAgentId) {
-      await tx
-        .update(conversations)
-        .set({ assigneeAgentId: null, assignedAt: null })
-        .where(eq(conversations.id, conversationId));
+      await unassignTicket(tx, { conversationId });
       // `from`, which the agent rollup reads to count the ticket as handed on
       // from its holder (`transferred_away_count`).
       await tx.insert(conversationEvents).values({

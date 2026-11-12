@@ -206,6 +206,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       if (data.reason === 'owner_only') {
         return 'unassigned the ticket: its WhatsApp number has no active owner now, and only the number’s owner and agents who can see every ticket can open its tickets';
       }
+      // The ticket was under no row, and its number has one now (`fileUnderNumber`,
+      // and `db/sql/009` for a ticket nobody writes to): whoever held it while
+      // it was nobody's number's cannot open it any more.
+      if (data.reason === 'filed_under_number') {
+        return 'unassigned the ticket: it was filed under its WhatsApp number, and only the number’s owner and agents who can see every ticket can open its tickets';
+      }
       return 'unassigned the ticket';
     case 'group_changed':
       return 'moved the ticket to another group';

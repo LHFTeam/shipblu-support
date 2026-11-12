@@ -322,24 +322,69 @@ Left as they are, each a change of its own if it is wanted:
 - **The live tick.** Inbox streams are woken per channel type, so an open
   inbox re-reads when a coexistence ticket changes. The payload is empty and
   the re-read is the scoped list.
-- **A plain number adopted as a coexistence one, or a ticket filed under no
-  row adopted onto one** (`findOrAdoptLive`), keeps the assignee it had.
-- **One place that enforces it.** "Never held by somebody it is hidden from"
-  is asked writer by writer: the rota, the console, `assign_agent`, a handover
-  and a reopen. Two writers do not ask: a ticket adopted onto a coexistence
-  row while a colleague holds it (`findOrAdoptLive`, `db/sql/009`), and the
-  sweep's reclaim. Decided on #516's review, and left to a pull request of its
-  own because it touches every assignment path: one `assignTicket(tx, …)`
-  helper that every writer of `assignee_agent_id` calls, and a repo rule
-  refusing a bare write of the column outside it, as `pool-confinement` does
-  for the pool. Not a trigger: "sees every ticket" is `can()` over a role and
-  an agent's overrides, which SQL would have to copy.
+- **A plain number adopted as a coexistence one** keeps the assignees its
+  tickets had, until a handover or each ticket's next reopen. Becoming a
+  coexistence number is a write of `channels.config`, which nothing below
+  watches.
 - **The handover's record.** `channel_owner_changes` counts the tickets moved
   and reassigned, and has no column for those a handover to nobody unassigned;
   that count is in the notice and on each ticket's `unassigned` line, which
   names the change.
 - **Reclaim** takes an abandoned ticket off a supervisor on an ownerless
   coexistence number and leaves it unassigned, where the rota once re-placed it.
+
+### One place that enforces it
+
+"Never held by somebody it is hidden from" was asked writer by writer in #516:
+the rota, the console, `assign_agent`, a handover and a reopen. Two writers did
+not ask, a ticket adopted onto a coexistence row while a colleague held it
+(`findOrAdoptLive`, `db/sql/009`) and the sweep's reclaim, and the next writer
+would have been a third. Decided on #516's review and built in the pull request
+after it: one writer of `assignee_agent_id`, `lib/tickets/assignee.ts`, and a
+repo rule, `assignee-confinement`, refusing a write of the column anywhere
+else, as `pool-confinement` does for the pool. Not a trigger: "sees every
+ticket" is `can()` over a role and an agent's overrides, which SQL would have
+to copy.
+
+| Writer                             | Through the helper                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| The rota's pick, `handBackToOwner` | `lockHolders` before the ticket's lock, then `assignTicket`                   |
+| `takeForNumberOwner`               | The same, behind `lockedOwnerId`                                              |
+| `updateTicket`, `assign_agent`     | `assignTicket`, or `unassignTicket` for "Unassigned"                          |
+| `handOverNumber`                   | `assignTickets` and `unassignTickets`, behind its own lock on the number      |
+| `alignAccountable`                 | `assignTicket` or `unassignTicket`; accountability stays its own write        |
+| Hand to, the sweep's reclaim       | `unassignTicket`                                                              |
+| WhatsApp ingest's insert           | `ownerStamp`, with the owner `lockedOwnerId` read                             |
+| `findOrAdoptLive`                  | `fileUnderNumber`: files the ticket, and unassigns a holder it is hidden from |
+| `db/sql/009`                       | SQL, named in the rule: unassigns anybody but the number's active owner       |
+
+The helper is two steps because of lock order. A handover locks the number and
+then its tickets, so a writer that locked a ticket and then asked the number
+would wait on a handover waiting on it. `lockHolders` therefore comes before
+the ticket's row is locked or written, and `assignTicket` puts the channel it
+asked about in the write's own `where`: a ticket filed under another row
+between the two is not written, and the caller is told `missed`.
+
+What changed for the two writers that did not ask:
+
+- **Adoption.** A ticket under no row, held by a colleague, and filed under a
+  coexistence row loses that holder as it is filed, with an `unassigned` line
+  (`reason: filed_under_number`, naming `from`). A customer's message then
+  assigns it in the pass every inbound message runs, and the echo path assigns
+  it itself, so with an active owner it is theirs in the same request. An
+  agent who sees every ticket keeps it. At a deploy, `db/sql/009` unassigns
+  anybody but the number's active owner, since SQL cannot ask who sees every
+  ticket.
+- **Reclaim.** Unassigning was always allowed, so the helper refuses nothing
+  there. What the reclaim did not ask was whose number the ticket is on: its
+  exemption for an owner reads the ticket's accountability, and on a
+  coexistence number the number outranks it. A ticket its owner held while
+  accountable to nobody, or to somebody else, was reclaimed and handed
+  straight back by the same sweep. The reclaim now asks the number, under its
+  lock, and leaves an active owner's ticket alone.
+
+The rule cannot see an object built elsewhere and spread into a write, which
+is why `ownerStamp` lives in the helper's module.
 
 An agent in no group used to be offered Mine alone, since their Unassigned was
 always empty. The shell now asks `ownsANumber`. An owner in no group is offered

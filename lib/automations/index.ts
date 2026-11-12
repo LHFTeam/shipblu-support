@@ -18,7 +18,7 @@ import { scheduleSurvey, suppressSurveyByRule } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { isCommentTicket, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { hiddenFromHolder } from '@/lib/tickets/owner-only';
+import { assignTicket, lockHolders, unassignTicket } from '@/lib/tickets/assignee';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
@@ -383,16 +383,21 @@ async function applyAction(
       const ended = await db.transaction(async (tx) => {
         // Asked in here, under the channel's lock, so a handover cannot
         // collect the number's tickets between the answer and the write.
-        if (
-          agentId &&
-          (await hiddenFromHolder(tx, ticket.conversation.channelId, agentId, { lock: true }))
-        ) {
-          return null;
+        // `assignTicket` is the one writer of the assignee, and the one that
+        // asks (`lib/tickets/assignee.ts`). It also writes nothing for a
+        // ticket filed under a number since this pass read it, whose answer
+        // would be about the wrong number: skipped the same way.
+        if (agentId) {
+          const holders = await lockHolders(tx, ticket.conversation.channelId);
+          const written = await assignTicket(tx, holders, {
+            conversationId,
+            to: agentId,
+            at: new Date(),
+          });
+          if (written !== 'assigned') return null;
+        } else {
+          await unassignTicket(tx, { conversationId });
         }
-        await tx
-          .update(conversations)
-          .set({ assigneeAgentId: agentId, assignedAt: agentId ? new Date() : null })
-          .where(eq(conversations.id, conversationId));
         await recordIn(tx, agentId ? 'assigned' : 'unassigned', { to: agentId });
         return agentId
           ? endHold(tx, conversationId, 'rule', { label: `automation:${ruleName}` })

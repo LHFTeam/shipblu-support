@@ -8,12 +8,16 @@ import {
   conversations,
   ticketStatuses,
 } from '@/db/schema';
-import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import {
-  agentsWhoSeeEveryTicket,
-  hiddenFromHolder,
-  isCoexistenceNumber,
-} from '@/lib/tickets/owner-only';
+  admits,
+  assignTicket,
+  assignTickets,
+  lockHolders,
+  unassignTicket,
+  unassignTickets,
+} from '@/lib/tickets/assignee';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import { agentsWhoSeeEveryTicket, isCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from './coexistence';
@@ -30,7 +34,8 @@ import { parseCoexistence } from './coexistence';
  *
  * Every write of either column is in this module, so the three moments a
  * ticket's accountability may move are one file to read: ingest creating a
- * ticket on an owned number (`lockedOwnerId` and `ownerStamp`), a handover
+ * ticket on an owned number (`lockedOwnerId`, and `ownerStamp` in
+ * `lib/tickets/assignee.ts`), a handover
  * (`handOverNumber`), and a customer reopening a ticket after one
  * (`alignAccountable`). Nothing else — not assignment, reclaim, a supervisor's
  * reassignment, an automation or a merge — touches accountability, which is
@@ -97,29 +102,6 @@ export async function lockedOwnerId(tx: typeof db, channelId: string): Promise<s
     .from(agents)
     .where(eq(agents.id, row.ownerId));
   return effectiveOwnerId(owner ? { id: row.ownerId, active: owner.active } : null);
-}
-
-/**
- * The columns a ticket created on a number starts with: accountable to the
- * owner and assigned to them, at `at` — or neither, with no owner.
- *
- * Written in the insert rather than by the assignment that follows it, because
- * an `on_create` rule must see the ticket the team actually has, and because a
- * ticket the business opened from the phone is resolved on creation and never
- * reaches `assignConversation` at all. `autoAssign` then finds it assigned and
- * stops there.
- */
-export function ownerStamp(
-  ownerId: string | null,
-  at: Date,
-): {
-  accountableAgentId: string | null;
-  assigneeAgentId: string | null;
-  assignedAt: Date | null;
-} {
-  return ownerId
-    ? { accountableAgentId: ownerId, assigneeAgentId: ownerId, assignedAt: at }
-    : { accountableAgentId: null, assigneeAgentId: null, assignedAt: null };
 }
 
 /**
@@ -276,7 +258,9 @@ export async function alignAccountable(
     })
     .from(conversations)
     .where(eq(conversations.id, input.conversationId))
-    .for('update');
+    // NO KEY UPDATE, as every lock on a ticket's row taken after its own
+    // transaction has written it is (§6.106): a reopen writes the status first.
+    .for('no key update');
 
   if (!ticket) return { changed: false, reassigned: false };
 
@@ -287,12 +271,15 @@ export async function alignAccountable(
   // number's owner, or to nobody when the number has none. Asked whether or
   // not the accountability moves: a ticket a colleague held when it was
   // resolved comes back with its number in the same hands.
+  //
+  // The number's lock is already this transaction's: every caller read the
+  // owner under it (`lockedOwnerId`) before the ticket's row was written, so
+  // asking again here waits for nobody.
+  const holders = await lockHolders(tx, input.channelId);
   const stranded =
     ticket.assigneeAgentId !== null &&
     ticket.assigneeAgentId !== input.ownerId &&
-    (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, {
-      ownerId: input.ownerId,
-    }));
+    !(await admits(tx, holders, ticket.assigneeAgentId));
   const moves = ticket.accountableAgentId !== input.ownerId;
   if (!moves && !stranded) return { changed: false, reassigned: false };
 
@@ -301,14 +288,20 @@ export async function alignAccountable(
     (stranded && input.ownerId !== null);
   const unassign = stranded && input.ownerId === null;
 
-  await tx
-    .update(conversations)
-    .set({
-      ...(moves ? { accountableAgentId: input.ownerId } : {}),
-      ...(reassign ? { assigneeAgentId: input.ownerId, assignedAt: input.now ?? new Date() } : {}),
-      ...(unassign ? { assigneeAgentId: null, assignedAt: null } : {}),
-    })
-    .where(eq(conversations.id, input.conversationId));
+  if (moves) {
+    await tx
+      .update(conversations)
+      .set({ accountableAgentId: input.ownerId })
+      .where(eq(conversations.id, input.conversationId));
+  }
+  if (reassign && input.ownerId) {
+    await assignTicket(tx, holders, {
+      conversationId: input.conversationId,
+      to: input.ownerId,
+      at: input.now ?? new Date(),
+    });
+  }
+  if (unassign) await unassignTicket(tx, { conversationId: input.conversationId });
 
   // The column default, the transaction's start, though the `assigned` below
   // is stamped as it is written. The rollup files each figure by the
@@ -623,28 +616,21 @@ export async function handOverNumber(input: {
           ),
         );
     }
-    if (to && reassigned.length > 0) {
-      await tx
-        .update(conversations)
-        .set({ assigneeAgentId: to.id, assignedAt: now })
-        .where(
-          inArray(
-            conversations.id,
-            reassigned.map((ticket) => ticket.id),
-          ),
-        );
+    // Through the one writer of the assignee. The number's row is locked
+    // above, and its owner is already the new one, so this reads what the
+    // handover wrote and waits for nobody.
+    const holders = await lockHolders(tx, channel.id);
+    if (to) {
+      await assignTickets(tx, holders, {
+        conversationIds: reassigned.map((ticket) => ticket.id),
+        to: to.id,
+        at: now,
+      });
     }
-    if (unassigned.length > 0) {
-      await tx
-        .update(conversations)
-        .set({ assigneeAgentId: null, assignedAt: null })
-        .where(
-          inArray(
-            conversations.id,
-            unassigned.map((ticket) => ticket.id),
-          ),
-        );
-    }
+    await unassignTickets(
+      tx,
+      unassigned.map((ticket) => ticket.id),
+    );
 
     const [change] = await tx
       .insert(channelOwnerChanges)

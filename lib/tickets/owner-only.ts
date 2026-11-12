@@ -19,9 +19,9 @@ import { can, type AgentRole } from '@/lib/auth/permissions';
  * a rule about who may see a ticket is a rule about who may hold it: a ticket
  * assigned to somebody it is hidden from is in nobody's list, counts against
  * their capacity, and reads as taken to everybody who can see it. So the rota
- * never picks for one (`assignConversation`), and the console, a rule, a
- * handover and a reopen leave one only with somebody `seesOwnerOnlyTicket`
- * admits.
+ * never picks for one (`assignConversation`), and every write of the assignee
+ * goes through `lib/tickets/assignee.ts`, which leaves one only with somebody
+ * `seesOwnerOnlyTicket` admits.
  */
 
 /**
@@ -137,37 +137,4 @@ export async function ownerOnlyNumber(
     .where(and(eq(channels.id, channelId), isCoexistenceNumber()));
   const [row] = await (lock ? read.for('key share') : read);
   return row ?? null;
-}
-
-/**
- * Whether a ticket on `channelId` would be hidden from `agentId` were they
- * given it — for a writer that has only the two ids, as a rule's
- * `assign_agent` does. False off a coexistence number, and for an agent who is
- * gone, whom the foreign key answers for.
- */
-export async function hiddenFromHolder(
-  tx: Pick<typeof db, 'select'>,
-  channelId: string | null,
-  agentId: string,
-  { ownerId, lock = false }: { ownerId?: string | null; lock?: boolean } = {},
-): Promise<boolean> {
-  const number = await ownerOnlyNumber(tx, channelId, { lock });
-  if (!number) return false;
-  const [agent] = await tx
-    .select({
-      id: agents.id,
-      role: agents.role,
-      permissions: agents.permissions,
-      isActive: agents.isActive,
-    })
-    .from(agents)
-    .where(eq(agents.id, agentId));
-  if (!agent) return false;
-  // Somebody who cannot sign in sees nothing, whatever their role says: the
-  // answer `agentsWhoSeeEveryTicket` gives, so a handover and a reopen treat
-  // a deactivated supervisor's ticket alike.
-  if (!agent.isActive) return true;
-  // The owner a caller has already read under the number's lock, where it
-  // has one: a deactivated owner counts as nobody there (`effectiveOwnerId`).
-  return !seesOwnerOnlyTicket(agent, ownerId === undefined ? number.ownerId : ownerId);
 }

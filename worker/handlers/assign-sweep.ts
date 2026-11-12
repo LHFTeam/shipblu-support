@@ -10,6 +10,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { reclaimDue } from '@/lib/assignment/reclaim';
+import { lockHolders, unassignTicket } from '@/lib/tickets/assignee';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { logger } from '@/lib/log';
 import { isHeld } from '@/lib/routing/hold';
@@ -109,11 +110,20 @@ async function assignWaiting(): Promise<number> {
  *   back would only hand it to them again: `assignConversation` returns an
  *   owned ticket to its owner. A deactivated owner's tickets, and an owned
  *   ticket somebody else is holding, are reclaimed like any other.
+ * - **Never from a coexistence number's active owner, whoever the ticket is
+ *   accountable to.** There the number's word outranks the ticket's
+ *   (`takeForNumberOwner`): a ticket filed under the row after it was created,
+ *   or stamped before a handover it missed, is accountable to nobody or to
+ *   somebody else, and the test above read its owner as a colleague holding
+ *   it. Taken back, it went straight to the owner again on the same sweep,
+ *   with a line on the timeline saying they had gone offline before replying.
+ *   Asked under the number's lock, in the transaction that would unassign it.
  */
 async function reclaimAbandoned(now: Date): Promise<number> {
   const abandoned = await db
     .select({
       id: conversations.id,
+      channelId: conversations.channelId,
       assigneeAgentId: conversations.assigneeAgentId,
       reclaimAfterMins: groups.reclaimAfterMins,
       assignedAt: conversations.assignedAt,
@@ -159,21 +169,25 @@ async function reclaimAbandoned(now: Date): Promise<number> {
     // should go back to the queue either way. `reclaimDue` says from when.
     if (!reclaimDue(row, row.reclaimAfterMins ?? 0, now)) continue;
 
-    await db.transaction(async (tx) => {
-      const cleared = await tx
-        .update(conversations)
-        .set({ assigneeAgentId: null, assignedAt: null })
-        // Re-checked in the write: the agent may have come back and replied
-        // between this loop reading the row and reaching it.
-        .where(
-          and(
-            eq(conversations.id, row.id),
-            eq(conversations.assigneeAgentId, row.assigneeAgentId as string),
-          ),
-        )
-        .returning({ id: conversations.id });
+    const taken = await db.transaction(async (tx) => {
+      // The number's lock before the ticket's row is written, the order a
+      // handover takes them (`lib/tickets/assignee.ts`).
+      const holders = await lockHolders(tx, row.channelId);
+      if (holders.ownerOnly && holders.ownerOnly.ownerId === row.assigneeAgentId) return false;
 
-      if (cleared.length === 0) return;
+      const cleared = await unassignTicket(tx, {
+        conversationId: row.id,
+        // Re-checked in the write: the agent may have come back and replied
+        // between this loop reading the row and reaching it. And still on the
+        // number the question above was asked of.
+        onlyIf: and(
+          eq(conversations.assigneeAgentId, row.assigneeAgentId as string),
+          row.channelId === null
+            ? isNull(conversations.channelId)
+            : eq(conversations.channelId, row.channelId),
+        ),
+      });
+      if (!cleared) return false;
 
       await tx.insert(conversationEvents).values({
         conversationId: row.id,
@@ -181,9 +195,12 @@ async function reclaimAbandoned(now: Date): Promise<number> {
         actorLabel: 'assign_sweep',
         data: { from: row.assigneeAgentId, afterMins: row.reclaimAfterMins },
       });
+      return true;
     });
 
-    reclaimed += 1;
+    // Only a ticket that was taken back: one the agent answered meanwhile, or
+    // an owner's on their own number, is not a reclaim to report.
+    if (taken) reclaimed += 1;
   }
 
   return reclaimed;
