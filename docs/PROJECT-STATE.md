@@ -297,10 +297,11 @@ settings are unchanged since the switch, 36 tickets carry a category (`sales`
 20, `customer_support` 14, `merchant_support` 1, `courier_jobs` 1), every one
 of the 36 `category_changed` events is Jev's, and `ai_category_runs` holds 195
 `live` answers under `apply`, the last at 20:28 UTC; no person has labelled a
-ticket or moved a filing. Nothing has routed yet: Web Chat has been in
+ticket or moved a filing. Nothing had routed by then (the first decisions were
+written on 2026-11-12; §5.1 has the count): Web Chat has been in
 `category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
-channel to route, and every other channel is on `default_group`; the widget has
-opened no ticket since 14:15 UTC on 2026-10-20, so at 21:20 UTC on 2026-11-07
+channel to route, and every other channel is on `default_group`; the widget
+opened no ticket between 14:15 UTC on 2026-10-20 and 2026-11-12, so at 21:20 UTC on 2026-11-07
 `routing_decisions` held no row and no `settle_routing` job existed (the plan's
 item 10 has the staffing a routed chat lands on). The backlog
 (`backfill_category_ai mode=apply`) waits for the user's go-ahead; the week of
@@ -500,8 +501,11 @@ ticket one more way to find its group: its category, on a channel an admin has
 moved off `default_group`, with the ticket held unassigned for a few minutes
 while the classifier files it (README, "Ticket assignment"; §5.1 below). Web
 Chat has been in `category` mode since 2026-10-30, with the classifier in
-`apply`, and every other channel is on `default_group`; no ticket has routed
-yet, because no web chat ticket has opened since 2026-10-20 (read 2026-11-07).
+`apply`, and every other channel is on `default_group`. Nothing routed until
+2026-11-12, because no web chat ticket opened between 2026-10-20 and that
+morning; the first decision was written at 08:24 UTC that day, and §5.1 has
+the count. That is the day the merchant dashboard began loading the widget, on
+the owner's word: which page each chat was opened from was not read.
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -932,8 +936,9 @@ time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
 Every human channel put together holds **173 conversations** — 140 Facebook, 18
-Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat are still
-test traffic from 18–21 August, but **Facebook and Instagram are not**: those 158
+Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat were still
+test traffic from 18–21 August when this was counted (web chat no longer: below,
+2026-11-12), but **Facebook and Instagram are not**: those 158
 threads are real people writing to a page and an account the public can already
 reach, filed under bare numeric ids and none of them answered by anybody.
 
@@ -946,7 +951,11 @@ nine rows, all active, and none defaults to `Support` since 2026-10-30. The
 mailbox, Web Chat, the Facebook Page, Instagram, WhatsApp Support and ShipBlu
 Admin default to Customer Care, the two coexistence numbers (Magdy Mohamed and
 Nayera Mohamed) to Merchant Care, and the bot to no group; still no `portal`
-row, and no comment row. Seven web chat tickets exist in all.
+row, and no comment row. Seven web chat tickets existed in all then. _Read
+2026-11-12 at 15:16 UTC:_ 33, 26 of them created that day, the first at 08:23
+UTC, the day the merchant dashboard began loading the widget (the owner's
+word; which page each chat was opened from was not read); the one before it
+was opened at 14:15 UTC on 2026-10-20. So web chat is no longer test traffic.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
 tickets after 3 days", §6.30), so both crons finally have work. `locations` holds
@@ -2127,12 +2136,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   **Both were what stood between the widget and the merchant dashboard.**
   Measured 2026-08-31, `https://shipblu-support.onrender.com/widget` answered
   `content-security-policy: frame-ancestors 'self';`. Measured 2026-11-06 it
-  answers `frame-ancestors 'self' https://app.shipblu.com
+  answered `frame-ancestors 'self' https://app.shipblu.com
 https://app.staging.shipblu.com https://merchant.staging.shipblu.com
-https://merchant-web-production.onrender.com`. The new merchant app's
-  production domain, `https://merchant.shipblu.com`, is not on that list,
-  although its `render.yaml` sets `NEXT_PUBLIC_SUPPORT_WIDGET_URL`: the
-  launcher there opens an empty box until the origin is added. `WIDGET_IDENTITY_SECRET` is the
+https://merchant-web-production.onrender.com`, without the new merchant app's
+  production domain, `https://merchant.shipblu.com`, where the launcher
+  therefore opened an empty box. Measured 2026-11-12, on
+  `support.shipblu.com` and on the Render host alike, it answers
+  `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`:
+  `merchant.shipblu.com` and `business.shipblu.com` are on the list and
+  `merchant-web-production.onrender.com` is off it. Nobody recorded the
+  change; it was read from the header. `WIDGET_IDENTITY_SECRET` is the
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
@@ -2162,8 +2177,7 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   the CSAT and portal-email links. It is dormant while CSAT is off, so check it
   before CSAT is switched on. Set it to `support.shipblu.com` again only once
   that name answers from this app, on both services together
-  (`plans/freshdesk-disconnection.md`). What follows is the record of
-  August and September._
+  (`plans/freshdesk-disconnection.md`)._
 
   _**That name has answered from this app since 20:54 UTC on 2026-11-11 at
   the latest, so the variable can be set now.** On 2026-11-12 it was still
@@ -2182,7 +2196,8 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   blueprint does not show. Read a survey link built on the worker before CSAT
   is switched on.
   Once it is set, the domain serves only the help centre, and the console
-  stays on the Render host._
+  stays on the Render host. What follows is the record of August and
+  September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2362,8 +2377,8 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   ticket already carries writes a `category_agreed` event, which the router
   reads and Filed by Jev counts as Jev's filing.
 
-- **Routing by category is deployed; Web Chat routes, and no ticket has routed
-  yet** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
+- **Routing by category is deployed; Web Chat routes, and its first tickets
+  routed on 2026-11-12** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
   all six services on `1470902` by 06:35:36 UTC on 2026-10-29, and amended by
   #477 and #481, on all six with `db4268c` since 16:29:38 UTC on 2026-11-07;
   `lib/routing/`). A channel's mode on
@@ -2374,10 +2389,18 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   to a category mode _while the classifier is in `apply`_. The classifier has
   been in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
   `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
-  every other channel is on `default_group`. No web chat ticket has opened
-  since 14:15 UTC on 2026-10-20, and a customer writing again on an existing
+  every other channel is on `default_group`. No web chat ticket opened
+  between 14:15 UTC on 2026-10-20 and 2026-11-12, and a customer writing again on an existing
   one never routes, so at about 21:20 UTC on 2026-11-07 there was no
-  `routing_decisions` row and no `settle_routing` job. Since 14:10 UTC
+  `routing_decisions` row and no `settle_routing` job. _That ended on
+  2026-11-12, the day the merchant dashboard began loading the widget (the
+  owner's word; which page each chat was opened from was not read): the first
+  web chat ticket in three weeks opened at 08:23 UTC and its decision was
+  written at 08:24. Read at 15:16 UTC that day, 26 web chat tickets had opened
+  and `routing_decisions` held 26 rows, every one decided, with a
+  `settle_routing` job each: 15 `rule`, 6 `no_route_for_category`, 3
+  `fallback` and 2 `category`. Whether the 15 are the two web chat rules below
+  ending the hold has not been read._ Since 14:10 UTC
   on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
@@ -2529,7 +2552,11 @@ nobody has run, that somebody has to actually watch against the real provider:
   Outlook, confirm it threads rather than opening a new ticket. Threading is the
   thing naive helpdesks get wrong, and the two bugs in §6.4 were both found by
   reading the API docs rather than by testing — there may be a third.
-- **The widget on a genuine third-party origin**, not localhost. The
+- **The widget on a genuine third-party origin**, not localhost. _Since
+  2026-11-12 the allowlist names five origins that are not this app's, and 26
+  web chats opened that day (§5.1); whether any of them came from one of those
+  origins has not been read, nor has a signed identity, so this is still to
+  watch._ The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.

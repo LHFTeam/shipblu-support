@@ -88,9 +88,9 @@ update.
 | 4.1   | Merged: #427 (`959404a`), then `dev` → `main` in #430 (`dbf4376`). As built below                                                                                                                                   | **Done.** All six services live on `dbf4376` by 12:07:54 UTC on 2026-10-27, web first, with `0050` applied. Shipped off: no settings row. Its checks read clean (below)                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 4.2   | Merged: #429 (`c6eb1ac`), then `dev` → `main` in #431 (`ad6a062`). As built below                                                                                                                                   | **Done.** All six services live on `ad6a062` by 21:49:08 UTC on 2026-10-27, web first; code only. Its checks read clean (below). The archive record run is done, and Shadow ran from 06:00:32 UTC on 2026-10-29 until the user switched the classifier to Apply at 18:37:23 the same day (below). The week of Apply has passed; the backlog still waits for the user's go-ahead (read 2026-11-07: no `mode=apply` backfill, and no record run since `archive-1`)                                                                                                                                |
 | 5.1   | Merged: #432 (`9d5b4fb`), then `dev` → `main` in #435 (`1470902`). As built below                                                                                                                                   | **Done.** All six services live on `1470902` by 06:35:36 UTC on 2026-10-29, web first, with `0051` applied. Shipped off: every channel on `default_group`; Web Chat on `category` since 2026-10-30 (5.2). Its checks read clean (below); the signed-in one is left. Amended since by #477 and #481 (the row below)                                                                                                                                                                                                                                                                              |
-| 5.2   | Operations: turning routing on                                                                                                                                                                                      | Under way: Web Chat in `category` mode since 2026-10-30 (set from the console), and nothing has routed: 0 `routing_decisions` and 0 `settle_routing` jobs, since no web chat ticket has opened since 2026-10-20 (read 2026-11-07). Route groups, 0.2's SLA reorder, the channel defaults off Support and Support's backlog moved to Customer Care were written on 2026-10-30 at the user's go-ahead. Left: members accepting in Customer Care and Merchant Care (0 of 3 and 0 of 2 at a Saturday-night read; a weekday re-read first), and the comment rows, still none (Next, items 10 and 11) |
+| 5.2   | Operations: turning routing on                                                                                                                                                                                      | Under way: Web Chat in `category` mode since 2026-10-30 (set from the console), and nothing had routed at the 2026-11-07 read. The first web chat tickets routed on 2026-11-12; the status section below the table has the counts. Route groups, 0.2's SLA reorder, the channel defaults off Support and Support's backlog moved to Customer Care were written on 2026-10-30 at the user's go-ahead. Left: members accepting in Customer Care and Merchant Care (0 of 3 and 0 of 2 at a Saturday-night read; a weekday re-read first), and the comment rows, still none (Next, items 10 and 11) |
 | 6     | Merged: #434 (`1daf6a5`), then `dev` → `main` in #437 (`9b4bc5b`); its screenshot pass in #438 (`b237858`), then #439 (`063e477`). Draft #433, which #434 superseded, closed unmerged on 2026-11-07. As built below | **Done.** All six services live on `9b4bc5b` by 11:29:28 UTC on 2026-10-29, web first, with `0052`–`0055` applied, and on the screenshot pass's `063e477` by 14:27:51. Both sets of checks and the first two Stage 6 nightlies read clean (below); the signed-in reads are left                                                                                                                                                                                                                                                                                                                 |
-| 5.1+  | #477 (`c844f0e`), released in #482 (`f89d7c1`); #481 (`19eb508`), released in #484 (`db4268c`). Below the table                                                                                                     | Live: #477 on all six from about 10:33–10:36 UTC on 2026-11-07, #481 from 16:27:06–16:29:38 UTC the same day. All six run `db4268c` since 16:29:38 UTC (web last). Neither has run on a routed ticket, since nothing has routed                                                                                                                                                                                                                                                                                                                                                                 |
+| 5.1+  | #477 (`c844f0e`), released in #482 (`f89d7c1`); #481 (`19eb508`), released in #484 (`db4268c`). Below the table                                                                                                     | Live: #477 on all six from about 10:33–10:36 UTC on 2026-11-07, #481 from 16:27:06–16:29:38 UTC the same day. All six run `db4268c` since 16:29:38 UTC (web last). Neither had by 2026-11-07; 26 tickets routed on 2026-11-12                                                                                                                                                                                                                                                                                                                                                                   |
 
 **Two router and classifier changes after 5.1** (`AGENTS.md`, Routing by
 category and the classifiers' paragraphs, states them as the code has them).
@@ -348,7 +348,13 @@ migrations...` at 06:28:24.4, and all nine `db/sql` files were done at
   moved a filing, so step 3's criteria still cannot be read, and Filed by Jev
   shows no move: with nobody filing or re-filing, that is not evidence of
   precision. Whether any `classify_category` job is dead was not re-read.
-- **Nothing has routed yet.** Web Chat has been in `category` mode since 14:45
+- **Nothing had routed by 2026-11-07; the first tickets routed on
+  2026-11-12.** Read at 15:16 UTC that day: 26 web chat tickets opened, the
+  first at 08:23, and `routing_decisions` held 26 rows, all decided, with a
+  `settle_routing` job each — 15 `rule`, 6 `no_route_for_category`, 3
+  `fallback`, 2 `category` (`docs/PROJECT-STATE.md` §5.1). Whether #477's and
+  #481's amendments ran on any of them was not read. What follows is the
+  2026-11-07 read. Web Chat has been in `category` mode since 14:45
   UTC on 2026-10-30 (Next, item 10), and every other channel is on
   `default_group`. The widget has opened no ticket since 14:15 UTC on
   2026-10-20; its last inbound message, at 01:42 UTC on 2026-11-05, continued
@@ -834,7 +840,8 @@ Every production write needs the user's go-ahead for that step, and the
    nothing reads them there. Each of those builds is older than `f89d7c1` and
    #472, so it now needs the KB counters' ways back and auto-deploy off first
    (below the table).
-8. **5.1 is deployed; Web Chat routes, and nothing has routed yet.** #432 was
+8. **5.1 is deployed; Web Chat routes, and its first tickets routed on
+   2026-11-12.** #432 was
    squashed into `dev` as
    `9d5b4fb`, and #435 (`1470902`) took it to `main` on 2026-10-29; all six
    services were live on it by 06:35:36 UTC, with `0051_routing` applied, and
@@ -848,7 +855,8 @@ Every production write needs the user's go-ahead for that step, and the
    routed nothing: every channel read `default_group`, and nothing is held or
    enqueued until an admin moves one while the classifier is in `apply`. Web
    Chat was moved on 2026-10-30 (item 10), and no web chat ticket has opened
-   since, so read 2026-11-07 nothing has routed. #477 and #481 amended the
+   since, so read 2026-11-07 nothing had routed; the first ticket did on
+   2026-11-12 (`docs/PROJECT-STATE.md` §5.1). #477 and #481 amended the
    router since, live on 2026-11-07 (below the table). Four
    things changed on every ticket at the deploy, all under
    [5.1, as built](#51-as-built): the out-of-hours acknowledgement's guards
@@ -961,9 +969,10 @@ Every production write needs the user's go-ahead for that step, and the
       ends that hold as `rule` (the rules were last read on 2026-10-28).
       Inbound Sales Team had no members then and has six now, two accepting
       even at the weekend read, so a chat filed `sales` can be assigned while
-      one of them accepts and is in hours. No web chat ticket has opened
-      since 14:15 UTC on 2026-10-20, so nothing has routed: no
-      `routing_decisions` row and no `settle_routing` job;
+      one of them accepts and is in hours. No web chat ticket had opened
+      since 14:15 UTC on 2026-10-20 at that read, so nothing had routed: no
+      `routing_decisions` row and no `settle_routing` job (26 of each by
+      15:16 UTC on 2026-11-12, `docs/PROJECT-STATE.md` §5.1);
     - **not yet:** no comment channel row exists (Q11), so all 63 comment
       tickets (`facebook_comment` 53, `instagram_comment` 10) are on their
       platform's row. Optional while the Page and Instagram rows stay on
@@ -5524,9 +5533,12 @@ production on 2026-10-29, it is now as fixed as any other.
     `number-owner.ts` would add one more module outside `lib/routing/` to those
     that end holds, with neither of `endHold`'s outcomes fitting it — a handover
     is no person or rule deciding where one ticket goes, which is why its events
-    carry no `actorAgentId` — for a case production has never had: no ticket
-    has routed yet (Web Chat alone in `category` mode since 2026-10-30; no
-    `routing_decisions` row, read 2026-11-07), and an owned number's new
+    carry no `actorAgentId` — for a case production had never had when this was decided: no ticket
+    had routed (Web Chat alone in `category` mode since 2026-10-30; no
+    `routing_decisions` row, read 2026-11-07). Tickets have been held since
+    2026-11-12, 26 that day, so that half of the argument no longer stands, and
+    whether a handover has met a held one has not been read. The other half
+    does: and an owned number's new
     tickets are never held, so a ticket on
     a number is held only if the number had no active owner when it arrived, and
     meets a handover only when an admin gives it one inside that ticket's

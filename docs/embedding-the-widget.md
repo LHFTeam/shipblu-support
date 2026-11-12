@@ -188,9 +188,13 @@ or `identify(user, signature)` — and the widget links the person to their
 shipping account, so an agent opens the ticket with the account's shipments
 already in front of them.
 
-Both halves are the values _after_ normalisation: the account id as digits and
-letters only, the email lower-cased and trimmed. Empty fields are still their
-side of the `|`. The signature covers the identifying half only, deliberately:
+Both halves are the values _after_ normalisation, in this order. The account id
+is trimmed and cut to 200 characters, then loses every character that is not
+an ASCII letter, an ASCII digit, `_` or `-`, then is cut to 64; its case is
+kept and so are its hyphens, so `SB-4471` is signed as `SB-4471`, not `SB4471`
+and not `sb-4471`. The email is trimmed and cut to 200 characters, then
+lower-cased, and a value that is not an address counts as empty.
+Empty fields are still their side of the `|`. The signature covers the identifying half only, deliberately:
 name, phone and `meta` are decoration, and covering them would mean a merchant
 renaming themselves in the dashboard silently stops being identified at all.
 
