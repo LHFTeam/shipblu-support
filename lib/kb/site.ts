@@ -33,7 +33,8 @@ const HOSTNAME = /^[a-z0-9.-]+(:\d+)?$/i;
  * Distinct from `publicBaseUrl()` above, and both are needed: that one is the
  * address we *publish* — sitemap, canonical tags, `metadataBase` — while this
  * one is the address somebody is *using*. An agent opening an article from the
- * console wants the second. The first is the hostname `KB_PUBLIC_HOST` names,
+ * console wants the second, and a link they send a customer the first
+ * (`articleOrigins`, below). The first is the hostname `KB_PUBLIC_HOST` names,
  * or `APP_URL`'s while it is unset, and nothing here can check that either
  * answers from this app. In August and September 2026 the variable named
  * `support.shipblu.com` while Freshdesk still served that host (it has answered
@@ -49,13 +50,13 @@ const HOSTNAME = /^[a-z0-9.-]+(:\d+)?$/i;
  * machine. `lib/http/redirect.ts` carries the long version.
  *
  * The host is attacker-controllable in principle, and this string ends up in a
- * message sent to a customer, so it is worth being explicit about why that is
- * bounded here: Render's edge routes to this service only for the hostnames
- * configured on it, so a forged `Host` does not arrive in the first place, and
- * anything that is not a bare hostname is rejected below. An allowlist would be
- * the belt-and-braces answer, but the only entries it could hold are
- * `KB_PUBLIC_HOST` and the host of `APP_URL` — and `APP_URL` is `sync: false`,
- * so it cannot be checked from the repository at all.
+ * link shown to a customer in the widget, so it is worth being explicit about
+ * why that is bounded here: Render's edge routes to this service only for the
+ * hostnames configured on it, so a forged `Host` does not arrive in the first
+ * place, and anything that is not a bare hostname is rejected below. An
+ * allowlist would be the belt-and-braces answer, but the only entries it could
+ * hold are `KB_PUBLIC_HOST` and the host of `APP_URL` — and `APP_URL` is
+ * `sync: false`, so it cannot be checked from the repository at all.
  */
 export function requestBaseUrl(headers: HeaderSource): string {
   const host = headers.get('x-forwarded-host') ?? headers.get('host');
@@ -67,4 +68,30 @@ export function requestBaseUrl(headers: HeaderSource): string {
   const scheme = forwarded || (host.startsWith('localhost') ? 'http' : 'https');
 
   return `${scheme}://${host}`;
+}
+
+/** Where a console knowledge link is read, and where one an agent sends points. */
+export type ArticleOrigins = { read: string; send: string };
+
+/**
+ * The two hosts a knowledge-base link takes in the console.
+ *
+ * `read` is the host the agent is on, for an article they open themselves.
+ * Their console session lives on that host alone, and on another host the help
+ * centre takes them for a customer and draws the chat launcher over the
+ * article, one click from a webchat ticket against their own queue
+ * (`lib/widget/audience.ts`).
+ *
+ * `send` is the published host, for the link they insert into a reply. The
+ * customer keeps that link, in a thread, an inbox or a screenshot, so it is an
+ * address we publish, as the sitemap, the canonicals and the survey and portal
+ * links are. Built on the agent's host it would name wherever the console is
+ * served, which is never the help centre's host once `KB_PUBLIC_HOST` names
+ * one: the proxy serves no console there. It rests on the variable naming a
+ * host that answers from this app, which nothing checks (`requestBaseUrl` says
+ * what that cost in 2026). A wrong value breaks every address we publish at
+ * once, and is mended in the variable rather than link by link.
+ */
+export function articleOrigins(headers: HeaderSource): ArticleOrigins {
+  return { read: requestBaseUrl(headers), send: publicBaseUrl() };
 }

@@ -2225,7 +2225,26 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   blueprint does not show. Read a survey link built on the worker before CSAT
   is switched on.
   Once it is set, the domain serves only the help centre, and the console
-  stays on the Render host. What follows is the record of August and
+  stays on the Render host.
+
+  _**Reported set on 2026-11-12, not yet in effect at 19:37 UTC.** The owner
+  says the variable now names the domain; Render's API shows no values, so
+  that is their word, not a reading. No service had deployed since
+  2026-11-11 18:03, and both hosts still published the Render host in
+  `BASE`, the sitemap, `robots.txt` and the canonicals, so the value waits
+  for a deploy. No console page answered a 200 on `support.shipblu.com` from
+  the move to then (`/inbox`, `/contacts`, `/admin`, `/kb`, `/api/sse`), so
+  nobody loses a console they were using there. Until #510 is released, the
+  favicon 404s on the domain once the variable is in effect (§1)._
+
+  _**The knowledge panel's Insert link follows the published host** (#521, on
+  `dev`). With the variable naming the domain, a link built on the agent's
+  own host named the Render host in every reply, since the console stays
+  there. The link inserted into a reply is now built on `publicBaseUrl()`, and
+  the agent's own Open link stays on the host they are on, where their
+  session hides the chat launcher (`articleOrigins` in `lib/kb/site.ts`). The
+  widget's article links stay on the host that served its frame, where the
+  visitor's chat is stored. What follows is the record of August and
   September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to

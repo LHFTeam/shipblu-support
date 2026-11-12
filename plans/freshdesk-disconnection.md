@@ -1194,7 +1194,10 @@ Order matters. The check beside each item is what proves it, not the merge.
       entry, set in the dashboard, which would win over the group and which
       the blueprint does not show: look at each service's Environment page
       when setting it. **Open on 2026-11-12, and the DNS answers here, so
-      nothing stands in the way.**
+      nothing stands in the way.** _Reported set later that day; at 19:37 UTC
+      no service had deployed since 2026-11-11 18:03, so it was not yet in
+      effect (`docs/PROJECT-STATE.md` §5.1). Leave this open until the check
+      below passes._
 - [ ] _Check:_ `/widget/embed.js`'s `BASE`, the sitemap and the canonicals name
       `support.shipblu.com`; `/en/a/packaging-guidelines` answers 200 there; a
       Freshdesk URL from the tables above 301s to its article; `/inbox` there

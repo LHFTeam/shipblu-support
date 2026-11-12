@@ -72,8 +72,27 @@ describe('freshdeskReferences', () => {
       {
         kind: 'link',
         address: 'https://shipblu1.freshdesk.com/a/solutions/articles/1?lang=ar&portalId=2',
+        home: 'freshworks',
       },
-      { kind: 'image', address: BUCKET_IMAGE },
+      { kind: 'image', address: BUCKET_IMAGE, home: 'freshworks' },
+    ]);
+  });
+
+  // The portal's hostname has been this app since 2026-11-11, so an address
+  // there no longer breaks *with* Freshdesk; it already has. Said apart, so the
+  // refusal does not tell an editor it still works.
+  it('says which addresses are on the portal and which on Freshworks', () => {
+    const html =
+      '<p><a href="https://support.shipblu.com/support/home">a</a>' +
+      '<a href="/ar/support/tickets/new">b</a>' +
+      '<a href="mailto:support@shipblu.freshdesk.com">c</a></p>' +
+      '<p><img src="https://support.shipblu.com/helpdesk/attachments/48012345" /></p>';
+
+    expect(freshdeskReferences(html).map(({ address, home }) => [address, home])).toEqual([
+      ['https://support.shipblu.com/support/home', 'portal'],
+      ['/ar/support/tickets/new', 'portal'],
+      ['mailto:support@shipblu.freshdesk.com', 'freshworks'],
+      ['https://support.shipblu.com/helpdesk/attachments/48012345', 'portal'],
     ]);
   });
 
@@ -95,13 +114,32 @@ describe('saveRefusal', () => {
     );
   });
 
-  it('refuses a link to the rest of the portal, which nothing here replaces', () => {
+  // Not "goes away once Freshdesk is disconnected": it already has. The page
+  // answers a stand-in here at best since the hostname moved on 2026-11-11.
+  it('refuses a link to the rest of the portal, which no longer exists', () => {
     expect(
       saveRefusal('<p><a href="https://support.shipblu.com/support/tickets/new">x</a></p>', null),
     ).toBe(
-      'The article has a link to Freshdesk, which goes away once Freshdesk is disconnected ' +
+      "The article has a link to Freshdesk's old portal, which no longer exists " +
         '(https://support.shipblu.com/support/tickets/new). ' +
         'Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.',
+    );
+  });
+
+  it('still says a link on Freshdesk itself goes away once Freshdesk is disconnected', () => {
+    expect(
+      saveRefusal('<p><a href="https://shipblu.freshdesk.com/support/home">x</a></p>', null),
+    ).toBe(
+      'The article has a link to Freshdesk, which goes away once Freshdesk is disconnected ' +
+        '(https://shipblu.freshdesk.com/support/home). ' +
+        'Point it at an article on this help centre (/<language>/a/<slug>) or remove it, then save.',
+    );
+  });
+
+  it('refuses a picture from the portal, which no longer loads', () => {
+    const picture = 'https://support.shipblu.com/helpdesk/attachments/48012345';
+    expect(saveRefusal(`<p><img src="${picture}" /></p>`, null)).toBe(
+      `The article shows a picture from Freshdesk's old portal, which no longer loads (${picture}). Remove it, or add the picture again with Insert picture, then save.`,
     );
   });
 

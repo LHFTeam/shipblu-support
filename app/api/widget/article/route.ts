@@ -48,10 +48,8 @@ export async function GET(request: Request) {
     title: article.title,
     bodyHtml: article.bodyHtml,
     // The origin this request actually arrived on, which is the one that served
-    // the frame, not the one we publish. Nothing checks that `publicBaseUrl()`
-    // answers from this app, and when it did not, the link was canonically
-    // correct and 404'd for the person who clicked it (`requestBaseUrl` says
-    // when).
+    // the frame, not the one we publish, for the reason `/api/widget/search`
+    // gives beside its own links.
     url: `${requestBaseUrl(request.headers)}/${locale}/a/${encodeURI(article.slug)}`,
   });
 }

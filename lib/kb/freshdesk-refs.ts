@@ -25,7 +25,19 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
  * what find those.
  */
 
-export type FreshdeskReference = { kind: 'link' | 'image'; address: string };
+/**
+ * Which of Freshdesk's addresses this is: `freshworks` for one on Freshworks'
+ * own hosts, its bucket or a mailbox, which breaks when the account closes;
+ * `portal` for a portal path on the portal's hostname or with no host, which
+ * stopped reaching Freshdesk when that hostname moved here.
+ */
+type FreshdeskHome = 'freshworks' | 'portal';
+
+export type FreshdeskReference = {
+  kind: 'link' | 'image';
+  address: string;
+  home: FreshdeskHome;
+};
 
 /**
  * The Freshdesk portal's own hostname. It served Freshdesk until 2026-11-11
@@ -70,11 +82,16 @@ const HREF_ATTR = /\shref="([^"]*)"/i;
  * editor refused a link to one would have nothing to fix.
  */
 export function isFreshdeskAddress(address: string): boolean {
+  return freshdeskHome(address) !== null;
+}
+
+/** `isFreshdeskAddress`, saying which kind of address it found. */
+function freshdeskHome(address: string): FreshdeskHome | null {
   let url: URL;
   try {
     url = new URL(address.trim(), RELATIVE_BASE);
   } catch {
-    return false;
+    return null;
   }
 
   if (url.protocol === 'mailto:') {
@@ -85,20 +102,21 @@ export function isFreshdeskAddress(address: string): boolean {
     } catch {
       // A malformed escape: read the address as written.
     }
-    return recipients.split(',').some((recipient) => {
+    const mailbox = recipients.split(',').some((recipient) => {
       try {
         return onFreshworks(new URL(`https://${recipient.split('@').at(-1)?.trim() ?? ''}`));
       } catch {
         return false;
       }
     });
+    return mailbox ? 'freshworks' : null;
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  if (onFreshworks(url)) return true;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (onFreshworks(url)) return 'freshworks';
 
   const host = url.hostname.toLowerCase();
   const portal = url.href.startsWith(RELATIVE_BASE) || host === PORTAL_HOST;
-  return portal && PORTAL_PATH.test(url.pathname);
+  return portal && PORTAL_PATH.test(url.pathname) ? 'portal' : null;
 }
 
 /** Every Freshdesk link and picture in stored article HTML, decoded, links first. */
@@ -109,10 +127,12 @@ export function freshdeskReferences(html: string): FreshdeskReference[] {
     const value = HREF_ATTR.exec(tag)?.[1];
     if (value === undefined) continue;
     const address = decodeAttribute(value);
-    if (isFreshdeskAddress(address)) references.push({ kind: 'link', address });
+    const home = freshdeskHome(address);
+    if (home) references.push({ kind: 'link', address, home });
   }
   for (const address of imageSources(html)) {
-    if (isFreshdeskAddress(address)) references.push({ kind: 'image', address });
+    const home = freshdeskHome(address);
+    if (home) references.push({ kind: 'image', address, home });
   }
 
   return references;
@@ -163,14 +183,26 @@ function key(reference: FreshdeskReference): string {
  * An article link names the id, because the only way one survives being
  * pointed here is that no published article here came from it: never
  * imported, or imported and since unpublished (`legacyArticleIndex`).
+ *
+ * Anything else is said by where it lives (`FreshdeskHome`). One on Freshworks'
+ * own hosts still works and stops when the account closes, so the editor is
+ * told that. One on the portal's hostname has not reached Freshdesk since that
+ * hostname moved here on 2026-11-11: a picture there answers nothing, and a
+ * page answers a stand-in here at best (`./freshdesk-portal.ts`). Telling the
+ * editor it goes away later would say it works now.
  */
 function described(reference: FreshdeskReference): string {
+  const { address } = reference;
   if (reference.kind === 'image') {
-    return `a picture from Freshdesk, which stops loading once Freshdesk is disconnected (${reference.address})`;
+    return reference.home === 'portal'
+      ? `a picture from Freshdesk's old portal, which no longer loads (${address})`
+      : `a picture from Freshdesk, which stops loading once Freshdesk is disconnected (${address})`;
   }
-  const id = ARTICLE_ID.exec(reference.address)?.[1];
+  const id = ARTICLE_ID.exec(address)?.[1];
   if (id) {
-    return `a link to Freshdesk article ${id}, which has no published article here (${reference.address})`;
+    return `a link to Freshdesk article ${id}, which has no published article here (${address})`;
   }
-  return `a link to Freshdesk, which goes away once Freshdesk is disconnected (${reference.address})`;
+  return reference.home === 'portal'
+    ? `a link to Freshdesk's old portal, which no longer exists (${address})`
+    : `a link to Freshdesk, which goes away once Freshdesk is disconnected (${address})`;
 }

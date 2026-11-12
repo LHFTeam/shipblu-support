@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { publicBaseUrl, requestBaseUrl } from './site';
+import { articleOrigins, publicBaseUrl, requestBaseUrl } from './site';
 
 /** Just enough of `Headers` for the one method `requestBaseUrl` calls. */
 function headers(entries: Record<string, string>) {
@@ -55,11 +55,33 @@ describe('requestBaseUrl', () => {
   });
 
   it('rejects anything that is not a bare hostname', () => {
-    // This string is pasted into a message sent to a customer, so a header
+    // This string becomes a link shown to a customer in the widget, so a header
     // carrying a path, a scheme or a second host must not become the origin —
     // it falls back rather than building something an attacker chose.
     for (const host of ['evil.com/path', 'https://evil.com', 'a,b', 'evil.com evil2.com', '']) {
       expect(requestBaseUrl(headers({ host }))).toBe('https://app.example.com');
     }
+  });
+});
+
+describe('articleOrigins', () => {
+  withTestEnv({ APP_URL: 'https://shipblu-support.onrender.com' });
+
+  // The console stays on the Render host once KB_PUBLIC_HOST names the help
+  // centre's, so a link built on the agent's host put that host in every reply.
+  it("reads on the agent's host and sends on the published one", () => {
+    setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+    expect(articleOrigins(headers({ host: 'shipblu-support.onrender.com' }))).toEqual({
+      read: 'https://shipblu-support.onrender.com',
+      send: 'https://support.shipblu.com',
+    });
+  });
+
+  it('sends on APP_URL while KB_PUBLIC_HOST is unset', () => {
+    expect(articleOrigins(headers({ host: 'localhost:3000' }))).toEqual({
+      read: 'http://localhost:3000',
+      send: 'https://shipblu-support.onrender.com',
+    });
   });
 });

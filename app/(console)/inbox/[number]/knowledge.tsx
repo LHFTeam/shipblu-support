@@ -225,8 +225,9 @@ function Hit({ hit, onInsert }: { hit: AgentArticleHit; onInsert: (text: string)
     // Title and URL on separate lines. Every channel we send on carries plain
     // text, so there is no anchor to hang a title on — and on its own line the
     // Latin URL cannot be reordered by the bidi algorithm when it lands in the
-    // middle of an Arabic paragraph.
-    onInsert(`${hit.title}\n${hit.url}`);
+    // middle of an Arabic paragraph. The published host's URL, not the one the
+    // agent reads on (`articleOrigins`).
+    onInsert(`${hit.title}\n${hit.sendUrl}`);
   }, [hit, onInsert]);
 
   return (

@@ -6,6 +6,7 @@ import type { ArticleVisibility } from './floors';
 import { effectiveVisibility, readableByRole } from './internal';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
+import type { ArticleOrigins } from './site';
 
 /**
  * The knowledge base as an agent answering a ticket sees it.
@@ -63,8 +64,13 @@ export type AgentArticleHit = {
   /** The stricter of the article's own visibility and its folder's. */
   visibility: ArticleVisibility;
   link: Linkability;
-  /** Where the article lives on the help centre, whether or not it may be sent. */
+  /**
+   * Where the agent reads the article on the help centre, on the host they are
+   * signed in on, whether or not it may be sent.
+   */
   url: string;
+  /** The link Insert puts in a reply, on the published host (`articleOrigins`). */
+  sendUrl: string;
 };
 
 /**
@@ -111,8 +117,12 @@ type Row = {
   visibility: ArticleVisibility;
 };
 
-function toHit(row: Row, origin: string): AgentArticleHit {
+function toHit(row: Row, origins: ArticleOrigins): AgentArticleHit {
   const truncated = row.body.length > MAX_BODY_CHARS;
+  // The article's own locale, never the panel's: an Arabic search that
+  // surfaced the English translation must link to the English one, or the
+  // agent sends a URL for a row that does not exist.
+  const path = `/${row.locale}/a/${encodeURI(row.slug)}`;
 
   return {
     id: row.id,
@@ -125,10 +135,8 @@ function toHit(row: Row, origin: string): AgentArticleHit {
     bodyTruncated: truncated,
     visibility: row.visibility,
     link: linkability(row.visibility),
-    // The article's own locale, never the panel's: an Arabic search that
-    // surfaced the English translation must link to the English one, or the
-    // agent sends a URL for a row that does not exist.
-    url: `${origin}/${row.locale}/a/${encodeURI(row.slug)}`,
+    url: `${origins.read}${path}`,
+    sendUrl: `${origins.send}${path}`,
   };
 }
 
@@ -152,14 +160,14 @@ function published(role: AgentRole, locale: Locale, match: SQL): SQL {
 /**
  * Articles matching what the agent typed, best first.
  *
- * `origin` and `role` come first for the same reason `searchArticles` in
+ * `origins` and `role` come first for the same reason `searchArticles` in
  * `./queries.ts` takes its viewer first: they are the context the read happens
- * in, not options. The origin is passed rather than read here because only the
- * caller knows which one this is for — `requestBaseUrl()` for anything an agent
- * or their customer will click, `publicBaseUrl()` for anything we publish.
+ * in, not options. The origins are passed rather than read here because the
+ * one an agent reads on is the request's, which only the caller holds; the
+ * caller takes both from `articleOrigins`, which says which link gets which.
  */
 export async function searchForAgent(
-  origin: string,
+  origins: ArticleOrigins,
   role: AgentRole,
   locale: Locale,
   query: string,
@@ -179,7 +187,7 @@ export async function searchForAgent(
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 
-  return rows.map((row) => toHit(row, origin));
+  return rows.map((row) => toHit(row, origins));
 }
 
 /**
@@ -200,7 +208,7 @@ export async function searchForAgent(
  * operator.
  */
 export async function suggestForAgent(
-  origin: string,
+  origins: ArticleOrigins,
   role: AgentRole,
   locale: Locale,
   terms: string[],
@@ -221,5 +229,5 @@ export async function suggestForAgent(
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 
-  return rows.map((row) => toHit(row, origin));
+  return rows.map((row) => toHit(row, origins));
 }
