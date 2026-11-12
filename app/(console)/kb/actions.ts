@@ -21,7 +21,7 @@ import { articleBody, changesNothing, cutArticleVersion } from '@/lib/kb/article
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { restoreRefusal, saveRefusal } from '@/lib/kb/freshdesk-refs';
 import { storeUploadedPicture } from '@/lib/kb/images';
-import { isLocale } from '@/lib/kb/locale';
+import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { pointedHere } from '@/lib/kb/off-freshdesk';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
@@ -201,16 +201,18 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   if (unreachable) return unreachable;
 
   // A Freshdesk picture already copied here goes back in as the copy, and a
-  // link to an imported Freshdesk article as that article: an editor tab
-  // opened before `rehost_kb_images` ran posts Freshdesk's address, and a
-  // paste from the old portal carries its links (`pointedHere`). What has no
-  // home here is refused, unless the stored row already carries it — Freshdesk
-  // is being disconnected, and an address of its added today breaks with it.
+  // link to an imported Freshdesk article as that article: an editor tab opened
+  // before `rehost_kb_images` ran posts Freshdesk's address, and a paste from
+  // the old portal carries its links (`pointedHere`). What has no home here is
+  // refused, unless the stored row already carries it — Freshdesk is being
+  // disconnected, and an address of its added today breaks with it, or, on the
+  // portal's hostname, which moved here on 2026-11-11, already reaches only a
+  // redirect here (`lib/kb/freshdesk-refs.ts`).
   //
   // After every other refusal, since it can read the pool twice and a save the
   // folder checks turn away would have spent those reads for nothing.
   const bodyHtml = await pointedHere(body.bodyHtml, locale);
-  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null);
+  const refusal = saveRefusal(bodyHtml, before?.bodyHtml ?? null, locale);
   if (refusal) return { error: refusal };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
@@ -543,7 +545,13 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   const body = articleBody(version.bodyHtml);
   const { bodyText, excerpt } = body;
   const bodyHtml = await pointedHere(body.bodyHtml, current.locale);
-  const refusal = restoreRefusal(bodyHtml, current.bodyHtml);
+  // The column is text; a row in a language the help centre lacks is read in
+  // the default one, as the help centre would serve it.
+  const refusal = restoreRefusal(
+    bodyHtml,
+    current.bodyHtml,
+    isLocale(current.locale) ? current.locale : DEFAULT_LOCALE,
+  );
   if (refusal) return { error: refusal };
 
   await db.transaction(async (tx) => {

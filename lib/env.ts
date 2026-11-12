@@ -37,10 +37,18 @@ const schema = z.object({
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
 
   /**
-   * Hostname the public help centre is served on, e.g. support.shipblu.com.
-   * The proxy rewrites requests arriving here under /kb, and canonical and
-   * sitemap URLs are built from it. Unset means the help centre is only
-   * reachable at /kb on the console's own hostname.
+   * Hostname the public help centre is published on, e.g. support.shipblu.com:
+   * a bare hostname, because `proxy.ts` compares it with the request's `Host`
+   * and strips no scheme. That host serves no console: past the app's own
+   * plumbing (`KB_HOST_PASSTHROUGH`), the head files and the Freshdesk portal
+   * pages `lib/kb/freshdesk-portal.ts` redirects, everything there is rewritten
+   * under /help. `publicBaseUrl()` builds what we publish from it, or from
+   * APP_URL while it is unset: the sitemap, the canonicals, the survey and
+   * portal links, the knowledge links agents send customers (`articleOrigins`)
+   * and the origin the widget snippet falls back to. On every other hostname,
+   * and on all of them while it is unset, the help centre answers at /en, /ar
+   * and /help beside the console. Nothing checks that the name answers from
+   * this app, and one that does not publishes a 404 (`requestBaseUrl`).
    */
   KB_PUBLIC_HOST: z.string().optional(),
 
@@ -75,9 +83,10 @@ const schema = z.object({
 
   /**
    * Comma-separated origins permitted to embed the chat widget, e.g.
-   * "https://support.shipblu.com,https://app.shipblu.com". Our own origin is
-   * always allowed. Everything outside this list is refused by
-   * `frame-ancestors`.
+   * "https://app.shipblu.com,https://merchant.shipblu.com". Our own origin is
+   * always allowed, and the help centre never needs listing on any host: the
+   * snippet frames the host that served it (`next.config.ts`). Everything
+   * outside this list is refused by `frame-ancestors`.
    */
   WIDGET_ALLOWED_ORIGINS: z.string().optional(),
 

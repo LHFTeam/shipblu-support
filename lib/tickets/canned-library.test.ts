@@ -64,8 +64,8 @@ describe('the canned-response library', () => {
   // centre (until 2026-11-11), when a link here would have pointed at the old
   // one. A link written into the library can still go stale with nobody
   // knowing which row holds it. Agents add links through the knowledge panel,
-  // which builds them from the live host. The customer is already talking to
-  // support, so no address or number either.
+  // which builds them on the published host as they are inserted. The customer
+  // is already talking to support, so no address or number either.
   it.each(bodies)('$key ($locale) carries no link, address or phone number', ({ text }) => {
     expect(text).not.toMatch(/https?:|www\.|\.com\b|@/i);
     // Both digit sets: a number in Arabic text is as likely written ٠١٠… as 010…,

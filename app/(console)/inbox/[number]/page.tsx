@@ -10,7 +10,7 @@ import { handToTarget } from '@/lib/routing/hand-to';
 import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleOrigins } from '@/lib/kb/site';
 import { subcategoryOptions, rootCauseOptions } from '@/lib/subcategorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import { getConversation } from '@/lib/tickets/conversation';
@@ -126,10 +126,9 @@ export default async function ConversationPage({
   const kbLocale = detectLocale(lastInbound?.bodyText, subject);
   const terms = wantsKnowledge ? seedTerms(subject, lastInbound?.bodyText) : [];
 
-  // The host this agent is actually on, so the article they open and the link
-  // they paste both resolve. `publicBaseUrl()` names the address we publish,
-  // which is only the same thing once that domain serves this app.
-  const kbOrigin = requestBaseUrl(await headers());
+  // The article an agent opens is read on the host they are on, and the link
+  // they insert points at the published host (`articleOrigins` says why each).
+  const kbOrigins = articleOrigins(await headers());
 
   // Whether the reply box asks Jev for a canned response: only where there is a
   // reply box, for an agent who may reply, and while the admin switch is on and
@@ -164,7 +163,7 @@ export default async function ConversationPage({
       // fewer than two terms — so a ticket with nothing to go on costs no query
       // and renders no panel furniture, the same way the help centre's blocks
       // remove themselves.
-      terms.length ? suggestForAgent(kbOrigin, agent.role, kbLocale, terms) : Promise.resolve([]),
+      terms.length ? suggestForAgent(kbOrigins, agent.role, kbLocale, terms) : Promise.resolve([]),
       mayReply ? suggestionsLive() : Promise.resolve(false),
     ]);
 

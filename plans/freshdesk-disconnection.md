@@ -390,7 +390,8 @@ changes:
   `/widget/embed.js` (`app/widget/embed.js/route.ts`), which loads nothing.
 - The widget iframe, `/api/widget/search` and `/api/widget/article` (all 108
   articles; the images aside, clean), and the console's knowledge panel, which
-  reads `body_text` and inserts a `requestBaseUrl()` link.
+  reads `body_text` and inserted a `requestBaseUrl()` link (on
+  `publicBaseUrl()` since #521, `articleOrigins`).
 - Seed content: `lib/kb/handbook.ts`, `lib/tickets/canned-library.ts` (its test
   refuses any URL), `db/sql/`, `db/baseline.ts`. Production's 62 canned
   responses, the auto-response and `channels.config`.
@@ -1194,7 +1195,10 @@ Order matters. The check beside each item is what proves it, not the merge.
       entry, set in the dashboard, which would win over the group and which
       the blueprint does not show: look at each service's Environment page
       when setting it. **Open on 2026-11-12, and the DNS answers here, so
-      nothing stands in the way.**
+      nothing stands in the way.** _Reported set later that day; at 19:37 UTC
+      no service had deployed since 2026-11-11 18:03, so it was not yet in
+      effect (`docs/PROJECT-STATE.md` §5.1). Leave this open until the check
+      below passes._
 - [ ] _Check:_ `/widget/embed.js`'s `BASE`, the sitemap and the canonicals name
       `support.shipblu.com`; `/en/a/packaging-guidelines` answers 200 there; a
       Freshdesk URL from the tables above 301s to its article; `/inbox` there

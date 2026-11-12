@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { getArticle } from '@/lib/kb/queries';
 import { allow, clientIp } from '@/lib/http/rate-limit';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleUrl, requestBaseUrl } from '@/lib/kb/site';
 import { ANONYMOUS } from '@/lib/kb/visibility';
 
 export const dynamic = 'force-dynamic';
@@ -47,9 +47,16 @@ export async function GET(request: Request) {
     id: article.id,
     title: article.title,
     bodyHtml: article.bodyHtml,
-    // The origin this request actually arrived on, not the one we publish.
-    // `publicBaseUrl()` names KB_PUBLIC_HOST, which does not serve this app yet
-    // — a canonically correct link that 404s for the person who clicked it.
-    url: `${requestBaseUrl(request.headers)}/${locale}/a/${encodeURI(article.slug)}`,
+    // The widget's "read more", the one help-centre link a visitor can click
+    // in it, built on the origin this request arrived on, which is the one that
+    // served the frame. Not `publicBaseUrl()`, unlike the link an agent sends
+    // (`articleOrigins`): this is a link for somebody reading right now, not an
+    // address they keep, and the frame's host has just answered from this app,
+    // where nothing checks that the published one does (`requestBaseUrl` says
+    // when it did not). The help-centre page it opens draws its launcher from
+    // that same host, the one whose storage holds the visitor's chat, though a
+    // chat a host page identified is kept there and not reopened, since the
+    // help centre names nobody (`judge()` in `lib/widget/person.ts`).
+    url: articleUrl(requestBaseUrl(request.headers), locale, article.slug),
   });
 }

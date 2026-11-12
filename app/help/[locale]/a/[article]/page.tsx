@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CopyableAddress } from '@/components/copyable-address';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -25,7 +26,9 @@ import {
   type ArticleSummary,
 } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
+import { articleUrl, publicBaseUrl } from '@/lib/kb/site';
 import { decodeSlugParam } from '@/lib/kb/slug';
+import { viewerIsTeamMember } from '@/lib/widget/audience';
 import { HelpCta, PageBody, PageHeader } from '../../chrome';
 import { ArticleFeedback } from './feedback';
 import { PrintButton } from './print-button';
@@ -97,10 +100,11 @@ export default async function ArticlePage({
   // (`folderNeighbours`), the related list already without the next article, so
   // the rail does not spend one of its few places on a link the reader is about
   // to meet under the body anyway.
-  const [{ next, related: rail }, translations, availability] = await Promise.all([
+  const [{ next, related: rail }, translations, availability, teamMember] = await Promise.all([
     folderNeighbours(viewer, locale, article.folderId, article.id),
     translationsOf(viewer, article.translationGroupId),
     supportAvailability(),
+    viewerIsTeamMember(),
   ]);
 
   const others = translations.filter((entry) => entry.locale !== locale);
@@ -205,6 +209,31 @@ export default async function ArticlePage({
               after it are drawn in, and an article in one too made the page a
               stack of boxes with the answer as just one of them.
             */}
+            {/*
+              For a signed-in agent only, who reads here on the console's own
+              host: the queue's help-centre link and the knowledge panel's
+              Open both bring them here, so their session keeps the chat
+              launcher off the page (`articleOrigins` in `lib/kb/site.ts`).
+              That host is the Render service URL once `KB_PUBLIC_HOST` names
+              the help centre's, so the address bar is not the link to send a
+              customer; this is. English, like the console it belongs to.
+              Decided per viewer, which this page may do only because it is
+              `force-dynamic`.
+
+              Only for an agent the page reads as anonymous, so only on an
+              article anybody may open: one also signed in to the portal as a
+              customer is shown that customer's `logged_in` and company
+              articles, whose link would answer another customer with the
+              sign-in or a 404 — the articles the knowledge panel marks as not
+              to be sent (`linkability`).
+            */}
+            {teamMember && viewer.kind === 'anonymous' ? (
+              <p dir="ltr" lang="en" className="kb-noprint text-sm text-(--color-text-secondary)">
+                For the team: the link to send a customer is{' '}
+                <CopyableAddress address={articleUrl(publicBaseUrl(), locale, article.slug)} />
+              </p>
+            ) : null}
+
             <div className="kb-article" dangerouslySetInnerHTML={{ __html: outline.html }} />
 
             <ArticleFeedback articleId={article.id} locale={locale} />

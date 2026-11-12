@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { getSessionAgent } from '@/lib/auth/session';
 
 /**
@@ -32,7 +33,14 @@ import { getSessionAgent } from '@/lib/auth/session';
  *   every site carrying the widget, or letting a shared cache hand one viewer's
  *   answer to the next reader. A wrong answer there is served to other people,
  *   which is the wrong failure to buy.
+ *
+ * Asked once per render (`cache`): the help centre's layout asks it for the
+ * launcher, and an article page again for the team's link to send, which put
+ * two session reads on the pool for every page a signed-in agent opened.
+ * `getSessionAgent` itself stays uncached, because its other callers need the
+ * live clock it returns (`lib/auth/customer-session.ts` says why); this caches
+ * only the yes or no, within one render, whose two asks are one moment.
  */
-export async function viewerIsTeamMember(): Promise<boolean> {
+export const viewerIsTeamMember = cache(async (): Promise<boolean> => {
   return (await getSessionAgent()) !== null;
-}
+});

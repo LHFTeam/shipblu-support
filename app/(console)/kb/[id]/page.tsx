@@ -2,6 +2,7 @@ import { ChevronLeftIcon } from '@/components/icons';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { CopyableAddress } from '@/components/copyable-address';
 import { Badge, Notice } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { articleLinks, articleOrigins } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
 import { ArticleSidebar } from './sidebar';
 
@@ -48,19 +49,20 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   const article = await getArticleForEdit(id, agent.role);
   if (!article) notFound();
 
-  // Built from the host this page is being served on rather than from
-  // `publicBaseUrl()`. This link exists to be clicked by the person who just
-  // wrote the article, and the published hostname is only the right answer once
-  // it serves this app — until the domain cuts over it is a 404 wearing the
-  // canonical address.
+  // Two addresses, for the reasons `articleOrigins` gives. The link the reader
+  // opens is on the host they are on, where their session keeps the chat
+  // launcher off the article. The address printed for them to copy is on the
+  // published host, because a link copied from here is one sent to a customer,
+  // and the console's own host is the Render service URL once `KB_PUBLIC_HOST`
+  // names the help centre's.
   //
   // `effectiveVisibility`, never the column: a `published`/`public` article
   // inside an `agents_only` folder is not on the help centre, so its URL is a
   // guaranteed 404 — the hole `folderVisibleTo` exists to close, offered here
   // as a link somebody will click.
-  const publicUrl =
+  const links =
     article.status === 'published' && article.effectiveVisibility === 'public'
-      ? `${requestBaseUrl(await headers())}/${article.locale}/a/${encodeURI(article.slug)}`
+      ? articleLinks(articleOrigins(await headers()), article.locale, article.slug)
       : null;
 
   if (!mayEdit) {
@@ -132,15 +134,16 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
           </>
         )}
 
-        {publicUrl ? (
+        {links ? (
           <p className="text-sm text-(--color-text-secondary)">
             Also on the help centre:{' '}
             <a
-              href={publicUrl}
+              href={links.url}
               className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
             >
-              {publicUrl}
+              open it
             </a>
+            . The link to send a customer is <CopyableAddress address={links.sendUrl} />
           </p>
         ) : null}
       </div>
@@ -191,7 +194,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         status={article.status}
         translations={translations}
         translationCandidates={translationCandidates}
-        publicUrl={publicUrl}
+        links={links}
         versions={versions}
         stats={article.stats}
       />
