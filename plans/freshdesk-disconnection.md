@@ -591,6 +591,8 @@ holds one.
 
 ### 7. Freshdesk's portal pages land on their counterparts
 
+Added after the domain moved, and it lands before PR 6, not after it.
+
 PR 3 answers the URLs that name an article or a folder. Everything else of
 Freshdesk's portal still answered as nothing here: on `support.shipblu.com`,
 with `KB_PUBLIC_HOST` unset, `/support/home`, `/support/tickets/new`,
@@ -614,15 +616,19 @@ the help-centre host, the locale rewrite and the sign-in check, on every host.
 None needs a lookup, so none goes through `/help/legacy`. The language is the
 path's own when the help centre has it, and Arabic otherwise:
 
-| Freshdesk                                            | Here                             |
-| ---------------------------------------------------- | -------------------------------- |
-| `[/<l>]/support`, `/support/home`                    | `/<l>`                           |
-| `[/<l>]/support/solutions`                           | `/<l>`                           |
-| `[/<l>]/support/solutions/<category id>`             | `/<l>`, standing in              |
-| `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in      |
-| `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in      |
-| `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`                |
-| anything else under `/support` (`solutions.json`, …) | as before: the help centre's 404 |
+| Freshdesk                                            | Here                        |
+| ---------------------------------------------------- | --------------------------- |
+| `[/<l>]/support`, `/support/home`                    | `/<l>`                      |
+| `[/<l>]/support/solutions`                           | `/<l>`                      |
+| `[/<l>]/support/solutions/<category id>`             | `/<l>`, standing in         |
+| `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in |
+| `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in |
+| `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`           |
+| anything else under `/support` (`solutions.json`, …) | as before                   |
+
+"As before" is the help centre's 404 for a locale path. For a bare one, it
+is the console's sign-in until `KB_PUBLIC_HOST` names `support.shipblu.com`,
+which production does not yet, and the help centre's 404 from then on.
 
 - **All 302.** The home and the index name the page they land on, so the
   legacy route's rule would make them 301. A browser keeps a 301 with no expiry,
@@ -637,7 +643,7 @@ path's own when the help centre has it, and Arabic otherwise:
 - **The ticket pages, the sign-in and the sign-up go to the contact band, not
   the portal.** `/forms` is a sign-in wall in production, which has no ticket
   form (0 rows on 2026-11-12). Freshdesk's requester accounts were not
-  migrated (2 portal identities hold a password). Its tickets were not
+  migrated: every portal identity with a password was made here after the move (four on 2026-11-12, one verified). Its tickets were not
   imported either, and its numbers are not ours: our own `#44105` is a
   different ticket from the Freshdesk one a customer followed. The band offers
   the chat, the address, the form card and a Sign in card, none of them behind
@@ -648,7 +654,7 @@ path's own when the help centre has it, and Arabic otherwise:
   host with `KB_PUBLIC_HOST` set and unset. It also checks that the answer is a
   302 for any method, that a session cookie changes nothing, that the search
   carries its term and nothing else, that articles and folders still reach the
-  legacy route, and that the leftovers keep their 404. Seven of its cases fail
+  legacy route, and that the leftovers answer as they did. Seven of its cases fail
   against `proxy.ts` as it was.
 - A production build served locally answered each shape with a 302 and a
   relative `Location` on both hosts, with the variable set and unset:
@@ -788,7 +794,9 @@ From a shell:
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/
 ```
 
-Today `302 https://support.shipblu.com/support/home` — still Freshdesk.
+Until the move on 2026-11-11, `302 https://support.shipblu.com/support/home` —
+Freshdesk. Since then, `307 https://support.shipblu.com/ar` (2026-11-12): this
+app's front door. `/support/home` answers `302` to `/ar` once PR 7 is deployed.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
