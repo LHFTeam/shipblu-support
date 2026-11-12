@@ -789,7 +789,7 @@ which production does not yet, and the help centre's 404 from then on.
   - Render's log for `support.shipblu.com`, from the move to 16:50 UTC on
     2026-11-12, our own curl checks left out, holds 37 folder URLs answered
     with the home's 301:
-    - 4 from browsers on Windows and a Mac, 1 fetched for a ChatGPT user, 2
+    - 4 from browsers on Windows and macOS, 1 fetched for a ChatGPT user, 2
       from headless browsers, and 30 from crawlers (Petal, Semrush, Baidu,
       Yandex, Exa and a vendor's);
     - every one of the 8 public ids, under `/ar` and `/en`, and once with no
@@ -802,9 +802,9 @@ which production does not yet, and the help centre's 404 from then on.
 
   - `lib/kb/legacy-resolve.db.test.ts` builds production's categories, three
     of its public folders (two sharing an Arabic slug under different
-    categories) and the guide's four. It checks every answer against
-    `getFolder`, so none lands on a page that 404s or lists nothing. It also
-    covers:
+    categories) and the guide's four. It checks the answers for production's
+    folders, and each stand-in, against `getFolder`, so none of them lands on
+    a page that 404s or lists nothing. It also covers:
     - every prefix, a language with a region, one the help centre lacks;
     - pages of a list, with and without a trailing slash;
     - a translation closed three ways (articles archived, the folder
@@ -814,13 +814,17 @@ which production does not yet, and the help centre's 404 from then on.
       articles, or of nothing, one in a language the help centre lacks, and a
       native folder carrying the id;
     - a `logged_in` folder, a folder moved to another category, and a
-      `kb_redirects` row for the URL.
+      `kb_redirects` row for the URL;
+    - an id an earlier importer wrote bare (`<id>`, no language), and a
+      public id with its last digit gone, which the colon in `<id>:%` keeps
+      from answering for the longer one. The category's cases gained the same
+      two.
 
     `app/help/legacy/route.db.test.ts` checks the encoded Arabic `Location`
     and that an agents-only folder's 404 is an unknown id's, status, headers
     and body. `proxy.test.ts` checks the rewrite on both hosts, with the
     variable set and unset, and that each path it sends is one
-    `freshdeskFolderId` reads an id from. 14 of the new cases fail against
+    `freshdeskFolderId` reads an id from. 15 of the new cases fail against
     the resolver as it was.
 
 ## To-dos outside this repository

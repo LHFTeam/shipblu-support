@@ -346,6 +346,9 @@ describe('resolveLegacyPath, for a category', () => {
       `/ar/support/solutions/${GUIDE}`,
       `/en/support/solutions/${GUIDE}-employee-guide`,
       '/support/solutions/154000999999',
+      // A public category's id with its last digit gone, which the colon in
+      // `<id>:%` keeps from answering for the longer id.
+      `/support/solutions/${PARTNERS.slice(0, -1)}`,
     ]) {
       expect({ path, answer: await resolveLegacyPath(path) }).toEqual({ path, answer: null });
     }
@@ -386,6 +389,16 @@ describe('resolveLegacyPath, for a category', () => {
       expect({ path, answer: await resolveLegacyPath(path) }).toEqual({ path, answer: null });
     }
     expect(await getCategory(ANONYMOUS, 'ar', 'مخزن')).toBeNull();
+  });
+
+  // An earlier importer wrote the id bare, with no language, and a re-run
+  // adopts such a row rather than writing a second (`matchesExternalId` in
+  // the importer), so the lookup matches both forms.
+  it('answers a category whose id an earlier importer wrote bare', async () => {
+    await category('154000300700', 'ar', 'قديم');
+    expect(await resolveLegacyPath('/en/support/solutions/154000300700')).toEqual(
+      permanent('/ar/c/قديم'),
+    );
   });
 
   // `logged_in` passes, as it does for an article (`someReaderMayOpen`): the
@@ -552,8 +565,9 @@ describe('resolveLegacyPath, for a folder', () => {
   });
 
   // The help centre's folder page lists every article at once, so whatever a
-  // page of Freshdesk's listed is on it (`freshdeskFolderId`). These are the
-  // shapes the log holds.
+  // page of Freshdesk's listed is on it (`freshdeskFolderId`). The first three
+  // are shapes the log holds; the last has a trailing slash, which Next
+  // answers with its own 308 before the proxy runs, but `?path=` can send.
   it('answers a page of a folder’s list as the folder', async () => {
     await production();
 
@@ -672,6 +686,9 @@ describe('resolveLegacyPath, for a folder', () => {
       `/en/support/solutions/folders/${GUIDE[2]}`,
       `/solutions/folders/${GUIDE[3]}`,
       '/support/solutions/folders/154000518595',
+      // A public folder's id with its last digit gone: the colon in
+      // `<id>:%` is what keeps it from answering for the longer id.
+      `/support/solutions/folders/${FAQS.slice(0, -1)}`,
     ]) {
       expect({ path, answer: await resolveLegacyPath(path) }).toEqual({ path, answer: null });
     }
@@ -720,6 +737,23 @@ describe('resolveLegacyPath, for a folder', () => {
     const empty = await getFolder(ANONYMOUS, 'ar', 'مخزن', 'فارغ');
     expect(empty?.articles).toEqual([]);
     expect((await getFolder(ANONYMOUS, 'ar', 'مخزن', 'انجليزي'))?.articles).toEqual([]);
+  });
+
+  // An earlier importer wrote the id bare, with no language, and a re-run
+  // adopts such a row (`matchesExternalId` in the importer). The page's
+  // language is its category's, which a bare id cannot give.
+  it('answers a folder whose id an earlier importer wrote bare', async () => {
+    const arabic = await categoryRow('ar', 'قديم');
+    await folder(arabic, '154000300700', 'الشحن');
+
+    for (const path of [
+      '/support/solutions/folders/154000300700',
+      '/en/support/solutions/folders/154000300700',
+    ]) {
+      const answer = await resolveLegacyPath(path);
+      expect({ path, answer }).toEqual({ path, answer: permanent('/ar/c/قديم/الشحن') });
+      await expectOpens(answer);
+    }
   });
 
   // `logged_in` passes, as it does for an article and a category

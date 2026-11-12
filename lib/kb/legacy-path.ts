@@ -17,8 +17,10 @@
  *
  * Anybody can send the header to `/help/legacy` themselves, and that is no more
  * than calling the route with `?path=`, which stays supported for exactly that:
- * the route only ever answers a redirect to a public article, folder or
- * category page, or to a `kb_redirects` row's own path, or a 404.
+ * the route only ever answers a redirect to an article, folder or category
+ * page some reader of the help centre can open (`someReaderMayOpen`, which
+ * counts a page only signed-in customers can open), or to a `kb_redirects`
+ * row's own path, or a 404.
  */
 
 /** The header the proxy puts the requested Freshdesk path in. */
@@ -76,7 +78,7 @@ export const FRESHDESK_FOLDER = /\/solutions\/folders\/(\d+)/;
  * **A page of a folder's list reads as the folder.** Freshdesk split a folder's
  * articles over pages, `/folders/<id>/page/2`, and the log shows pages 1 and 2
  * of `154000746959` (15 articles) followed since the move, under `/ar` and
- * `/en`, by crawlers and a headless browser. The help centre's folder page
+ * `/en`, by crawlers and two headless browsers. The help centre's folder page
  * lists every article in one page (`getFolder` takes no limit), so whatever a
  * page of Freshdesk's listed is on it, and that page is the answer for any of
  * them, as it is for the folder: a 404 would turn away a reader whose answer is

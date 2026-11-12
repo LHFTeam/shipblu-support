@@ -212,7 +212,7 @@ async function resolveCategory(
  * The importer kept Freshdesk's folder ids as it kept the categories'
  * (`kb_folders.external_id` is `<id>:<locale>`, one row per translation). A
  * folder has no language or path of its own: its page is under its category,
- * whose language is the page's and whose slug is the path's first segment, so
+ * whose language is the page's and whose slug comes before the folder's, so
  * each translation is read with its category as it stands now, and a folder
  * moved to another category since the import answers at the page it has there.
  * The translation is chosen as a category's is (`translationAnswer`).
@@ -221,9 +221,10 @@ async function resolveCategory(
  * an article in its category's language that `someReaderMayOpen` passes. Both
  * halves are what `getFolder` reads, the folder's own visibility and the
  * articles it lists in the page's language. `getFolder` opens a folder that
- * lists none, with a line saying it is empty; this sends nobody there, for the
- * reason a category's empty page is no answer: a 301 to a page with nothing on
- * it is a soft 404 that the browser keeps.
+ * lists none, with a line saying it is empty; this sends nobody there, because
+ * a 301 to a page with nothing on it is a soft 404 that the browser keeps. So
+ * such a folder answers null, as a category with nothing to list does, whose
+ * page is a 404 (`getCategory`).
  *
  * **A folder nobody can open answers null, so the route's 404**, exactly as an
  * id nothing was imported under does. The employee guide's four agents-only

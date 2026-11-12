@@ -1614,9 +1614,11 @@ is code:
   with it. The guide's four folders answer 404 too, the same status, headers
   and body as an unknown id, where each answered a 301 to the home that said
   an internal folder was imported under the id. Render's log holds 37 folder
-  URLs answered with that 301 between the move and 16:50 UTC on 2026-11-12,
-  our own curl checks left out (`plans/freshdesk-disconnection.md`, PR 7). None
-  of the three is deployed until `dev` reaches `main`. Freshdesk's own notification emails still link
+  URLs answered with the home's 301 between the move and 16:50 UTC on
+  2026-11-12, every one for a public folder, our own curl checks left out;
+  only those checks asked for one of the guide's
+  (`plans/freshdesk-disconnection.md`, PR 7). None of the three is deployed
+  until `dev` reaches `main`. Freshdesk's own notification emails still link
   `support.shipblu.com/support/tickets/<n>`, which no redirect here can answer
   with the ticket (the plan's to-dos).
 
