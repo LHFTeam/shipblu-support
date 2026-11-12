@@ -536,13 +536,15 @@ door it comes through.
 
 **What this depends on, and is not in this plan:** there is no authenticated
 API that creates an `api` ticket today. The survey endpoints assume a
-`lib/api/auth.ts` that resolves a bearer token in `Authorization` to a named
-integration (`MYBLU_API_TOKEN` to start, a table when there is a second
-caller), and a ticket resource under `/api/v1/tickets` that myBlu creates
-tickets and replies through. That is `plans/myblu-ticket-api.md`, to be written
-with whoever owns myBlu's backend; the survey endpoints are the first consumer
-of its authentication module and ship in the same release as its ticket
-creation, because a survey on a channel with no tickets measures nothing.
+`lib/api/auth.ts` and a ticket resource under `/api/v1/tickets` that myBlu
+creates tickets and replies through. That is `plans/myblu-ticket-api.md`, and
+it changes two things said here. The bearer the app sends is a session for one
+user, minted by myBlu's backend, since `MYBLU_API_TOKEN` cannot ship inside an
+app; that token only mints and ends sessions. And `notify_myblu` and its two
+variables arrive in that plan's stage 6, where the first event is an agent's
+reply, so this stage adds `survey.created` to a job that exists. The survey
+endpoints are that plan's last stage, because a survey on a channel with no
+tickets measures nothing.
 
 ## Admin — `/admin/csat`
 
