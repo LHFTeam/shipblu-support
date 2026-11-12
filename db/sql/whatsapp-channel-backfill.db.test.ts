@@ -1,8 +1,17 @@
 import { readFileSync } from 'node:fs';
+import postgres from 'postgres';
 import { asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { channels, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  channels,
+  contacts,
+  conversationEvents,
+  conversations,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 
 /**
@@ -174,6 +183,211 @@ describe('009_whatsapp_channel_backfill.sql', () => {
     expect(await channelOf(silent)).toBeNull();
     expect(await channelOf(placed)).toBe(phone);
     expect(await channelOf(bot)).toBeNull();
+  });
+
+  /**
+   * A coexistence row's tickets are its owner's alone
+   * (`lib/tickets/owner-only.ts`), so a ticket filed under one is not left
+   * with whoever held it while it was nobody's number's. SQL cannot ask who
+   * sees every ticket, so only the number's active owner keeps one.
+   */
+  describe('filing under a coexistence number', () => {
+    const COEXISTENCE = { onboardedAt: '2026-10-01T09:00:00.000Z', wabaId: '1' };
+    let people = 0;
+
+    async function person(values: Partial<typeof agents.$inferInsert> = {}) {
+      people += 1;
+      const [row] = await db
+        .insert(agents)
+        .values({ name: `Agent ${people}`, email: `backfill${people}@shipblu.test`, ...values })
+        .returning({ id: agents.id });
+      return row!.id;
+    }
+
+    const phone = (ownerAgentId: string | null) =>
+      db
+        .insert(channels)
+        .values({
+          type: 'whatsapp',
+          name: 'Nayera',
+          ownerAgentId,
+          config: { phoneNumberId: PHONE, coexistence: COEXISTENCE },
+        })
+        .returning({ id: channels.id })
+        .then((rows) => rows[0]!.id);
+
+    async function heldTicket(holder: string | null) {
+      const id = await ticket(
+        holder ? { assigneeAgentId: holder, assignedAt: new Date('2026-09-20T10:00:00Z') } : {},
+      );
+      await message(id, PHONE, '09:00');
+      return id;
+    }
+
+    async function held(id: string) {
+      const [row] = await db
+        .select({
+          channelId: conversations.channelId,
+          assigneeAgentId: conversations.assigneeAgentId,
+          assignedAt: conversations.assignedAt,
+        })
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      const lines = await db
+        .select({
+          type: conversationEvents.type,
+          actorLabel: conversationEvents.actorLabel,
+          data: conversationEvents.data,
+        })
+        .from(conversationEvents)
+        .where(eq(conversationEvents.conversationId, id));
+      return { ...row!, lines };
+    }
+
+    it('gives a ticket a colleague holds to nobody, and says why', async () => {
+      const owner = await person();
+      const colleague = await person();
+      const channelId = await phone(owner);
+      const id = await heldTicket(colleague);
+
+      await run();
+
+      expect(await held(id)).toEqual({
+        channelId,
+        assigneeAgentId: null,
+        assignedAt: null,
+        lines: [
+          {
+            type: 'unassigned',
+            actorLabel: 'channel_backfill',
+            data: { to: null, from: colleague, reason: 'filed_under_number_at_deploy', channelId },
+          },
+        ],
+      });
+    });
+
+    it('leaves one with the number’s active owner, and writes no line for one nobody held', async () => {
+      const owner = await person();
+      const channelId = await phone(owner);
+      const theirs = await heldTicket(owner);
+      const nobodys = await heldTicket(null);
+
+      await run();
+
+      expect(await held(theirs)).toMatchObject({ channelId, assigneeAgentId: owner, lines: [] });
+      expect(await held(nobodys)).toMatchObject({ channelId, assigneeAgentId: null, lines: [] });
+    });
+
+    // A deactivated owner counts as nobody (`effectiveOwnerId`), and with no
+    // owner at all nobody but an agent who sees every ticket can open it.
+    it('takes one off anybody when the number has no owner', async () => {
+      const colleague = await person();
+      const channelId = await phone(null);
+      const id = await heldTicket(colleague);
+
+      await run();
+
+      expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+      expect((await held(id)).lines).toHaveLength(1);
+    });
+
+    // Where `fileUnderNumber` lets her keep it: SQL cannot ask who sees every
+    // ticket, and nobody is somebody every ticket may be left with.
+    it('takes one off an agent who sees every ticket, which only TypeScript can ask', async () => {
+      const owner = await person();
+      const supervisor = await person({ role: 'supervisor' });
+      const channelId = await phone(owner);
+      const id = await heldTicket(supervisor);
+
+      await run();
+
+      expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: null });
+      expect((await held(id)).lines).toMatchObject([
+        { data: { from: supervisor, reason: 'filed_under_number_at_deploy' } },
+      ]);
+    });
+
+    it('takes one off a deactivated owner, whom the number counts as nobody', async () => {
+      const gone = await person({ isActive: false });
+      const channelId = await phone(gone);
+      const id = await heldTicket(gone);
+
+      await run();
+
+      expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+      expect((await held(id)).lines).toHaveLength(1);
+    });
+
+    it('leaves a colleague holding a ticket filed under a plain number', async () => {
+      const colleague = await person();
+      const support = await number('WhatsApp Support', SUPPORT);
+      const id = await ticket({ assigneeAgentId: colleague });
+      await message(id, SUPPORT, '09:00');
+
+      await run();
+
+      expect(await held(id)).toMatchObject({
+        channelId: support,
+        assigneeAgentId: colleague,
+        lines: [],
+      });
+    });
+
+    // A handover holds the number's row FOR UPDATE. A replay with nothing to
+    // file there must not wait for it — a ticket under no row whose number
+    // has none is there on every deploy — and one with a ticket to file must,
+    // so that the owner it reads is the one the handover leaves.
+    it('waits for a handover only on a number it has a ticket to file under', async () => {
+      const owner = await person();
+      const channelId = await phone(owner);
+      const unplaceable = await ticket();
+      await message(unplaceable, '100000000000001', '09:00');
+
+      const other = postgres(process.env.TEST_DATABASE_URL!, {
+        max: 1,
+        prepare: false,
+        onnotice: () => {},
+      });
+      const replay = () =>
+        db.transaction(async (tx) => {
+          await tx.execute(sql`set local lock_timeout = '300ms'`);
+          await tx.execute(sql.raw(backfill));
+        });
+      try {
+        await other.begin(async (handover) => {
+          await handover`select id from channels where id = ${channelId} for update`;
+          await expect(replay()).resolves.toBeUndefined();
+
+          await message(await heldTicket(null), PHONE, '10:00');
+          await expect(replay()).rejects.toMatchObject({ cause: { code: '55P03' } });
+        });
+      } finally {
+        await other.end();
+      }
+    });
+
+    // Once filed, the ticket is on a row, and a replay reads only tickets on
+    // none: somebody given it since — its owner, a supervisor — keeps it.
+    it('writes nothing the second time, and never touches a ticket already on the row', async () => {
+      const owner = await person();
+      const colleague = await person();
+      const supervisor = await person({ role: 'supervisor' });
+      const channelId = await phone(owner);
+      const id = await heldTicket(colleague);
+      const placed = await ticket({ channelId, assigneeAgentId: colleague });
+      await message(placed, PHONE, '09:00');
+
+      await run();
+      await db
+        .update(conversations)
+        .set({ assigneeAgentId: supervisor })
+        .where(eq(conversations.id, id));
+      await run();
+
+      expect(await held(id)).toMatchObject({ assigneeAgentId: supervisor });
+      expect((await held(id)).lines).toHaveLength(1);
+      expect(await held(placed)).toMatchObject({ assigneeAgentId: colleague, lines: [] });
+    });
   });
 
   // Replayed after every migration, so a second run must write nothing — not

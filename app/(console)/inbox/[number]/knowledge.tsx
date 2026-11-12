@@ -6,6 +6,7 @@ import { InfoTip } from '@/components/tooltip';
 import { SearchInput } from '@/components/search-input';
 import { Badge, Button } from '@/components/ui';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
+import { insertedArticleLink } from '@/lib/kb/agent-link';
 import { LocaleToggle } from './locale-toggle';
 
 /**
@@ -222,11 +223,7 @@ function Hit({ hit, onInsert }: { hit: AgentArticleHit; onInsert: (text: string)
   const bodyId = useId();
 
   const insert = useCallback(() => {
-    // Title and URL on separate lines. Every channel we send on carries plain
-    // text, so there is no anchor to hang a title on — and on its own line the
-    // Latin URL cannot be reordered by the bidi algorithm when it lands in the
-    // middle of an Arabic paragraph.
-    onInsert(`${hit.title}\n${hit.url}`);
+    onInsert(insertedArticleLink(hit));
   }, [hit, onInsert]);
 
   return (

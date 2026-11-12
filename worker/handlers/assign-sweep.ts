@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-or
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   conversationEvents,
   conversationWatchers,
   conversations,
@@ -10,7 +11,9 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { reclaimDue } from '@/lib/assignment/reclaim';
+import { lockHolders, unassignTicket } from '@/lib/tickets/assignee';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { isCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { logger } from '@/lib/log';
 import { isHeld } from '@/lib/routing/hold';
 
@@ -47,25 +50,57 @@ function routingGroups() {
 }
 
 /**
- * Every unassigned ticket in a routing group gets another attempt.
+ * The ticket is on a coexistence number whose owner is active: one only that
+ * owner may be handed. Correlated, since this read locks nothing; the owner is
+ * asked again under the number's lock when the ticket is assigned
+ * (`lockHolders`).
+ */
+function ownedCoexistenceNumber() {
+  return sql`exists (
+    select 1 from ${channels}
+    inner join ${agents} on ${agents.id} = ${channels.ownerAgentId}
+    where ${channels.id} = ${conversations.channelId}
+      and ${isCoexistenceNumber()}
+      and ${agents.isActive}
+  )`;
+}
+
+/**
+ * Every unassigned ticket in a routing group gets another attempt, and so does
+ * every unassigned ticket on a coexistence number whose owner is active,
+ * whatever its group.
  *
  * Bounded to the open backlog, so this is the queue an agent would be looking
  * at, not the archive. Each ticket is attempted individually rather than in one
  * transaction: they contend for the same group lock, and one ticket that cannot
  * be placed must not roll back the twenty before it.
  *
- * An owned WhatsApp ticket in no group, or in a manual one, is not in this list,
- * and does not need to be: it goes back to its owner on the spot — ingest
- * stamps it, and "Unassign" runs `assignConversation` in the same request — so
- * the sweep is only ever its second chance.
+ * An owned ticket on a plain number in no group, or in a manual one, is not in
+ * this list, and does not need to be: it goes back to its owner on the spot —
+ * ingest stamps it, and "Unassign" runs `assignConversation` in the same
+ * request — so the sweep is only ever its second chance. A coexistence
+ * number's ticket can be left with nobody by something that assigns nothing
+ * after it: `db/sql/009` filing it under the number at a deploy and taking it
+ * off a holder it is hidden from, or its owner coming back after it arrived
+ * while they were deactivated. Its group's mode says nothing about it, since
+ * the group's members may not hold it anyway (`lib/tickets/owner-only.ts`),
+ * so it is asked whatever the group, and `assignConversation` hands it to the
+ * owner (`takeForNumberOwner`). Left to its group's mode, one in a manual
+ * group waited for its customer's next message, which could be days.
  */
 async function assignWaiting(): Promise<number> {
   const waiting = await db
     .select({ id: conversations.id })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .innerJoin(groups, eq(groups.id, conversations.groupId))
-    .where(and(isNull(conversations.assigneeAgentId), routingGroups(), openBacklog()))
+    .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .where(
+      and(
+        isNull(conversations.assigneeAgentId),
+        or(and(isNotNull(groups.id), routingGroups()), ownedCoexistenceNumber()),
+        openBacklog(),
+      ),
+    )
     // Oldest first: the queue drains in the order it filled, and a burst that
     // exceeds the team's capacity leaves the newest waiting rather than the
     // ticket that has already been waiting longest.
@@ -109,11 +144,20 @@ async function assignWaiting(): Promise<number> {
  *   back would only hand it to them again: `assignConversation` returns an
  *   owned ticket to its owner. A deactivated owner's tickets, and an owned
  *   ticket somebody else is holding, are reclaimed like any other.
+ * - **Never from a coexistence number's active owner, whoever the ticket is
+ *   accountable to.** There the number's word outranks the ticket's
+ *   (`takeForNumberOwner`): a ticket filed under the row after it was created,
+ *   or stamped before a handover it missed, is accountable to nobody or to
+ *   somebody else, and the test above read its owner as a colleague holding
+ *   it. Taken back, it went straight to the owner again on the same sweep,
+ *   with a line on the timeline saying they had gone offline before replying.
+ *   Asked under the number's lock, in the transaction that would unassign it.
  */
 async function reclaimAbandoned(now: Date): Promise<number> {
   const abandoned = await db
     .select({
       id: conversations.id,
+      channelId: conversations.channelId,
       assigneeAgentId: conversations.assigneeAgentId,
       reclaimAfterMins: groups.reclaimAfterMins,
       assignedAt: conversations.assignedAt,
@@ -159,21 +203,25 @@ async function reclaimAbandoned(now: Date): Promise<number> {
     // should go back to the queue either way. `reclaimDue` says from when.
     if (!reclaimDue(row, row.reclaimAfterMins ?? 0, now)) continue;
 
-    await db.transaction(async (tx) => {
-      const cleared = await tx
-        .update(conversations)
-        .set({ assigneeAgentId: null, assignedAt: null })
-        // Re-checked in the write: the agent may have come back and replied
-        // between this loop reading the row and reaching it.
-        .where(
-          and(
-            eq(conversations.id, row.id),
-            eq(conversations.assigneeAgentId, row.assigneeAgentId as string),
-          ),
-        )
-        .returning({ id: conversations.id });
+    const taken = await db.transaction(async (tx) => {
+      // The number's lock before the ticket's row is written, the order a
+      // handover takes them (`lib/tickets/assignee.ts`).
+      const holders = await lockHolders(tx, row.channelId);
+      if (holders.ownerOnly && holders.ownerOnly.ownerId === row.assigneeAgentId) return false;
 
-      if (cleared.length === 0) return;
+      const cleared = await unassignTicket(tx, {
+        conversationId: row.id,
+        // Re-checked in the write: the agent may have come back and replied
+        // between this loop reading the row and reaching it. And still on the
+        // number the question above was asked of.
+        onlyIf: and(
+          eq(conversations.assigneeAgentId, row.assigneeAgentId as string),
+          row.channelId === null
+            ? isNull(conversations.channelId)
+            : eq(conversations.channelId, row.channelId),
+        ),
+      });
+      if (!cleared) return false;
 
       await tx.insert(conversationEvents).values({
         conversationId: row.id,
@@ -181,9 +229,12 @@ async function reclaimAbandoned(now: Date): Promise<number> {
         actorLabel: 'assign_sweep',
         data: { from: row.assigneeAgentId, afterMins: row.reclaimAfterMins },
       });
+      return true;
     });
 
-    reclaimed += 1;
+    // Only a ticket that was taken back: one the agent answered meanwhile, or
+    // an owner's on their own number, is not a reclaim to report.
+    if (taken) reclaimed += 1;
   }
 
   return reclaimed;

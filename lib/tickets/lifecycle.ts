@@ -131,8 +131,13 @@ export async function afterTicketUpdate(conversationId: string): Promise<void> {
  * Failures are logged and swallowed, exactly as shipment linking is. These paths
  * run inside queue jobs; throwing here would fail the job, and the retry would
  * re-run every engine that already succeeded — including sending a reply twice.
+ *
+ * Exported for the one ingest path that assigns outside `afterInboundMessage`:
+ * the phone's own reply filing a ticket under its number
+ * (`ingestWhatsAppEcho`), so a failed assignment after a stored message is
+ * handled in one place.
  */
-async function autoAssign(conversationId: string): Promise<void> {
+export async function autoAssign(conversationId: string): Promise<void> {
   try {
     await assignConversation(conversationId);
   } catch (error) {

@@ -521,8 +521,9 @@ export function articlePath(locale: string, slug: string): string {
  * them resolvable — the title text after the id changes whenever somebody edits
  * the title, and was never the key. A relative one (`/en/support/solutions/
  * articles/<id>`) is the portal's path pasted without its host: none is stored
- * today, and once the domain moves it would be ours, reaching the article only
- * by a 301 through `app/help/legacy`.
+ * today, and on whichever host of ours draws one — `support.shipblu.com`
+ * among them since 2026-11-11 — it reaches the article only through
+ * `app/help/legacy`'s redirect.
  *
  * The pattern finds the shape anywhere; whether the address is *ours* is
  * `isFreshdeskAddress`, asked of every match (`legacyFreshdeskLink`), so the
@@ -572,8 +573,10 @@ export function legacyArticleIds(html: string): string[] {
  * Published articles only. A draft or an archived article answers no reader on
  * the help centre, so a link pointed at one is a dead link that no longer
  * looks like Freshdesk's, and the refusal in `./freshdesk-refs.ts` cannot see
- * it. Left as Freshdesk's address, it still works today, a Save is refused for
- * adding it, and the formatting pass leaves it alone. Every imported article
+ * it. Left as Freshdesk's address, a Save is refused for adding it and the
+ * formatting pass leaves it alone; on the portal's hostname, which has
+ * answered from this app since 2026-11-11, it reaches `app/help/legacy`,
+ * which answers only an article some reader may open. Every imported article
  * is published (measured 2026-11-09), so this changes no link stored today.
  */
 export function legacyArticleIndex(
@@ -643,8 +646,9 @@ export function legacyArticleResolver(
  *
  * Only the `href` changes. A `#fragment` on the old address is kept, since it
  * named a heading in the same article; the link's text is left as written,
- * because it is the author's words, and a bare old URL shown there still
- * reaches the article through `app/help/legacy` once the domain moves.
+ * because it is the author's words, and a bare old URL shown there has
+ * reached the article through `app/help/legacy` since the domain moved on
+ * 2026-11-11.
  */
 export function rewriteLegacyArticleLinks(
   html: string,

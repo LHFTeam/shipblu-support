@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { publicBaseUrl, requestBaseUrl } from './site';
+import { articleLinks, articleOrigins, articleUrl, publicBaseUrl, requestBaseUrl } from './site';
 
 /** Just enough of `Headers` for the one method `requestBaseUrl` calls. */
 function headers(entries: Record<string, string>) {
@@ -22,8 +22,10 @@ describe('requestBaseUrl', () => {
   });
 
   it('does not follow the published host when they disagree', () => {
-    // The whole point: KB_PUBLIC_HOST can name a domain that does not serve
-    // this app yet, and an agent clicking a link needs the one that does.
+    // The whole point: nothing checks that the domain KB_PUBLIC_HOST names
+    // answers from this app (it once named support.shipblu.com while Freshdesk
+    // still served that host), and an agent clicking a link needs one that
+    // does.
     setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
 
     expect(requestBaseUrl(headers({ host: 'shipblu-support.onrender.com' }))).toBe(
@@ -53,11 +55,67 @@ describe('requestBaseUrl', () => {
   });
 
   it('rejects anything that is not a bare hostname', () => {
-    // This string is pasted into a message sent to a customer, so a header
+    // This string becomes a link shown to a customer in the widget, so a header
     // carrying a path, a scheme or a second host must not become the origin —
     // it falls back rather than building something an attacker chose.
     for (const host of ['evil.com/path', 'https://evil.com', 'a,b', 'evil.com evil2.com', '']) {
       expect(requestBaseUrl(headers({ host }))).toBe('https://app.example.com');
     }
+  });
+});
+
+describe('articleOrigins', () => {
+  withTestEnv({ APP_URL: 'https://shipblu-support.onrender.com' });
+
+  // The console stays on the Render host once KB_PUBLIC_HOST names the help
+  // centre's, so a link built on the agent's host put that host in every reply.
+  it("reads on the agent's host and sends on the published one", () => {
+    setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+    expect(articleOrigins(headers({ host: 'shipblu-support.onrender.com' }))).toEqual({
+      read: 'https://shipblu-support.onrender.com',
+      send: 'https://support.shipblu.com',
+    });
+  });
+
+  it("reads on the console's origin, not the published one, with no host to read", () => {
+    setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+    expect(articleOrigins(headers({}))).toEqual({
+      read: 'https://shipblu-support.onrender.com',
+      send: 'https://support.shipblu.com',
+    });
+  });
+
+  it('sends on APP_URL while KB_PUBLIC_HOST is unset', () => {
+    expect(articleOrigins(headers({ host: 'localhost:3000' }))).toEqual({
+      read: 'http://localhost:3000',
+      send: 'https://shipblu-support.onrender.com',
+    });
+  });
+});
+
+describe('articleLinks', () => {
+  // Swapped, an agent would send customers the Render host again, or read on
+  // the published host and be shown the chat launcher meant for customers.
+  it('opens on the read origin and sends on the send origin', () => {
+    expect(
+      articleLinks(
+        { read: 'https://shipblu-support.onrender.com', send: 'https://support.shipblu.com' },
+        'ar',
+        'شحنتي-فين',
+      ),
+    ).toEqual({
+      url: `https://shipblu-support.onrender.com/ar/a/${encodeURI('شحنتي-فين')}`,
+      sendUrl: `https://support.shipblu.com/ar/a/${encodeURI('شحنتي-فين')}`,
+    });
+  });
+});
+
+describe('articleUrl', () => {
+  it('percent-encodes an Arabic slug once', () => {
+    expect(articleUrl('https://support.shipblu.com', 'ar', 'شحنة')).toBe(
+      'https://support.shipblu.com/ar/a/%D8%B4%D8%AD%D9%86%D8%A9',
+    );
   });
 });

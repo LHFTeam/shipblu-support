@@ -8,12 +8,17 @@ import {
   conversations,
   ticketStatuses,
 } from '@/db/schema';
-import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import {
-  agentsWhoSeeEveryTicket,
-  hiddenFromHolder,
-  isCoexistenceNumber,
-} from '@/lib/tickets/owner-only';
+  admits,
+  assignTicket,
+  assignTickets,
+  lockHolders,
+  unassignTicket,
+  unassignTickets,
+  type Holders,
+} from '@/lib/tickets/assignee';
+import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
+import { agentsWhoSeeEveryTicket, isCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { parseCoexistence } from './coexistence';
@@ -28,9 +33,11 @@ import { parseCoexistence } from './coexistence';
  * breaches count against, frozen onto the ticket because ownership changes and
  * the nightly rollup rebuilds the last three days from current state.
  *
- * Every write of either column is in this module, so the three moments a
- * ticket's accountability may move are one file to read: ingest creating a
- * ticket on an owned number (`lockedOwnerId` and `ownerStamp`), a handover
+ * Every write of either column is in this module but one, so the three
+ * moments a ticket's accountability may move are one file to read: ingest
+ * creating a ticket on an owned number (`lockedOwnerId` here; the columns it
+ * stamps are `ownerStamp` in `lib/tickets/assignee.ts`, beside the assignee
+ * they are written with), a handover
  * (`handOverNumber`), and a customer reopening a ticket after one
  * (`alignAccountable`). Nothing else — not assignment, reclaim, a supervisor's
  * reassignment, an automation or a merge — touches accountability, which is
@@ -81,45 +88,10 @@ export function effectiveOwnerId(owner: NumberOwner | null): string | null {
  * Null for a row that is not a plain number: the bot is nobody's.
  */
 export async function lockedOwnerId(tx: typeof db, channelId: string): Promise<string | null> {
-  // The channel alone, and the owner in a second read. A row that waited for a
-  // handover's lock is re-read at its new version, but a table joined to it and
-  // not locked keeps the row the first look found — the previous owner's —
-  // so a join here reads the new owner as matching nobody, and so as inactive.
-  const [row] = await tx
-    .select({ type: channels.type, ownerId: channels.ownerAgentId })
-    .from(channels)
-    .where(eq(channels.id, channelId))
-    .for('key share');
-  if (!row || row.type !== 'whatsapp' || !row.ownerId) return null;
-
-  const [owner] = await tx
-    .select({ active: agents.isActive })
-    .from(agents)
-    .where(eq(agents.id, row.ownerId));
-  return effectiveOwnerId(owner ? { id: row.ownerId, active: owner.active } : null);
-}
-
-/**
- * The columns a ticket created on a number starts with: accountable to the
- * owner and assigned to them, at `at` — or neither, with no owner.
- *
- * Written in the insert rather than by the assignment that follows it, because
- * an `on_create` rule must see the ticket the team actually has, and because a
- * ticket the business opened from the phone is resolved on creation and never
- * reaches `assignConversation` at all. `autoAssign` then finds it assigned and
- * stops there.
- */
-export function ownerStamp(
-  ownerId: string | null,
-  at: Date,
-): {
-  accountableAgentId: string | null;
-  assigneeAgentId: string | null;
-  assignedAt: Date | null;
-} {
-  return ownerId
-    ? { accountableAgentId: ownerId, assigneeAgentId: ownerId, assignedAt: at }
-    : { accountableAgentId: null, assigneeAgentId: null, assignedAt: null };
+  // The one read of a number's owner under its lock (`lockHolders`), so the
+  // owner ingest stamps and the one an assignment checks against cannot
+  // differ.
+  return (await lockHolders(tx, channelId)).ownerId;
 }
 
 /**
@@ -213,7 +185,7 @@ async function ownerOnReopen(
   tx: typeof db,
   conversationId: string,
   to: StatusCategory,
-): Promise<{ ownerId: string | null; channelId: string } | null> {
+): Promise<{ ownerId: string | null; channelId: string; holders: Holders } | null> {
   if (to !== 'open' && to !== 'pending') return null;
 
   const [ticket] = await tx
@@ -235,7 +207,10 @@ async function ownerOnReopen(
   ) {
     return null;
   }
-  return { ownerId: await lockedOwnerId(tx, ticket.channelId), channelId: ticket.channelId };
+  // The owner and who may hold the ticket in one read under the number's
+  // lock, handed on to `alignAccountable` so it asks nothing a second time.
+  const holders = await lockHolders(tx, ticket.channelId);
+  return { ownerId: holders.ownerId, channelId: ticket.channelId, holders };
 }
 
 /**
@@ -267,6 +242,11 @@ export async function alignAccountable(
     channelId: string | null;
     reason: AlignReason;
     now?: Date;
+    /**
+     * Who may hold a ticket on the number, as the caller read it under the
+     * number's lock (`lockHolders`). Read here when not given.
+     */
+    holders?: Holders;
   },
 ): Promise<{ changed: boolean; reassigned: boolean }> {
   const [ticket] = await tx
@@ -276,7 +256,9 @@ export async function alignAccountable(
     })
     .from(conversations)
     .where(eq(conversations.id, input.conversationId))
-    .for('update');
+    // NO KEY UPDATE, as every lock on a ticket's row taken after its own
+    // transaction has written it is (§6.106): a reopen writes the status first.
+    .for('no key update');
 
   if (!ticket) return { changed: false, reassigned: false };
 
@@ -287,12 +269,15 @@ export async function alignAccountable(
   // number's owner, or to nobody when the number has none. Asked whether or
   // not the accountability moves: a ticket a colleague held when it was
   // resolved comes back with its number in the same hands.
+  //
+  // The number's lock is already this transaction's: every caller read the
+  // owner under it before the ticket's row was written, and hands that answer
+  // on where it has it, so a read here waits for nobody.
+  const holders = input.holders ?? (await lockHolders(tx, input.channelId));
   const stranded =
     ticket.assigneeAgentId !== null &&
     ticket.assigneeAgentId !== input.ownerId &&
-    (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, {
-      ownerId: input.ownerId,
-    }));
+    !(await admits(tx, holders, ticket.assigneeAgentId));
   const moves = ticket.accountableAgentId !== input.ownerId;
   if (!moves && !stranded) return { changed: false, reassigned: false };
 
@@ -301,14 +286,27 @@ export async function alignAccountable(
     (stranded && input.ownerId !== null);
   const unassign = stranded && input.ownerId === null;
 
-  await tx
-    .update(conversations)
-    .set({
-      ...(moves ? { accountableAgentId: input.ownerId } : {}),
-      ...(reassign ? { assigneeAgentId: input.ownerId, assignedAt: input.now ?? new Date() } : {}),
-      ...(unassign ? { assigneeAgentId: null, assignedAt: null } : {}),
-    })
-    .where(eq(conversations.id, input.conversationId));
+  if (moves) {
+    await tx
+      .update(conversations)
+      .set({ accountableAgentId: input.ownerId })
+      .where(eq(conversations.id, input.conversationId));
+  }
+  // What was written, not what was meant: `assignTicket` refuses an owner the
+  // number does not admit and writes nothing for a ticket no longer on the
+  // number it asked about, and neither may then read as an `assigned` line or
+  // a caller's "the owner took it" (`takeForNumberOwner`).
+  const reassigned =
+    reassign && input.ownerId
+      ? (await assignTicket(tx, holders, {
+          conversationId: input.conversationId,
+          to: input.ownerId,
+          at: input.now ?? new Date(),
+        })) === 'assigned'
+      : false;
+  const unassigned = unassign
+    ? await unassignTicket(tx, { conversationId: input.conversationId })
+    : false;
 
   // The column default, the transaction's start, though the `assigned` below
   // is stamped as it is written. The rollup files each figure by the
@@ -331,14 +329,14 @@ export async function alignAccountable(
     });
   }
 
-  if (reassign && input.ownerId) {
+  if (reassigned && input.ownerId) {
     await recordOwnerAssigned(tx, {
       conversationId: input.conversationId,
       ownerId: input.ownerId,
       channelId: input.channelId,
     });
   }
-  if (unassign) {
+  if (unassigned) {
     await tx.insert(conversationEvents).values({
       conversationId: input.conversationId,
       type: 'unassigned',
@@ -353,7 +351,7 @@ export async function alignAccountable(
     });
   }
 
-  return { changed: moves, reassigned: reassign };
+  return { changed: moves, reassigned };
 }
 
 /**
@@ -607,10 +605,10 @@ export async function handOverNumber(input: {
       !seesAll.has(ticket.assigneeAgentId);
 
     const moved = tickets.filter((ticket) => ticket.accountableAgentId !== (to?.id ?? null));
-    const reassigned = to
+    const toReassign = to
       ? tickets.filter((ticket) => movesAssignee(ticket, from, to.id) || stranded(ticket))
       : [];
-    const unassigned = to ? [] : tickets.filter(stranded);
+    const toUnassign = to ? [] : tickets.filter(stranded);
 
     if (moved.length > 0) {
       await tx
@@ -623,28 +621,35 @@ export async function handOverNumber(input: {
           ),
         );
     }
-    if (to && reassigned.length > 0) {
-      await tx
-        .update(conversations)
-        .set({ assigneeAgentId: to.id, assignedAt: now })
-        .where(
-          inArray(
-            conversations.id,
-            reassigned.map((ticket) => ticket.id),
-          ),
-        );
-    }
-    if (unassigned.length > 0) {
-      await tx
-        .update(conversations)
-        .set({ assigneeAgentId: null, assignedAt: null })
-        .where(
-          inArray(
-            conversations.id,
-            unassigned.map((ticket) => ticket.id),
-          ),
-        );
-    }
+    // Through the one writer of the assignee. The number's row is locked
+    // above, and its owner is already the new one, so this reads what the
+    // handover wrote and waits for nobody.
+    //
+    // The lines, the counts and the audit row are built from what was
+    // written, never from what was meant: a refusal or a ticket the write did
+    // not match would otherwise be recorded as moved. Neither is expected here,
+    // since the new owner is active and every ticket is locked on this number,
+    // and that is why the write answers rather than the caller assuming.
+    const holders = await lockHolders(tx, channel.id);
+    const reassignedIds = to
+      ? new Set(
+          (
+            await assignTickets(tx, holders, {
+              conversationIds: toReassign.map((ticket) => ticket.id),
+              to: to.id,
+              at: now,
+            })
+          ).written,
+        )
+      : new Set<string>();
+    const unassignedIds = new Set(
+      await unassignTickets(
+        tx,
+        toUnassign.map((ticket) => ticket.id),
+      ),
+    );
+    const reassigned = toReassign.filter((ticket) => reassignedIds.has(ticket.id));
+    const unassigned = toUnassign.filter((ticket) => unassignedIds.has(ticket.id));
 
     const [change] = await tx
       .insert(channelOwnerChanges)

@@ -821,6 +821,20 @@ async function channelStep(
     const previouslyCopied = previous ? copiedSoFar(previous) : [];
 
     await db.transaction(async (tx) => {
+      // FOR UPDATE first, the lock a handover takes: a plain row becoming a
+      // coexistence number is a change in who may hold its tickets, and every
+      // writer of a ticket's assignee reads that under FOR KEY SHARE on this
+      // row (`lockHolders`). An update of the row's config alone takes a lock
+      // KEY SHARE does not wait for, so an assignment to a colleague read
+      // while the row was plain could commit after the record landed, and
+      // leave a ticket held by somebody its number now hides it from. The
+      // tickets colleagues already hold are not moved here (AGENTS.md says
+      // so); this only keeps one in flight from slipping past.
+      await tx
+        .select({ id: channels.id })
+        .from(channels)
+        .where(eq(channels.id, current.id))
+        .for('update');
       // Pointed at this account and switched on: the number now sends with
       // the credential this attempt stored. Its name and group are the team's
       // and are kept.

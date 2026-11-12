@@ -15,9 +15,11 @@ const DEFINITION = 'lib/kb/article-write.ts';
  * that article. A writer that skips it can put Freshdesk's addresses back after
  * the copy job and the formatting pass took them out: a Restore of an old
  * version, a re-import, a paste from the old portal. Nothing downstream would
- * notice until the day Freshdesk is disconnected and those pictures and links
- * break. The Save that refuses what is left (`saveRefusal`) reads the pointed
- * body, so it cannot stand in for this either.
+ * notice until the day Freshdesk is disconnected and those pictures, and links
+ * on Freshworks' own hosts, break; a link on the portal's hostname has reached
+ * this app since 2026-11-11, and the article only through the legacy route. The
+ * Save that refuses what is left (`saveRefusal`) reads the pointed body, so it
+ * cannot stand in for this either.
  *
  * Asked of the module rather than traced through the code, as the
  * sanitise-then-normalise pair is (`article-normalisation`): a `pointedHere`

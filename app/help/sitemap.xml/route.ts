@@ -1,14 +1,14 @@
 import { LOCALES } from '@/lib/kb/locale';
 import { allPublishedArticles, listCategories } from '@/lib/kb/queries';
 import { ANONYMOUS } from '@/lib/kb/visibility';
-import { publicBaseUrl } from '@/lib/kb/site';
+import { articleUrl, publicBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Hand-written rather than Next's `sitemap.ts` convention, because the file
  * lives under a rewritten path: the convention would emit URLs containing
- * `/kb`, which is an internal detail no customer or crawler ever sees.
+ * `/help`, which is an internal detail no customer or crawler ever sees.
  */
 export async function GET() {
   const base = publicBaseUrl();
@@ -33,7 +33,7 @@ export async function GET() {
 
   for (const article of articles) {
     urls.push({
-      loc: `${base}/${article.locale}/a/${encodeURI(article.slug)}`,
+      loc: articleUrl(base, article.locale, article.slug),
       lastmod: article.updatedAt.toISOString(),
       priority: '0.5',
     });

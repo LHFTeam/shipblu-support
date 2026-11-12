@@ -37,12 +37,8 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
-import {
-  type Holder,
-  OWNER_ONLY_REFUSAL,
-  ownerOnlyNumber,
-  seesOwnerOnlyTicket,
-} from '@/lib/tickets/owner-only';
+import { assignTicket, lockHoldersOf, unassignTicket } from '@/lib/tickets/assignee';
+import { OWNER_ONLY_REFUSAL } from '@/lib/tickets/owner-only';
 import { changeStatus } from '@/lib/tickets/status';
 import { seesTicket } from '@/lib/tickets/visibility';
 import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
@@ -126,7 +122,6 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     case 'assignee': {
       if (!can(agent, 'ticket.assign')) return { error: 'You cannot reassign tickets' };
       const assigneeAgentId = value || null;
-      let assignee: Holder | null = null;
 
       // The picker lists active agents only, but the id comes back as a form
       // field and the picker is not the authority. The foreign key would prove
@@ -134,19 +129,15 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // who has left, where nobody will ever answer it.
       if (assigneeAgentId) {
         if (!isUuid(assigneeAgentId)) return { error: 'Unknown agent' };
+        // Whether they exist and can sign in, and nothing more: who may see
+        // the ticket is `admits`', inside the transaction below.
         const [found] = await db
-          .select({
-            id: agents.id,
-            isActive: agents.isActive,
-            role: agents.role,
-            permissions: agents.permissions,
-          })
+          .select({ isActive: agents.isActive })
           .from(agents)
           .where(eq(agents.id, assigneeAgentId))
           .limit(1);
         if (!found) return { error: 'Unknown agent' };
         if (!found.isActive) return { error: 'That agent is deactivated' };
-        assignee = found;
       }
 
       const assigned = await db.transaction(async (tx) => {
@@ -158,15 +149,25 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         // and before the ticket is written: read ahead of the transaction, an
         // assignment to the owner a handover was replacing passed, and
         // committed after the handover had collected the number's tickets.
-        if (assignee) {
-          const number = await ownerOnlyNumber(tx, row.conversation.channelId, { lock: true });
-          if (number && !seesOwnerOnlyTicket(assignee, number.ownerId)) return null;
+        //
+        // Both halves are `assignTicket`'s (`lib/tickets/assignee.ts`), the one
+        // writer of the assignee. The number is the one the ticket is on now,
+        // read in here: the row this request loaded may name none, for a
+        // ticket its customer's next message has since filed under one.
+        // `missed` is a ticket filed in the moment between that read and the
+        // write, or deleted: nothing is written, and the agent is asked to
+        // look again.
+        if (assigneeAgentId) {
+          const holders = await lockHoldersOf(tx, conversationId);
+          const written = await assignTicket(tx, holders, {
+            conversationId,
+            to: assigneeAgentId,
+            at: new Date(),
+          });
+          if (written !== 'assigned') return written;
+        } else {
+          await unassignTicket(tx, { conversationId });
         }
-
-        await tx
-          .update(conversations)
-          .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
-          .where(eq(conversations.id, conversationId));
 
         await tx.insert(conversationEvents).values({
           conversationId,
@@ -194,7 +195,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           : false;
         return { ended, deferred: await deferToRouter(tx, conversationId) };
       });
-      if (!assigned) return { error: OWNER_ONLY_REFUSAL };
+      if (assigned === 'hidden') return { error: OWNER_ONLY_REFUSAL };
+      if (assigned === 'missed') {
+        return { error: 'This ticket changed while you were assigning it. Reload and try again.' };
+      }
       endedHold = assigned.ended;
       routingRunsRules = assigned.deferred;
       break;

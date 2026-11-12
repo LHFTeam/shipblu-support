@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -1592,6 +1592,262 @@ describe('a customer writing to two of our numbers', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  /**
+   * Under no row a ticket is its group's, and anybody may hold it. Filed under
+   * a coexistence row it is the number's owner's alone
+   * (`lib/tickets/owner-only.ts`), so the holder it had cannot be left with
+   * it: it would be in none of their lists and read as taken to everybody who
+   * can see it (`fileUnderNumber`).
+   */
+  describe('filing a held ticket under a coexistence number', () => {
+    let people = 0;
+    async function person(values: Partial<typeof agents.$inferInsert> = {}) {
+      people += 1;
+      const [row] = await db
+        .insert(agents)
+        .values({ name: `Agent ${people}`, email: `filed${people}@shipblu.test`, ...values })
+        .returning({ id: agents.id });
+      return row!.id;
+    }
+
+    /** A ticket under no row, held by `holder`, and then the number's row. */
+    async function heldUnderNoRow(holder: string, ownerAgentId: string | null) {
+      const before = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_B }));
+      await db
+        .update(conversations)
+        .set({ assigneeAgentId: holder, assignedAt: SENT })
+        .where(eq(conversations.id, before.conversationId));
+      const b = await phone('Ali', NUMBER_B);
+      await db.update(channels).set({ ownerAgentId }).where(eq(channels.id, b));
+      return { id: before.conversationId, channelId: b };
+    }
+
+    async function held(id: string) {
+      const [row] = await db
+        .select({
+          channelId: conversations.channelId,
+          assigneeAgentId: conversations.assigneeAgentId,
+          assignedAt: conversations.assignedAt,
+        })
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      const lines = await db
+        .select({ type: conversationEvents.type, data: conversationEvents.data })
+        .from(conversationEvents)
+        .where(
+          and(
+            eq(conversationEvents.conversationId, id),
+            inArray(conversationEvents.type, ['assigned', 'unassigned']),
+          ),
+        )
+        .orderBy(asc(conversationEvents.createdAt), asc(conversationEvents.id));
+      return { ...row!, lines };
+    }
+
+    const again = () =>
+      ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.after', phoneNumberId: NUMBER_B, sentAt: LATER }),
+      );
+
+    it('takes it off a colleague, and the number’s owner takes it', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const owner = await person();
+        const { id, channelId } = await heldUnderNoRow(colleague, owner);
+
+        expect(await again()).toMatchObject({ conversationId: id, createdConversation: false });
+
+        const after = await held(id);
+        expect(after).toMatchObject({ channelId, assigneeAgentId: owner });
+        expect(after.lines).toEqual([
+          {
+            type: 'unassigned',
+            data: { to: null, from: colleague, reason: 'filed_under_number', channelId },
+          },
+          { type: 'assigned', data: expect.objectContaining({ to: owner }) },
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('leaves it with nobody when the number has no owner', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const { id, channelId } = await heldUnderNoRow(colleague, null);
+
+        await again();
+
+        const after = await held(id);
+        expect(after).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+        expect(after.lines).toEqual([
+          {
+            type: 'unassigned',
+            data: { to: null, from: colleague, reason: 'filed_under_number', channelId },
+          },
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('and with nobody when its owner is deactivated, whom the number counts as nobody', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const gone = await person({ isActive: false });
+        const { id, channelId } = await heldUnderNoRow(colleague, gone);
+
+        await again();
+
+        const after = await held(id);
+        expect(after).toMatchObject({ channelId, assigneeAgentId: null, assignedAt: null });
+        expect(after.lines.map((line) => line.type)).toEqual(['unassigned']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('leaves it with the number’s owner, who held it already', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const owner = await person();
+        const { id, channelId } = await heldUnderNoRow(owner, owner);
+
+        await again();
+
+        expect(await held(id)).toMatchObject({
+          channelId,
+          assigneeAgentId: owner,
+          assignedAt: SENT,
+          lines: [],
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('leaves it with an agent who sees every ticket', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const supervisor = await person({ role: 'supervisor' });
+        const owner = await person();
+        const { id, channelId } = await heldUnderNoRow(supervisor, owner);
+
+        await again();
+
+        expect(await held(id)).toMatchObject({
+          channelId,
+          assigneeAgentId: supervisor,
+          assignedAt: SENT,
+          lines: [],
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('takes it off a supervisor who is deactivated, who sees nothing', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const left = await person({ role: 'supervisor', isActive: false });
+        const { id } = await heldUnderNoRow(left, null);
+
+        await again();
+
+        const after = await held(id);
+        expect(after).toMatchObject({ assigneeAgentId: null });
+        expect(after.lines.map((line) => line.type)).toEqual(['unassigned']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // The owner typed a reply from the phone: no inbound pass runs for an
+    // echo, so the path assigns the ticket itself.
+    it('gives it to the owner when the business’s own reply is what files it', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const owner = await person();
+        const { id, channelId } = await heldUnderNoRow(colleague, owner);
+
+        const stored = await ingestWhatsAppEcho(phoneEcho(NUMBER_B, { sentAt: LATER }));
+
+        expect(stored).toMatchObject({ conversationId: id, createdConversation: false });
+        expect(await held(id)).toMatchObject({ channelId, assigneeAgentId: owner });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // The orphan read above is filed by somebody else while this filing waits
+    // for its row — `db/sql/009` at a deploy — under another number. It is no
+    // longer this number's to continue, and the message opens a ticket here
+    // rather than landing on the other number's (§6.99).
+    it('opens a ticket here when another writer files the orphan elsewhere first', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const before = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_B }));
+        await phone('Ali', NUMBER_B);
+        const elsewhere = await phone('Somebody else', NUMBER_A);
+
+        const hold = holdNextTransaction('after');
+        const filing = db.transaction((tx) =>
+          tx
+            .update(conversations)
+            .set({ channelId: elsewhere })
+            .where(eq(conversations.id, before.conversationId)),
+        );
+        await hold.atHold;
+
+        const arriving = again();
+        expect(await untilWaitingOnALock(db, { rowLockIn: '^\\s*select' })).toBe(true);
+        hold.release();
+        await filing;
+        const after = await arriving;
+
+        expect(after).toMatchObject({ createdConversation: true });
+        expect(after.conversationId).not.toBe(before.conversationId);
+        expect(await held(before.conversationId)).toMatchObject({ channelId: elsewhere });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    // A plain number's tickets are hidden from nobody, so filing one changes
+    // nothing about who may hold it.
+    it('leaves a colleague holding a ticket filed under a plain number', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const colleague = await person();
+        const before = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_A }));
+        await db
+          .update(conversations)
+          .set({ assigneeAgentId: colleague, assignedAt: SENT })
+          .where(eq(conversations.id, before.conversationId));
+        const [plain] = await db
+          .insert(channels)
+          .values({ type: 'whatsapp', name: 'Support', config: { phoneNumberId: NUMBER_A } })
+          .returning({ id: channels.id });
+
+        await ingestWhatsAppMessage(
+          inbound({ wamid: 'wamid.after', phoneNumberId: NUMBER_A, sentAt: LATER }),
+        );
+
+        expect(await held(before.conversationId)).toMatchObject({
+          channelId: plain!.id,
+          assigneeAgentId: colleague,
+          lines: [],
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });
 
