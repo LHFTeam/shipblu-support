@@ -25,12 +25,15 @@
  * refers to "the date you asked for" rather than restating it. A response that
  * cannot be written that way is the wrong response to have in a library.
  *
- * **No links, addresses or phone numbers.** `support.shipblu.com` still serves
- * the Freshdesk help centre while this one is reached elsewhere, so a URL here
- * would point at the old site and go stale silently. Responses say "the
- * tracking page in our help centre"; the agent adds the link from the
- * knowledge panel, which builds it from the live host. The customer is already
- * talking to support, so nothing tells them to contact it.
+ * **No links, addresses or phone numbers.** The rule was set while
+ * `support.shipblu.com` served the Freshdesk help centre (until 2026-11-11),
+ * when a URL here would have pointed at the old site. It still holds: a body is
+ * sent unread, and a link in it goes stale silently when a host moves.
+ * Responses say "the tracking page in our help centre"; the agent adds the
+ * link from the knowledge panel, which builds it from the live host. Allowing
+ * links would be a change of its own, made with the test that refuses them.
+ * The customer is already talking to support, so nothing tells them to
+ * contact it.
  *
  * **1000 bytes of UTF-8 at most**, which is Instagram's limit for a direct
  * message and the strictest of the five channels the same text goes out on.

@@ -530,10 +530,12 @@ a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
-duplicate — but note that **a key is spent for good, not until its job
-finishes**: `jobs_dedupe_idx` is a plain unique index over the whole table, so
-the conflict target still matches a job that completed months ago, and a job that
-reached `dead` is never cleaned up at all. Key on the subject only where the work
+duplicate — but note that **a key stays spent after its job finishes**:
+`jobs_dedupe_idx` is a plain unique index over the whole table, so the conflict
+target still matches a completed job until the nightly cleanup deletes it, seven
+days on (`completedJobRetentionFilter` in `worker/handlers/cleanup.ts`), and a
+job that reached `dead` is never cleaned up at all, so its key is spent for
+good. Key on the subject only where the work
 is genuinely once-ever for it (one send, one media download). Anything that might
 legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
@@ -674,8 +676,11 @@ rules follow, each of which has already cost a customer channel:
   a thread whose customer last wrote before it is the new default's, and
   refuses. The Page's own switch supersedes nothing: it named this app
   `default_app` on 2026-11-05 too, and every Messenger message in the day after
-  it still arrived in `standby`, since Freshworks holds that inbox as primary
-  receiver (§6.111). Every reader of a stored message takes both facts from
+  it still arrived in `standby`, while Freshworks held that inbox as primary
+  receiver (§6.111). Since 2026-11-11 Meta hands each new Messenger thread to
+  this app, and whether Freshworks is still primary receiver cannot be read
+  from the deliveries (`docs/PROJECT-STATE.md` §5.1), so a thread opened
+  before then is still the case this rule is for. Every reader of a stored message takes both facts from
   `threadOwnershipFacts`, and `metaThreadStateFromMessage` takes the standing
   as a required argument, so the console and `send_meta` cannot weigh different
   ones. The one reader that takes neither is the survey's thanks, which judges a
@@ -2367,7 +2372,8 @@ picture. `rehost_kb_images` copies
 Freshdesk's hot-linked images in (`plans/freshdesk-disconnection.md`, PR 1). It
 rewrites versions in place rather than cutting one, so no Restore can bring
 Freshdesk's address back, and its way back is `revert=true` from
-`kb_images.source_url`. The editor uploads a new picture the same way
+`kb_images.source_url`, which works only while Freshdesk still serves those
+addresses, so never after the account is closed. The editor uploads a new picture the same way
 (`uploadArticlePicture`, PR 4): judged by its bytes, stored with no
 `source_url`, and named by its route.
 
@@ -2521,9 +2527,11 @@ keys=<key,...>`, which replaces only the entries named, and an entry removed
 from the library is reported rather than deleted. `canned-library.test.ts` is
 the style guide.
 Every body is sendable exactly as it stands, because nothing interpolates and an
-automation sends it unread, so it carries no placeholder. It carries no link,
-because `support.shipblu.com` still serves Freshdesk and agents add links from
-the knowledge panel. It is at most 1000 bytes of UTF-8, Instagram's limit for a
+automation sends it unread, so it carries no placeholder. It carries no link:
+agents add links from the knowledge panel. The rule was set while
+`support.shipblu.com` still served Freshdesk, which it stopped doing on
+2026-11-11. Allowing links now would be a change of its own, made together
+with the test that refuses them. It is at most 1000 bytes of UTF-8, Instagram's limit for a
 direct message, so roughly 550 Arabic characters. The Arabic addresses the customer as «حضرتك» and uses no
 imperative, because neither the customer's gender nor the agent's is known. Any
 policy a response states is quoted from the help centre, so a change to a
@@ -2920,7 +2928,9 @@ deleting it, and drop the sections that genuinely do not apply.
 
 Back any claim about production with a query or a log line. "Phase N is
 complete" in the docs describes the codebase, never the product — the system
-still cannot take a real human support ticket. But do not read "not configured"
+could not take a real human support ticket until 2026-11-12, when the
+team began answering web chat, Messenger and email from the console (§1 of
+`docs/PROJECT-STATE.md` has the figures). But do not read "not configured"
 as "no data" either: the bot channel has been copying real traffic in since
 August, so there is an archive worth measuring against. `docs/PROJECT-STATE.md`
 §1 carries the current figures; that is the file that gets updated, not this one.

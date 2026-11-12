@@ -43,6 +43,14 @@ surveys not going out, and the code says why before the data does:
 3. **The link names a host that does not serve this app.** `publicBaseUrl()`
    returns `support.shipblu.com`, which still answers from Freshdesk
    (`docs/PROJECT-STATE.md` §5). The one survey ever sent carried a dead link.
+   _By 2026-11-07 the web service published the Render host instead (when it
+   changed was not recorded), and since 2026-11-11 `support.shipblu.com`
+   answers from this app. The link is built on the worker, though, whose
+   value has never been read. The blueprint gives the worker the same group
+   value as the web service, unless the dashboard holds an entry of its own
+   on the worker.
+   Setting `KB_PUBLIC_HOST` to the domain, and reading a survey link before
+   CSAT is switched on, settles it (`plans/freshdesk-disconnection.md`)._
 4. **On Facebook and Instagram it is a text link that mostly cannot send.** Half
    an hour after a resolve the Meta window is usually still open, but a survey
    sent as a plain DM is blocked at 24 hours by `automatedReplyBlocked`, rightly,
@@ -164,7 +172,7 @@ known rather than as off.
 | `survey_rule_resolved`              | true    | Whether an automation's resolve schedules a survey                                                                                                 |
 | `meta_expires_in_days`              | 3       | Meta's `expires_in_days`, 1–7                                                                                                                      |
 | `privacy_url`                       | null    | Meta's `business_privacy.url`; no card while null, the buttons inside 24h instead                                                                  |
-| `api_email_fallback`                | false   | Whether an `api` ticket whose contact has an address is also emailed                                                                               |
+| `api_email_fallback`                | false   | _Not built: see myBlu, below._ Whether an `api` ticket whose contact has an address is also emailed                                                |
 | `last_template_refusal`             | null    | What Graph last said when it refused the Facebook template, shown on the page; for a day after it, a survey due past 24h is skipped `card_refused` |
 | `updated_at`, `updated_by_agent_id` |         | Who flipped it last, shown on the page                                                                                                             |
 
@@ -521,8 +529,11 @@ message went to). It owns its own screens, so a survey for an `api` ticket is
   `{ id, question, labels[5], commentPrompt, expiresAt, status, rating }` in the
   ticket's locale.
 - **`POST /api/v1/tickets/{id}/survey`** `{ rating, comment? }` →
-  `recordAnswer(…, 'api')`; `204`, outcome deliberately not reflected in the
-  status for the reason `app/api/kb/csat/route.ts` gives.
+  `recordAnswer(…, 'api')`; `200` with the survey as the row holds it
+  afterwards, as the widget's card is answered. The `204` this said at first
+  was `app/api/kb/csat/route.ts`'s, which guards an unauthenticated token
+  against being used as an oracle; a session is not one, and after a `204`
+  the app would have to ask again to learn which answer was kept.
 - **An outbound webhook, `survey.created`**, posted to a URL myBlu registers
   (`MYBLU_WEBHOOK_URL`, signed with `MYBLU_WEBHOOK_SECRET`, both in `lib/env.ts`
   and `render.yaml`, values in the production group), carried by a job
@@ -530,19 +541,25 @@ message went to). It owns its own screens, so a survey for an `api` ticket is
   a prompt or a push. The pull endpoint works without it.
 
 Delivery is `api_pull`: no `messages` row, a `csat_sent` event and the survey
-row. With `api_email_fallback` on and an address on the contact, the email
-survey goes too, with one row and one token, so the first answer wins whichever
-door it comes through.
+row. There is no email fallback. _Not built
+(`plans/myblu-ticket-api.md`, stage 8):_ `api_email_fallback` would mail the
+address on the ticket's contact, and that contact can be the WhatsApp contact
+of the number's previous holder; the mail would name the ticket to them and
+let them answer its survey.
 
 **What this depends on, and is not in this plan:** there is no authenticated
 API that creates an `api` ticket today. The survey endpoints assume a
-`lib/api/auth.ts` that resolves a bearer token in `Authorization` to a named
-integration (`MYBLU_API_TOKEN` to start, a table when there is a second
-caller), and a ticket resource under `/api/v1/tickets` that myBlu creates
-tickets and replies through. That is `plans/myblu-ticket-api.md`, to be written
-with whoever owns myBlu's backend; the survey endpoints are the first consumer
-of its authentication module and ship in the same release as its ticket
-creation, because a survey on a channel with no tickets measures nothing.
+`lib/api/auth.ts` and a ticket resource under `/api/v1/tickets` that myBlu
+creates tickets and replies through. That is `plans/myblu-ticket-api.md`, and
+it changes what is said here in four places. The bearer the app sends is a
+session for one user, minted by myBlu's backend, since `MYBLU_API_TOKEN`
+cannot ship inside an app; that token only mints and ends sessions, and there
+is no integrations table, where this paragraph once promised "a table when
+there is a second caller". `notify_myblu` and its variables arrive in that
+plan's stage 6, where the first event is an agent's reply, so this stage adds
+`survey.created` to a job that exists. The answer is a `200`, above. And the
+email fallback is not built, above. The survey endpoints are that plan's
+stage 8, its last: a survey on a channel with no tickets measures nothing.
 
 ## Admin — `/admin/csat`
 
@@ -563,7 +580,7 @@ Sections, top to bottom, every control an `InfoTip` away from its reason:
 3. **Channels.** One row per deliverable channel with its switch and a sentence
    on how it is delivered ("Facebook: Messenger's feedback card, up to 7 days
    after the customer's last message"), the privacy link and the last template
-   refusal on Facebook's row, and the API email fallback on the API row.
+   refusal on Facebook's row. (The API row has no email fallback: see _myBlu_.)
 4. **Wording.** The `csat_rules` table — scope, both languages, which rows are
    complete — with the form the out-of-hours page has, the Meta length limits
    printed under each field and counted live, and a **preview** that renders
@@ -819,10 +836,11 @@ and shown **not** to reopen the ticket.
 the hints on the three existing pages. Verified by `rollup.db.test.ts` on
 fixtures with known distributions.
 
-**6. myBlu.** After `plans/myblu-ticket-api.md` lands its authentication and
-ticket creation: the two survey endpoints, `notify_myblu`, the env vars, the
-API row's fallback switch. Verified with the app's staging build against
-staging.
+**6. myBlu.** `plans/myblu-ticket-api.md` stage 8, after its sessions, tickets
+and webhook have shipped: `api_pull`, the `api` answer source, the two survey
+endpoints, and `survey.created` on the `notify_myblu` job that plan's stage 6
+added. Verified by a `*.db.test.ts` on the two routes, and with the app's
+staging build against staging, resumed for the window.
 
 **7. Follow-ups, each its own small change, all built.** `suppress_survey` as
 an automation action (7a: see _Automations_ above); a `csat_low_rating` event
