@@ -2,11 +2,12 @@ import { and, eq, gt, isNull, lt } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, contactTokens, contacts } from '@/db/schema';
 import { destroyAllCustomerSessions } from '@/lib/auth/customer-session';
-import { normaliseEmail } from '@/lib/auth/normalise';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { enqueueNotificationEmail } from '@/lib/email/notify';
 import type { Locale } from '@/lib/kb/locale';
+import { logger } from '@/lib/log';
 import { resolveContact } from '@/lib/tickets/contacts';
 import { passwordResetEmail, verificationEmail } from './emails';
 
@@ -25,6 +26,8 @@ import { passwordResetEmail, verificationEmail } from './emails';
  * inert until somebody opens the link we send to that address.
  */
 
+const log = logger('portal_accounts');
+
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 const RESET_TTL_MS = 60 * 60 * 1000;
 
@@ -33,8 +36,14 @@ const RESET_TTL_MS = 60 * 60 * 1000;
  * deliberately indistinguishable from "that address is not registered". A
  * support portal that says "no account with that email" is an address oracle
  * for a customer list that includes every merchant we work with.
+ *
+ * The two refusals are about what was typed, never about who holds it, so
+ * neither says anything about the customer list: `invalid_email` is the same
+ * answer for every spelling of an address the send path refuses, whether or
+ * not anybody has registered it.
  */
-export type AccountRequestResult = { ok: true } | { ok: false; reason: 'weak_password' };
+export type AccountRequestResult =
+  { ok: true } | { ok: false; reason: 'weak_password' | 'invalid_email' };
 
 export async function requestAccount(input: {
   email: string;
@@ -43,6 +52,14 @@ export async function requestAccount(input: {
   locale: Locale;
 }): Promise<AccountRequestResult> {
   const email = normaliseEmail(input.email);
+  // Before anything is written. `resolveContact` below inserts a contact and
+  // an identity for an address nobody has written from, and an address the
+  // verification email's job refuses is one no link will ever reach: the
+  // identity it made could never be verified, and the customer would be told
+  // to check an inbox nothing was sent to (§6.117). The action asks the same
+  // question first, for the sentence; this is the guarantee for any caller.
+  if (!looksLikeEmail(email)) return { ok: false, reason: 'invalid_email' };
+
   const strength = validatePasswordStrength(input.password);
   if (!strength.ok) return { ok: false, reason: 'weak_password' };
 
@@ -102,6 +119,10 @@ export async function requestAccount(input: {
 /** Always reports success: see the note on AccountRequestResult. */
 export async function requestPasswordReset(rawEmail: string, locale: Locale): Promise<void> {
   const email = normaliseEmail(rawEmail);
+  // An address the send path refuses is left to `issueToken`, past the lookup
+  // rather than before it, so a stored one is refused with a warning naming
+  // its identity: a customer still trying an account no link can reach shows
+  // up in the logs instead of nowhere.
   if (!email) return;
 
   const rows = await db
@@ -237,6 +258,16 @@ export async function recordSignIn(identityId: string): Promise<void> {
  * who presses the button three times should find that the newest link is the
  * one that works, rather than three live links of which two are forgeries
  * waiting in an inbox somebody else may later read.
+ *
+ * Nothing is issued for an address `send_notification_email` would refuse.
+ * Registration refuses one before it stores anything, but an identity stored
+ * before the two checks were one can still hold such an address — the one of
+ * 2026-11-12 does (§6.117) — and every resend reaches it here: a sign-in to an
+ * unverified account, on the help centre or the console, and a forgotten
+ * password. Queued, each would mint a link nobody can receive and a job that
+ * dies on its first attempt, with its link in the dead row's payload for good.
+ * The warning names the identity rather than the address: the row is what
+ * somebody looks up, and the address is a customer's.
  */
 async function issueToken(
   identityId: string,
@@ -245,6 +276,13 @@ async function issueToken(
   email: string,
   locale: Locale,
 ): Promise<void> {
+  if (!looksLikeEmail(email)) {
+    log.warn(
+      `not issuing ${purpose}: the send path refuses this identity's address identity=${identityId}`,
+    );
+    return;
+  }
+
   const token = generateToken();
 
   await db

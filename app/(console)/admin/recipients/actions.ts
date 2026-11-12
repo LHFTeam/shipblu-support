@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { internalRecipients } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { looksLikeEmail } from '@/lib/auth/normalise';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { errorMessage } from '@/lib/errors';
@@ -44,9 +45,10 @@ export async function saveInternalRecipient(
   const isActive = formData.get('isActive') === 'on';
 
   if (!name) return { error: 'Give this recipient a name agents will recognise' };
-  if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(email)) {
-    return { error: 'Enter a valid email address' };
-  }
+  // The app's one definition, which the side conversation sent to this
+  // recipient is checked with too (`refuseRecipient`): a directory entry the
+  // composer would refuse is a dead end (§6.117).
+  if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
   // No 'hub'. A hub is a `locations` row, which is a register somebody else's
   // screen owns; letting one be entered here would mean the Downtown hub's
   // address is maintained in two places with nothing keeping them in step.

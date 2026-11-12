@@ -6,7 +6,7 @@ import { requestMeta } from '@/lib/http/request-meta';
 import { signInWithPassword } from '@/lib/auth/sign-in';
 import { destroyCustomerSession } from '@/lib/auth/customer-session';
 import { customerPath, safePath } from '@/lib/auth/next-path';
-import { normaliseEmail } from '@/lib/auth/normalise';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { type Locale, type StringKey } from '@/lib/kb/locale';
 import { completePasswordReset, requestAccount, requestPasswordReset } from '@/lib/portal/accounts';
@@ -34,6 +34,12 @@ export async function portalSignIn(
   const password = String(formData.get('password') ?? '');
 
   if (!email || !password) return { error: 'errorMissingFields' };
+  // No account can stand on an address the send path refuses — it could never
+  // have been verified — so saying it is malformed gives nothing away, and it
+  // tells the one customer whose registration was let through with one what
+  // to change, where `errorUnverified` sent them to an inbox nothing reaches
+  // (§6.117).
+  if (!looksLikeEmail(email)) return { error: 'errorInvalidEmail' };
 
   const outcome = await signInWithPassword(email, password, locale);
 
@@ -62,7 +68,12 @@ export async function portalRegister(
   const password = String(formData.get('password') ?? '');
 
   if (!email || !password) return { error: 'errorMissingFields' };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'errorInvalidEmail' };
+  // The check the verification email's job makes, not one of the form's own:
+  // a looser regex here accepted two dots in a row, stored the account, said
+  // a link was on its way, and the job refused the address (§6.117). Asked
+  // before the throttle, so a typo is answered with a sentence rather than
+  // the silent success a throttled request gets.
+  if (!looksLikeEmail(email)) return { error: 'errorInvalidEmail' };
   if (password.length > 200) return { error: 'errorPasswordLong' };
 
   const { ip } = await requestMeta();
@@ -71,7 +82,11 @@ export async function portalRegister(
   if (!allowEmailDispatch(email, ip)) return { error: null, done: true };
 
   const result = await requestAccount({ email, name: name || null, password, locale });
-  if (!result.ok) return { error: 'errorPasswordShort' };
+  if (!result.ok) {
+    return {
+      error: result.reason === 'invalid_email' ? 'errorInvalidEmail' : 'errorPasswordShort',
+    };
+  }
 
   return { error: null, done: true };
 }
@@ -84,6 +99,9 @@ export async function portalForgotPassword(
   const email = normaliseEmail(String(formData.get('email') ?? ''));
 
   if (!email) return { error: 'errorMissingFields' };
+  // About the spelling alone, the same for every address, so it is no oracle;
+  // without it a mistyped address read "check your inbox" with nothing sent.
+  if (!looksLikeEmail(email)) return { error: 'errorInvalidEmail' };
 
   const { ip } = await requestMeta();
   if (allowEmailDispatch(email, ip)) {

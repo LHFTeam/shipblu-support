@@ -49,6 +49,15 @@ describe('refuseRecipient', () => {
     expect(refuseRecipient('hub-downtown', CONTEXT)).toMatch(/not an email address/i);
     expect(refuseRecipient('hub@localhost', CONTEXT)).toMatch(/not an email address/i);
   });
+
+  it('refuses what the provider would refuse, and nothing it sends to', () => {
+    // The app's one definition (§6.117): two dots in a row used to pass here
+    // and fail as a job; a business address with `&` or `#` still passes.
+    expect(refuseRecipient('cairo..hub@shipblu.com', CONTEXT)).toMatch(/not an email address/i);
+    expect(refuseRecipient('hub.@shipblu.com', CONTEXT)).toMatch(/not an email address/i);
+    expect(refuseRecipient('sales&billing@merchant.example', CONTEXT)).toBeNull();
+    expect(refuseRecipient('hub#3@shipblu.com', CONTEXT)).toBeNull();
+  });
 });
 
 describe('refuseRecipients', () => {

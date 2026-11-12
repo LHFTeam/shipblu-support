@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { z } from 'zod';
+import { isEmailAddress } from '@/lib/auth/normalise';
 import { SURVEY_TRIGGERS } from '@/lib/csat/decision';
 import { dayWindow, wallClockInstant } from '@/lib/hours/wall-clock';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
@@ -138,8 +139,11 @@ export const JOB_PAYLOADS = {
   send_whatsapp: z.object({ messageId: z.string() }),
   send_meta: z.object({ messageId: z.string() }),
   send_agent_invite: z.object({ inviteId: z.uuid() }),
+  // `isEmailAddress`, the one definition every form asks through
+  // `looksLikeEmail`: two checks, one here and one at the form, are how the
+  // portal came to store an address this job then refused (§6.117).
   send_notification_email: z.object({
-    to: z.email(),
+    to: z.string().refine(isEmailAddress, 'not an email address the provider takes'),
     subject: z.string().min(1),
     textBody: z.string().min(1),
     htmlBody: z.string().min(1),

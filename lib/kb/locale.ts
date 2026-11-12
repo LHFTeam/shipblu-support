@@ -254,7 +254,10 @@ const STRINGS = {
     errorUnverified: 'Confirm your email address first — check your inbox for the link we sent.',
     errorPasswordShort: 'Password must be at least 12 characters',
     errorPasswordLong: 'Password must be at most 200 characters',
-    errorInvalidEmail: 'Enter a valid email address',
+    // Names the mistakes the send path refuses that a browser's own check lets
+    // through, so a customer who typed two dots knows what to look for (§6.117).
+    errorInvalidEmail:
+      'Enter a valid email address — check for two dots in a row, a dot at the start or just before the @, or letters that are not Latin',
     errorSubjectRequired: 'Give your request a subject',
     errorMessageRequired: 'Write your message',
     errorGeneric: 'Something went wrong. Try again.',
@@ -458,7 +461,8 @@ const STRINGS = {
       'البريد الإلكتروني لم يُؤكَّد بعد — رابط التأكيد الذي أرسلناه في بريد حضرتك الإلكتروني.',
     errorPasswordShort: 'يجب ألا تقل كلمة المرور عن ١٢ حرفًا',
     errorPasswordLong: 'يجب ألا تزيد كلمة المرور عن ٢٠٠ حرف',
-    errorInvalidEmail: 'البريد الإلكتروني غير صالح',
+    errorInvalidEmail:
+      'البريد الإلكتروني غير صالح — قد يكون فيه نقطتان متتاليتان، أو نقطة في أوله أو قبل @ مباشرة، أو حروف غير لاتينية',
     errorSubjectRequired: 'موضوع الطلب مطلوب',
     errorMessageRequired: 'نص الرسالة مطلوب',
     errorGeneric: 'حدث خطأ ما. يمكن لحضرتك المحاولة مرة أخرى.',

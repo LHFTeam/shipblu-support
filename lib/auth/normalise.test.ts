@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeEmail, normaliseEmail, normaliseIdentifier, normalisePhone } from './normalise';
+import {
+  isEmailAddress,
+  looksLikeEmail,
+  normaliseEmail,
+  normaliseIdentifier,
+  normalisePhone,
+} from './normalise';
 
 describe('normaliseEmail', () => {
   it('lowercases and trims', () => {
@@ -54,5 +60,94 @@ describe('looksLikeEmail', () => {
     expect(looksLikeEmail('hub@localhost')).toBe(false);
     expect(looksLikeEmail('two@@shipblu.com')).toBe(false);
     expect(looksLikeEmail('cairo hub@shipblu.com')).toBe(false);
+  });
+
+  // The checks this one replaced, kept only to show that every address in
+  // the first list is one where a form and the send path used to disagree:
+  // the help centre's registration asked the first regex, the side
+  // conversations the second, every other form the third, and
+  // `send_notification_email` asked `z.email()`, which refused them all
+  // (§6.117).
+  const RETIRED_REGISTRATION_CHECK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const RETIRED_SIDE_CONVERSATION_CHECK = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+  const RETIRED_FORM_CHECK = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+
+  // What Postmark refuses, or DNS cannot route, and the forms let through.
+  const LET_THROUGH = [
+    // The shape of the registration whose link died on 2026-11-12: a Gmail
+    // address with two dots in a row before the @.
+    'amira..hassan@gmail.com',
+    '.amira@gmail.com',
+    'amira.@gmail.com',
+    // `?` is RFC 5322's and not in Postmark's published set.
+    'amira?@gmail.com',
+    'amira@gmail.c0m',
+    'amira@gmail.c',
+    'amira@mail_box.com',
+    'amira@-gmail.com',
+    'amira@gmail-.com',
+    'amira@[192.0.2.1]',
+    // Arabic letters typed on an Arabic keyboard, either side of the @.
+    'أميرة@gmail.com',
+    'amira@جيميل.com',
+    // RFC 5321's limits: 64 before the @, 254 in all.
+    `${'a'.repeat(65)}@gmail.com`,
+    `amira@${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`,
+  ];
+
+  it.each(LET_THROUGH)('refuses %s, which registration accepted', (address) => {
+    expect(RETIRED_REGISTRATION_CHECK.test(normaliseEmail(address))).toBe(true);
+    expect(looksLikeEmail(address)).toBe(false);
+  });
+
+  it('refuses the same addresses wherever else a form let them through', () => {
+    const elsewhere = LET_THROUGH.filter(
+      (address) =>
+        RETIRED_FORM_CHECK.test(normaliseEmail(address)) ||
+        RETIRED_SIDE_CONVERSATION_CHECK.test(normaliseEmail(address)),
+    );
+    expect(elsewhere).toContain('amira..hassan@gmail.com');
+    expect(elsewhere.filter(looksLikeEmail)).toEqual([]);
+  });
+
+  it('refuses what no form let through either', () => {
+    expect(looksLikeEmail('amira,hassan@gmail.com')).toBe(false);
+    expect(looksLikeEmail('amira;hassan@gmail.com')).toBe(false);
+    expect(looksLikeEmail('"amira hassan"@gmail.com')).toBe(false);
+    expect(looksLikeEmail('amira@gmail..com')).toBe(false);
+    expect(looksLikeEmail('amira@gmail.com.')).toBe(false);
+    expect(looksLikeEmail('amira@shipblu.com\nbcc@evil.test')).toBe(false);
+  });
+
+  it('accepts what mailboxes hand out, the punctuation they allow included', () => {
+    expect(looksLikeEmail('amira.hassan@gmail.com')).toBe(true);
+    expect(looksLikeEmail('amira.hassan+orders@gmail.com')).toBe(true);
+    expect(looksLikeEmail("o'brien@example.co.uk")).toBe(true);
+    expect(looksLikeEmail('cairo_hub-2@mail.shipblu.com')).toBe(true);
+    expect(looksLikeEmail('1755021358719@shipblu.com')).toBe(true);
+    expect(looksLikeEmail('amira@xn--mgbh0fb.xn--wgbh1c')).toBe(true);
+    expect(looksLikeEmail(`${'a'.repeat(64)}@gmail.com`)).toBe(true);
+  });
+
+  // `z.email()`, which the job asked, is Gmail's username rules and refused
+  // these; Postmark lists every one of their characters and sends to them, and
+  // a business address — a hub's forwarding list, a merchant's billing box —
+  // can carry one.
+  it.each([
+    'sales&billing@merchant.example',
+    'hub#3@shipblu.com',
+    "amira'@gmail.com",
+    'orders/cairo@merchant.example',
+    'a!b$c%d*e=f^g`h{i|j}k~l@merchant.example',
+  ])('accepts %s, which the job used to refuse and the provider takes', (address) => {
+    expect(looksLikeEmail(address)).toBe(true);
+  });
+
+  it('asks the question of the address as a form stores it', () => {
+    // A form trims and lowercases before it stores or queues anything, so the
+    // check does too; the address it accepts is the one the job is handed.
+    expect(looksLikeEmail('  Amira.Hassan@GMAIL.com ')).toBe(true);
+    expect(isEmailAddress(normaliseEmail('  Amira.Hassan@GMAIL.com '))).toBe(true);
+    expect(isEmailAddress('  amira.hassan@gmail.com ')).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isEmailAddress } from '@/lib/auth/normalise';
 
 /**
  * Environment validation shared by the web app, the worker and the job runner.
@@ -175,8 +176,12 @@ const schema = z.object({
    * services that never receive mail do not need it.
    */
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
-  /** Envelope sender, e.g. support@shipblu.com */
-  EMAIL_FROM_ADDRESS: z.email().optional(),
+  /**
+   * Envelope sender, e.g. support@shipblu.com. Read with the definition every
+   * recipient is (`isEmailAddress`), so there is one answer to what an address
+   * is — it was `z.email()`, which refused some that Postmark sends from.
+   */
+  EMAIL_FROM_ADDRESS: z.string().refine(isEmailAddress, 'not an email address').optional(),
   EMAIL_FROM_NAME: z.string().default('ShipBlu Support'),
   /**
    * Domain used to build plus-addressed reply tokens
