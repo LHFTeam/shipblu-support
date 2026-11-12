@@ -302,7 +302,7 @@ it is hidden from is in nobody's list:
 | `assign_agent`                      | Skipped, with a warning, for anybody else                           |
 | `handOverNumber`                    | Moves every holder it is hidden from to the new owner, or unassigns |
 | `alignAccountable`                  | The same, for any ticket coming back out of resolved or closed      |
-| `takeForOwner`                      | An unassigned ticket accountable to nobody goes to an active owner  |
+| `takeForNumberOwner`                | An unassigned ticket accountable to nobody goes to an active owner  |
 
 Production on the day: three coexistence numbers, two with no owner, 188
 tickets, 130 open or pending, and none held by anybody but its number's owner,
@@ -457,7 +457,7 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
   report falls back to the assignee. Undoing a handover is a handover to
   "Nobody — team number": accountability clears, and the assignees keep what
   they hold. On a coexistence number, since 2026-11-12, it is "Nobody —
-  supervisors and admins only", and whoever cannot see the tickets loses them
+  only agents who see every ticket", and whoever cannot see the tickets loses them
   (**A coexistence number is its owner's alone**).
 
 ## How it was verified

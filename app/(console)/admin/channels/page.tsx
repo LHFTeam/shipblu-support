@@ -536,7 +536,7 @@ function NumberOwnerLine({
             against them for its SLA, whoever it is reassigned to. Unassigning one hands it back to
             them.
             {ownerOnly
-              ? ' It is their phone, so only they, supervisors and admins can see its tickets.'
+              ? ' It is their phone, so only they and agents who can see every ticket see its tickets.'
               : null}
           </InfoTip>
         </Badge>
@@ -544,8 +544,8 @@ function NumberOwnerLine({
         <Badge tone="warning">
           No owner
           <InfoTip label="No owner">
-            This number is somebody&rsquo;s phone, and nobody owns it here. Only supervisors and
-            admins can see its tickets, and new ones are assigned to nobody until it has an owner.
+            This number is somebody&rsquo;s phone, and nobody owns it here. Only agents who can see
+            every ticket see its tickets, and new ones are assigned to nobody until it has an owner.
           </InfoTip>
         </Badge>
       ) : (
@@ -562,7 +562,7 @@ function NumberOwnerLine({
           Owner deactivated
           <InfoTip label="Owner deactivated">
             {ownerOnly
-              ? 'The owner can no longer sign in. Until the number is handed to somebody else, or they are reactivated, only supervisors and admins can see its tickets, and new ones are assigned to nobody; the tickets it already has stay with the owner.'
+              ? 'The owner can no longer sign in. Until the number is handed to somebody else, or they are reactivated, only agents who can see every ticket see its tickets, and new ones are assigned to nobody. The open tickets the owner holds stay in their name until then, and one that is resolved and reopened is unassigned.'
               : 'The owner can no longer sign in. Until the number is handed to somebody else, or they are reactivated, its new tickets go to the default group’s rota and count against whoever holds them; the tickets it already has stay with them.'}
           </InfoTip>
         </Badge>

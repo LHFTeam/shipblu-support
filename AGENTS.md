@@ -1176,10 +1176,12 @@ who can see it — so every writer that hands tickets out asks the same module:
 
 - **The rota never picks for one.** `assignConversation` hands it back to an
   active owner as it does any owned ticket, and otherwise answers `owner_only`,
-  unrecorded, since its candidates are a group's members. A ticket accountable
-  to nobody on a number that has an active owner — it arrived while the owner
-  was deactivated — is made theirs first (`takeForOwner`), since nothing else
-  realigns an open ticket and the rota that would have taken it may not.
+  unrecorded, since its candidates are a group's members. The owner is the
+  number's, read ahead of the ticket's accountable agent, since the two can
+  disagree: a ticket that arrived while the owner was deactivated answers to
+  nobody, and one adopted onto the row to somebody else. `takeForNumberOwner`
+  makes it the owner's under the channel's lock and then the ticket's, asking
+  again that nobody holds it and that it is still work.
 - **The console and a rule leave one only with somebody who sees it.** The
   Assignee picker offers the owner and the agents who see every ticket
   (`listAssignableAgents`), `updateTicket` refuses anybody else, and a rule's
@@ -1192,7 +1194,19 @@ who can see it — so every writer that hands tickets out asks the same module:
   closed, whether or not the number changed hands meanwhile.
   "Sees every ticket" is `can()` over each active agent's role and overrides
   (`agentsWhoSeeEveryTicket`), never a role test, so one statement of what a
-  role holds decides it.
+  role holds decides it; a deactivated agent sees nothing, whatever their
+  role, to a handover and a reopen alike (`hiddenFromHolder`). The console's
+  copy says "agents who can see every ticket" for the same reason, never
+  "supervisors and admins".
+- **A writer that assigns reads the owner under the channel's lock, inside
+  its transaction and before it writes the ticket** (`ownerOnlyNumber` with
+  `lock`, `lockedOwnerId`): the order a handover takes them. Read ahead of the
+  transaction, an assignment to the owner a handover was replacing passed and
+  committed after the handover had collected the number's tickets.
+- **What a page says about such a ticket asks `hasCoexistenceRecord`**
+  (`lib/whatsapp/coexistence.ts`), the twin of `isCoexistenceNumber`, not
+  `parseCoexistence`: a record written by hand must not be hidden by one rule
+  and offered "Hand to" by another.
 
 What it does not reach: the contact directory, where a person known only from
 that phone is still found by name and number with an empty ticket list; a

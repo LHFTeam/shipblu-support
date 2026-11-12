@@ -104,11 +104,11 @@ describe('handoverNotice', () => {
     const nobody = { ...done, to: null, ownerOnly: true };
     expect(handoverNotice({ ...nobody, ticketsUnassigned: 2 })).toBe(
       '+20 12 78707918 has no owner from now: 2 open or pending tickets were unassigned, and ' +
-        'only supervisors and admins can see its tickets until it has one.',
+        'only agents who can see every ticket can see its tickets until it has one.',
     );
     expect(handoverNotice({ ...nobody, ticketsMoved: 0, ticketsReassigned: 0 })).toBe(
-      '+20 12 78707918 has no owner from now: only supervisors and admins can see its tickets ' +
-        'until it has one.',
+      '+20 12 78707918 has no owner from now: only agents who can see every ticket can see its ' +
+        'tickets until it has one.',
     );
   });
 

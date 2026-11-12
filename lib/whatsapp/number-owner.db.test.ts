@@ -429,6 +429,10 @@ describe('handOverNumber', () => {
       expect(result).toMatchObject({ ticketsMoved: 3, ticketsReassigned: 2, ticketsUnassigned: 0 });
       expect(await holders(bobs)).toEqual({ accountable: ali, assignee: ali });
       expect(await holders(omars)).toEqual({ accountable: ali, assignee: ali });
+      // The line says who was working it: it left their inbox without a word.
+      expect(
+        (await eventsOf(bobs)).filter((e) => e.type === 'assigned').map((e) => e.data),
+      ).toEqual([expect.objectContaining({ to: ali, from: bob, reason: 'number_handover' })]);
       // She sees every ticket, so what she was given stays with her.
       expect(await holders(saras)).toEqual({ accountable: ali, assignee: sara });
     });
@@ -795,6 +799,12 @@ describe('alignAccountable', () => {
     ]);
     expect(await align(orphanSeen, null)).toEqual({ changed: true, reassigned: false });
     expect(await holders(orphanSeen)).toEqual({ accountable: null, assignee: sara });
+
+    // A supervisor who has left sees nothing, as a handover reads her.
+    const gone = await agent('Gone Supervisor', { role: 'supervisor', isActive: false });
+    const hers = await ticket(number, 'Open', { ...held, assigneeAgentId: gone });
+    expect(await align(hers, ali)).toEqual({ changed: true, reassigned: true });
+    expect(await holders(hers)).toEqual({ accountable: ali, assignee: ali });
 
     // The number in the same hands, and the ticket in a colleague's: only the
     // work moves, so nothing says the breach did.

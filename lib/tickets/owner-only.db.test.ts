@@ -15,7 +15,7 @@ import {
 import { assignConversation } from '@/lib/assignment';
 import { runAutomations } from '@/lib/automations';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { hasCoexistenceRecord, parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { listAssignableAgents } from './lookups';
 import {
   agentsWhoSeeEveryTicket,
@@ -135,6 +135,8 @@ describe('which number is a coexistence number', () => {
         .where(eq(conversations.id, id));
       expect([config, row]).toEqual([config, { on: expected, off: !expected }]);
       expect((await ownerOnlyNumber(db, channelId)) !== null).toBe(expected);
+      // The ticket page's twin, so a page never calls a hidden ticket a team number's.
+      expect(hasCoexistenceRecord(config)).toBe(expected);
       if (parseCoexistence(config)) expect(expected).toBe(true);
     }
   });
@@ -254,6 +256,25 @@ describe('the rota', () => {
     expect(await assigneeOf(done)).toBeNull();
   });
 
+  // The number's word outranks the ticket's: one adopted onto the row, or
+  // stamped before a handover it missed, answers to somebody who is not the
+  // owner, and handing it back to them would give it to somebody it is
+  // hidden from.
+  it('gives one accountable to somebody else to the number’s owner, not to them', async () => {
+    const nayera = await agent('Nayera Mohamed');
+    const id = await ticket(await phone(nayera), { groupId: care, accountableAgentId: lina });
+
+    expect(await assignConversation(id)).toMatchObject({ assignedTo: nayera, reason: null });
+    const [row] = await db
+      .select({
+        assignee: conversations.assigneeAgentId,
+        accountable: conversations.accountableAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row).toEqual({ assignee: nayera, accountable: nayera });
+  });
+
   it('still hands one back to an active owner', async () => {
     const nayera = await agent('Nayera Mohamed', { presence: 'offline' });
     const id = await ticket(await phone(nayera), { groupId: care, accountableAgentId: nayera });
@@ -301,12 +322,26 @@ describe('a rule that assigns an agent', () => {
 
 describe('hiddenFromHolder', () => {
   it('reads the owner a caller names over the row’s, for one who counts as nobody', async () => {
-    const left = await agent('Nayera Mohamed', { isActive: false });
-    const channelId = await phone(left);
+    const nayera = await agent('Nayera Mohamed');
+    const channelId = await phone(nayera);
 
-    expect(await hiddenFromHolder(db, channelId, left)).toBe(false);
-    expect(await hiddenFromHolder(db, channelId, left, null)).toBe(true);
-    expect(await hiddenFromHolder(db, null, left, null)).toBe(false);
+    expect(await hiddenFromHolder(db, channelId, nayera)).toBe(false);
+    expect(await hiddenFromHolder(db, channelId, nayera, { ownerId: null })).toBe(true);
+    expect(await hiddenFromHolder(db, channelId, nayera, { lock: true })).toBe(false);
+    expect(await hiddenFromHolder(db, null, nayera, { ownerId: null })).toBe(false);
+  });
+
+  // Somebody who cannot sign in sees nothing, whatever their role: the answer
+  // a handover gives (`agentsWhoSeeEveryTicket`), so a reopen gives it too.
+  it('counts a deactivated agent as hidden from, a supervisor and the owner included', async () => {
+    const leftOwner = await agent('Nayera Mohamed', { isActive: false });
+    const leftSupervisor = await agent('Sara Supervisor', { role: 'supervisor', isActive: false });
+    const channelId = await phone(leftOwner);
+
+    expect(await hiddenFromHolder(db, channelId, leftSupervisor)).toBe(true);
+    expect(await hiddenFromHolder(db, channelId, leftOwner)).toBe(true);
+    // Off a coexistence number the rule has nothing to say about anybody.
+    expect(await hiddenFromHolder(db, await number({}), leftSupervisor)).toBe(false);
   });
 });
 

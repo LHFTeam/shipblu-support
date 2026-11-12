@@ -266,7 +266,7 @@ export function OwnerEditor({
   channelId: string;
   /** As the row records it; `active` false is an owner who can no longer sign in. */
   owner: { id: string; label: string; active: boolean } | null;
-  /** A coexistence number, whose tickets only its owner, supervisors and admins see. */
+  /** A coexistence number, whose tickets only its owner and agents who see every ticket see. */
   ownerOnly: boolean;
   /** Active agents, by name. */
   agents: OwnerChoice[];
@@ -366,9 +366,9 @@ function OwnerForm({
           ownerOnly ? (
             <>
               The team member whose phone this is. New tickets on it are assigned to them, every
-              ticket on it counts against them for its SLA, and only they, supervisors and admins
-              can see its tickets. With nobody, only supervisors and admins see them, and new
-              tickets are assigned to nobody.
+              ticket on it counts against them for its SLA, and only they and agents who can see
+              every ticket see its tickets. With nobody, only those agents see them, and new tickets
+              are assigned to nobody.
             </>
           ) : (
             <>
@@ -386,7 +386,7 @@ function OwnerForm({
             the button — so the select would reach a screen reader unnamed. */}
         <Select name="ownerAgentId" defaultValue={owner?.id ?? ''} aria-label="Owner">
           <option value="">
-            {ownerOnly ? 'Nobody — supervisors and admins only' : 'Nobody — team number'}
+            {ownerOnly ? 'Nobody — only agents who see every ticket' : 'Nobody — team number'}
           </option>
           {owner && !listed ? (
             <option value={owner.id}>
@@ -435,11 +435,11 @@ function movesHint(count: number, ownerOnly: boolean): string {
   const none = 'It has no open or pending tickets now.';
   if (ownerOnly) {
     const after =
-      'The previous owner stops seeing every ticket on it, resolved ones included. Choosing Nobody unassigns them, and only supervisors and admins see the number’s tickets until it has an owner.';
+      'The previous owner stops seeing its tickets, resolved ones included, unless they can see every ticket. Choosing Nobody unassigns what such holders cannot see, and only agents who can see every ticket see the number’s tickets until it has an owner.';
     if (count === 0) return `${none} ${after}`;
     const tickets =
       count === 1 ? 'Its 1 open or pending ticket goes' : `Its ${count} open or pending tickets go`;
-    return `${tickets} to the new owner, except what a supervisor or an admin holds. ${after}`;
+    return `${tickets} to the new owner, except what an agent who can see every ticket holds. ${after}`;
   }
   const resolved =
     'A resolved ticket follows only if it is reopened. Choosing Nobody leaves every ticket with whoever holds it, and each counts against them.';

@@ -13,7 +13,6 @@ import {
   agentsWhoSeeEveryTicket,
   hiddenFromHolder,
   isCoexistenceNumber,
-  ownerOnlyNumber,
 } from '@/lib/tickets/owner-only';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import type { StatusCategory } from '@/lib/tickets/vocabulary';
@@ -161,41 +160,11 @@ export async function recordOwnerAssigned(
  * WhatsApp and the portal alike), or an agent or a rule moved it back out of
  * resolved or closed. Two reasons rather than one so the timeline can say which.
  */
-export type AlignReason = 'reopened_after_handover' | 'reopened_by_status' | 'owner_returned';
-
-/**
- * Give an unassigned ticket on a coexistence number to the number's active
- * owner, and make it theirs to answer for — for `assignConversation`, which
- * has found one that is accountable to nobody.
- *
- * That is a ticket that arrived while its number's owner was deactivated, or
- * before the number had one: stamped with nobody (`ownerStamp`), and from then
- * on realigned by nothing, since only a handover or a reopen writes
- * accountability and neither happens when the owner is simply reactivated. On
- * a plain number the group's rota takes such a ticket. Here the rota may not
- * (`owner_only`), so without this it would wait unassigned for good beside an
- * owner who answers the number.
- *
- * Null when the number has no active owner, or somebody took the ticket
- * meanwhile. The channel's lock before the ticket's, the order a handover
- * takes them.
- */
-export async function takeForOwner(
-  conversationId: string,
-  channelId: string,
-): Promise<string | null> {
-  return db.transaction(async (tx) => {
-    const ownerId = await lockedOwnerId(tx, channelId);
-    if (!ownerId) return null;
-    const { reassigned } = await alignAccountable(tx, {
-      conversationId,
-      ownerId,
-      channelId,
-      reason: 'owner_returned',
-    });
-    return reassigned ? ownerId : null;
-  });
-}
+export type AlignReason =
+  | 'reopened_after_handover'
+  | 'reopened_by_status'
+  /** An unassigned ticket nobody answered for, on a number whose owner is back (`takeForNumberOwner`). */
+  | 'owner_returned';
 
 /**
  * Write a ticket's status, keeping it with its number's owner when the write
@@ -321,7 +290,9 @@ export async function alignAccountable(
   const stranded =
     ticket.assigneeAgentId !== null &&
     ticket.assigneeAgentId !== input.ownerId &&
-    (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, input.ownerId));
+    (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, {
+      ownerId: input.ownerId,
+    }));
   const moves = ticket.accountableAgentId !== input.ownerId;
   if (!moves && !stranded) return { changed: false, reassigned: false };
 
@@ -525,6 +496,7 @@ export async function handOverNumber(input: {
         name: channels.name,
         config: channels.config,
         ownerAgentId: channels.ownerAgentId,
+        ownerOnly: sql<boolean>`${isCoexistenceNumber()}`,
       })
       .from(channels)
       .where(eq(channels.id, input.channelId))
@@ -626,7 +598,7 @@ export async function handOverNumber(input: {
     // just stopped being the one person it showed them to, or a colleague one
     // was given to. With a new owner they follow the number; with none they
     // are unassigned, where everybody who can still see them finds them.
-    const ownerOnly = (await ownerOnlyNumber(tx, channel.id)) !== null;
+    const { ownerOnly } = channel;
     const seesAll = ownerOnly ? await agentsWhoSeeEveryTicket(tx) : null;
     const stranded = (ticket: { assigneeAgentId: string | null }) =>
       seesAll !== null &&
@@ -636,9 +608,7 @@ export async function handOverNumber(input: {
 
     const moved = tickets.filter((ticket) => ticket.accountableAgentId !== (to?.id ?? null));
     const reassigned = to
-      ? tickets
-          .filter((ticket) => movesAssignee(ticket, from, to.id) || stranded(ticket))
-          .map((ticket) => ticket.id)
+      ? tickets.filter((ticket) => movesAssignee(ticket, from, to.id) || stranded(ticket))
       : [];
     const unassigned = to ? [] : tickets.filter(stranded);
 
@@ -657,7 +627,12 @@ export async function handOverNumber(input: {
       await tx
         .update(conversations)
         .set({ assigneeAgentId: to.id, assignedAt: now })
-        .where(inArray(conversations.id, reassigned));
+        .where(
+          inArray(
+            conversations.id,
+            reassigned.map((ticket) => ticket.id),
+          ),
+        );
     }
     if (unassigned.length > 0) {
       await tx
@@ -717,11 +692,21 @@ export async function handOverNumber(input: {
         data: { from: ticket.accountableAgentId, to: to?.id ?? null, ...stamp },
         createdAt: now,
       })),
-      ...reassigned.map((id) => ({
-        conversationId: id,
+      // `from` only where the ticket left a colleague: one a supervisor gave
+      // to somebody the number's tickets are hidden from. Nothing else says
+      // who was working it when it left their inbox; a ticket following its
+      // previous owner, or nobody, is the handover's ordinary case.
+      ...reassigned.map((ticket) => ({
+        conversationId: ticket.id,
         type: 'assigned',
         actorLabel: 'number_handover',
-        data: { to: to!.id, ...stamp },
+        data: {
+          to: to!.id,
+          ...stamp,
+          ...(ticket.assigneeAgentId && ticket.assigneeAgentId !== from
+            ? { from: ticket.assigneeAgentId }
+            : {}),
+        },
         createdAt: CHANGE_STAMP,
       })),
       ...unassigned.map((ticket) => ({
@@ -774,7 +759,7 @@ export function handoverNotice(done: Extract<Handover, { ok: true }>): string {
     // are hidden from the team, and those somebody held have left them, so
     // the sentence about who they count against would name nobody.
     if (done.ownerOnly) {
-      const sees = 'only supervisors and admins can see its tickets until it has one';
+      const sees = 'only agents who can see every ticket can see its tickets until it has one';
       if (done.ticketsUnassigned === 0) return `${number} has no owner from now: ${sees}.`;
       const tickets = `${done.ticketsUnassigned} open or pending ${done.ticketsUnassigned === 1 ? 'ticket was' : 'tickets were'}`;
       return `${number} has no owner from now: ${tickets} unassigned, and ${sees}.`;

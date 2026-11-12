@@ -37,7 +37,12 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
-import { OWNER_ONLY_REFUSAL, ownerOnlyNumber, seesOwnerOnlyTicket } from '@/lib/tickets/owner-only';
+import {
+  type Holder,
+  OWNER_ONLY_REFUSAL,
+  ownerOnlyNumber,
+  seesOwnerOnlyTicket,
+} from '@/lib/tickets/owner-only';
 import { changeStatus } from '@/lib/tickets/status';
 import { seesTicket } from '@/lib/tickets/visibility';
 import { scheduleSurvey, setSurveySuppressed } from '@/lib/csat';
@@ -121,6 +126,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     case 'assignee': {
       if (!can(agent, 'ticket.assign')) return { error: 'You cannot reassign tickets' };
       const assigneeAgentId = value || null;
+      let assignee: Holder | null = null;
 
       // The picker lists active agents only, but the id comes back as a form
       // field and the picker is not the authority. The foreign key would prove
@@ -128,7 +134,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // who has left, where nobody will ever answer it.
       if (assigneeAgentId) {
         if (!isUuid(assigneeAgentId)) return { error: 'Unknown agent' };
-        const [assignee] = await db
+        const [found] = await db
           .select({
             id: agents.id,
             isActive: agents.isActive,
@@ -138,21 +144,25 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           .from(agents)
           .where(eq(agents.id, assigneeAgentId))
           .limit(1);
-        if (!assignee) return { error: 'Unknown agent' };
-        if (!assignee.isActive) return { error: 'That agent is deactivated' };
+        if (!found) return { error: 'Unknown agent' };
+        if (!found.isActive) return { error: 'That agent is deactivated' };
+        assignee = found;
+      }
 
+      const assigned = await db.transaction(async (tx) => {
         // A coexistence number's tickets are hidden from everybody but its
         // owner and the agents who see every ticket, so anybody else given
         // one would hold a ticket that is in none of their lists
         // (`lib/tickets/owner-only.ts`). The picker leaves them out; this is
-        // the authority.
-        const number = await ownerOnlyNumber(db, row.conversation.channelId);
-        if (number && !seesOwnerOnlyTicket(assignee, number.ownerId)) {
-          return { error: OWNER_ONLY_REFUSAL };
+        // the authority. The owner is read in here, under the channel's lock
+        // and before the ticket is written: read ahead of the transaction, an
+        // assignment to the owner a handover was replacing passed, and
+        // committed after the handover had collected the number's tickets.
+        if (assignee) {
+          const number = await ownerOnlyNumber(tx, row.conversation.channelId, { lock: true });
+          if (number && !seesOwnerOnlyTicket(assignee, number.ownerId)) return null;
         }
-      }
 
-      const assigned = await db.transaction(async (tx) => {
         await tx
           .update(conversations)
           .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
@@ -184,6 +194,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           : false;
         return { ended, deferred: await deferToRouter(tx, conversationId) };
       });
+      if (!assigned) return { error: OWNER_ONLY_REFUSAL };
       endedHold = assigned.ended;
       routingRunsRules = assigned.deferred;
       break;

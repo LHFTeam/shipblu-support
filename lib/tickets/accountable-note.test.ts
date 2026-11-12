@@ -55,8 +55,11 @@ describe('accountableNote', () => {
   it('says who sees a coexistence number whose owner is deactivated', () => {
     const left = { id: 'nayera', name: 'Nayera Mohamed', active: false };
     expect(accountableNote(null, { owner: left }, true)).toBe(
-      'Nayera Mohamed owns this number but is deactivated, so only supervisors and admins can ' +
+      'Nayera Mohamed owns this number but is deactivated, so only agents who can see every ticket ' +
         'see its tickets.',
+    );
+    expect(accountableNote(null, { owner: null }, true)).toBe(
+      'Nobody owns this number now, so only agents who can see every ticket see its tickets.',
     );
   });
 });

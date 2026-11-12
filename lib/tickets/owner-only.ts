@@ -72,9 +72,17 @@ export function notOnCoexistenceNumber(): SQL {
   return sql`(${conversations.channelId} is null or ${conversations.channelId} <> all(array(${coexistenceNumbers()})))`;
 }
 
+/**
+ * Who sees a coexistence number's tickets beside its owner, as the console
+ * words it. "Sees every ticket" and not "supervisors and admins": the rule is
+ * the `ticket.view.all` key, which an agent's own overrides can add or take
+ * away, and a role named here told a supervisor without the key that they
+ * could see tickets they cannot.
+ */
+const SEES_EVERY_TICKET = 'agents who can see every ticket';
+
 /** What an agent is told when they give one to somebody it is hidden from. */
-export const OWNER_ONLY_REFUSAL =
-  'Only the owner of this WhatsApp number, a supervisor or an admin can open its tickets, so it cannot be assigned to anybody else.';
+export const OWNER_ONLY_REFUSAL = `Only the owner of this WhatsApp number and ${SEES_EVERY_TICKET} can open its tickets, so it cannot be assigned to anybody else.`;
 
 /** What `seesOwnerOnlyTicket` needs of an agent. */
 export type Holder = { id: string; role: AgentRole; permissions: Record<string, boolean> };
@@ -111,12 +119,23 @@ export async function agentsWhoSeeEveryTicket(tx: Pick<typeof db, 'select'>): Pr
 export async function ownerOnlyNumber(
   tx: Pick<typeof db, 'select'>,
   channelId: string | null,
+  /**
+   * Held against a handover, for a writer about to assign inside a
+   * transaction: FOR KEY SHARE on the channel, the lock `lockedOwnerId` takes
+   * and for its reason. Read without it, an assignment to the owner a
+   * handover was replacing passed, and committed after the handover had
+   * collected the number's tickets: the previous owner holding a ticket on a
+   * number that is no longer theirs to see. Taken before the ticket's row is
+   * written, the order a handover takes them.
+   */
+  { lock = false }: { lock?: boolean } = {},
 ): Promise<{ ownerId: string | null } | null> {
   if (!channelId) return null;
-  const [row] = await tx
+  const read = tx
     .select({ ownerId: channels.ownerAgentId })
     .from(channels)
     .where(and(eq(channels.id, channelId), isCoexistenceNumber()));
+  const [row] = await (lock ? read.for('key share') : read);
   return row ?? null;
 }
 
@@ -124,24 +143,31 @@ export async function ownerOnlyNumber(
  * Whether a ticket on `channelId` would be hidden from `agentId` were they
  * given it — for a writer that has only the two ids, as a rule's
  * `assign_agent` does. False off a coexistence number, and for an agent who is
- * gone, whom the foreign key answers for. An agent who sees every ticket but
- * is deactivated is not hidden from: what a deactivated agent holds is every
- * ticket's question, not this rule's.
+ * gone, whom the foreign key answers for.
  */
 export async function hiddenFromHolder(
   tx: Pick<typeof db, 'select'>,
   channelId: string | null,
   agentId: string,
-  ownerId?: string | null,
+  { ownerId, lock = false }: { ownerId?: string | null; lock?: boolean } = {},
 ): Promise<boolean> {
-  const number = await ownerOnlyNumber(tx, channelId);
+  const number = await ownerOnlyNumber(tx, channelId, { lock });
   if (!number) return false;
   const [agent] = await tx
-    .select({ id: agents.id, role: agents.role, permissions: agents.permissions })
+    .select({
+      id: agents.id,
+      role: agents.role,
+      permissions: agents.permissions,
+      isActive: agents.isActive,
+    })
     .from(agents)
     .where(eq(agents.id, agentId));
+  if (!agent) return false;
+  // Somebody who cannot sign in sees nothing, whatever their role says: the
+  // answer `agentsWhoSeeEveryTicket` gives, so a handover and a reopen treat
+  // a deactivated supervisor's ticket alike.
+  if (!agent.isActive) return true;
   // The owner a caller has already read under the number's lock, where it
   // has one: a deactivated owner counts as nobody there (`effectiveOwnerId`).
-  const owner = ownerId === undefined ? number.ownerId : ownerId;
-  return agent ? !seesOwnerOnlyTicket(agent, owner) : false;
+  return !seesOwnerOnlyTicket(agent, ownerId === undefined ? number.ownerId : ownerId);
 }

@@ -458,8 +458,15 @@ describe('an unassignment nobody made', () => {
   it('says the number has no owner, and who can still open its tickets', () => {
     expect(describeEvent('unassigned', { to: null, reason: 'owner_only' })).toBe(
       'unassigned the ticket: its WhatsApp number has no owner now, and only the number’s ' +
-        'owner, a supervisor or an admin can open its tickets',
+        'owner and agents who can see every ticket can open its tickets',
     );
     expect(describeEvent('unassigned', { to: null })).toBe('unassigned the ticket');
+    expect(describeEvent('assigned', { to: 'ali', from: 'bob', reason: 'number_handover' })).toBe(
+      'gave the ticket to the new owner of its WhatsApp number: only the number’s owner and ' +
+        'agents who can see every ticket can open its tickets',
+    );
+    expect(describeEvent('assigned', { to: 'ali', reason: 'number_handover' })).toBe(
+      'gave the ticket to the new owner of its WhatsApp number',
+    );
   });
 });

@@ -380,13 +380,15 @@ async function applyAction(
       // a rule naming anybody else would leave it held by somebody who cannot
       // open it. Left as it is, and said, as a rule naming a retired category
       // is: the rule is not doing what its author asked for.
-      if (agentId && (await hiddenFromHolder(db, ticket.conversation.channelId, agentId))) {
-        log.warn(
-          `"${ruleName}" assigns a coexistence number's ticket to an agent it is hidden from`,
-        );
-        return;
-      }
       const ended = await db.transaction(async (tx) => {
+        // Asked in here, under the channel's lock, so a handover cannot
+        // collect the number's tickets between the answer and the write.
+        if (
+          agentId &&
+          (await hiddenFromHolder(tx, ticket.conversation.channelId, agentId, { lock: true }))
+        ) {
+          return null;
+        }
         await tx
           .update(conversations)
           .set({ assigneeAgentId: agentId, assignedAt: agentId ? new Date() : null })
@@ -396,6 +398,12 @@ async function applyAction(
           ? endHold(tx, conversationId, 'rule', { label: `automation:${ruleName}` })
           : false;
       });
+      if (ended === null) {
+        log.warn(
+          `"${ruleName}" assigns a coexistence number's ticket to an agent it is hidden from`,
+        );
+        return;
+      }
       if (ended) pass.endedHold = true;
       return;
     }

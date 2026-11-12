@@ -22,7 +22,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
-import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { hasCoexistenceRecord, parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { CustomFieldValues } from './custom-fields';
 import { threadOwnershipFacts } from './meta-thread';
 import {
@@ -546,10 +546,12 @@ export async function getConversation(
               : null,
           }
         : null,
-    // As `routingModeOf` reads it: only a WhatsApp ticket's number is answered
-    // from a phone; the bot's is read-only whatever its config says.
+    // Only a WhatsApp ticket's number is answered from a phone; the bot's is
+    // read-only whatever its config says. Any record counts, as it does for
+    // who may see the ticket (`hasCoexistenceRecord`): the page must not offer
+    // to hand a group a ticket the group cannot open.
     onCoexistenceNumber:
-      row.conversation.channel === 'whatsapp' && parseCoexistence(row.numberConfig) !== null,
+      row.conversation.channel === 'whatsapp' && hasCoexistenceRecord(row.numberConfig),
     groupId: row.conversation.groupId,
     groupName: row.groupName,
     category: row.conversation.categoryId

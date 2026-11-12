@@ -154,7 +154,11 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         return 'gave the ticket to the owner of the WhatsApp number it arrived on';
       }
       if (data.reason === 'number_handover') {
-        return 'gave the ticket to the new owner of its WhatsApp number';
+        // Taken off a colleague, which only a coexistence number's handover
+        // does: said, because the ticket left their inbox without a word.
+        return data.from
+          ? 'gave the ticket to the new owner of its WhatsApp number: only the number’s owner and agents who can see every ticket can open its tickets'
+          : 'gave the ticket to the new owner of its WhatsApp number';
       }
       return 'reassigned the ticket';
     /*
@@ -194,7 +198,7 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       // a holder it is hidden from, and the sentence has to say why it is
       // back in the queue.
       if (data.reason === 'owner_only') {
-        return 'unassigned the ticket: its WhatsApp number has no owner now, and only the number’s owner, a supervisor or an admin can open its tickets';
+        return 'unassigned the ticket: its WhatsApp number has no owner now, and only the number’s owner and agents who can see every ticket can open its tickets';
       }
       return 'unassigned the ticket';
     case 'group_changed':
