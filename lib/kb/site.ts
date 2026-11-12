@@ -33,13 +33,14 @@ const HOSTNAME = /^[a-z0-9.-]+(:\d+)?$/i;
  * Distinct from `publicBaseUrl()` above, and both are needed: that one is the
  * address we *publish* — sitemap, canonical tags, `metadataBase` — while this
  * one is the address somebody is *using*. An agent opening an article from the
- * console wants the second. The first is whatever hostname `KB_PUBLIC_HOST`
- * names, and nothing here can check that the name answers from this app. In
- * August and September 2026 it named `support.shipblu.com` while Freshdesk
- * still served that host (it has answered from this app since 2026-11-11), so
- * every link built on it was a page that 404'd, and no amount of the link
- * being canonically correct helps the person who clicked it. The host a
- * request arrived on has just answered from this app.
+ * console wants the second. The first is the hostname `KB_PUBLIC_HOST` names,
+ * or `APP_URL`'s while it is unset, and nothing here can check that either
+ * answers from this app. In August and September 2026 the variable named
+ * `support.shipblu.com` while Freshdesk still served that host (it has answered
+ * from this app since 2026-11-11), so every link built on it was a page that
+ * 404'd, and no amount of the link being canonically correct helps the person
+ * who clicked it. The host a request arrived on has just answered from this
+ * app.
  *
  * Read off the `Host` header, never off `request.url`. Next resolves
  * `request.url` against the address the server is *bound* to, so behind Render

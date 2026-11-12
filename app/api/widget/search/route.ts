@@ -48,12 +48,11 @@ export async function GET(request: Request) {
   const hits = await searchArticles(ANONYMOUS, locale, query, RESULTS);
   /*
    * The host this request arrived on, which is the one that served the frame —
-   * not `publicBaseUrl()`, which builds every link on whatever `KB_PUBLIC_HOST`
-   * names, a host nothing here checks answers from this app (`requestBaseUrl`
-   * says when it did not). A suggestion the visitor cannot open is worse than
-   * no suggestion, and this is a link for somebody reading right now rather
-   * than a published address that has to stay put; the sitemap and the
-   * canonicals keep the configured host.
+   * not `publicBaseUrl()`, a host nothing here checks answers from this app
+   * (`requestBaseUrl` says when it did not). A suggestion the visitor cannot
+   * open is worse than no suggestion, and this is a link for somebody reading
+   * right now rather than a published address that has to stay put; the sitemap
+   * and the canonicals keep the configured host.
    */
   const base = requestBaseUrl(request.headers);
 

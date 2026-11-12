@@ -13,13 +13,16 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
  * (`./off-freshdesk.ts`), so what it finds is what has no home here: a picture
  * nobody copied, a link to an article with no published copy here, a link to a
  * part of the portal nothing here replaces. One on Freshdesk's own hosts breaks
- * the day Freshdesk is disconnected, one on the portal's hostname broke when
- * that name moved here on 2026-11-11, and each is refused only when the write
- * would *add* it. One the stored row already carries is left alone: refusing it
- * would make the article unsaveable until somebody found and removed it,
- * whatever the save was for, and leaving it costs nothing the article does not
- * already cost. `rehost_kb_images` and the audit in
- * `plans/freshdesk-disconnection.md` are what find those.
+ * the day Freshdesk is disconnected. One on the portal's hostname stopped
+ * reaching Freshdesk when that name moved here on 2026-11-11, and gets what
+ * this app answers there: an article or folder only through `app/help/legacy`,
+ * a page of the portal at most a stand-in (`./freshdesk-portal.ts`), the rest a
+ * 404 or the console's sign-in. Each is refused only when the write would *add*
+ * it. One the stored row already carries is left alone: refusing it would make
+ * the article unsaveable until somebody found and removed it, whatever the save
+ * was for, and leaving it costs nothing the article does not already cost.
+ * `rehost_kb_images` and the audit in `plans/freshdesk-disconnection.md` are
+ * what find those.
  */
 
 export type FreshdeskReference = { kind: 'link' | 'image'; address: string };
@@ -55,9 +58,11 @@ const A_TAG = /<a\b[^>]*>/gi;
 const HREF_ATTR = /\shref="([^"]*)"/i;
 
 /**
- * Whether an address breaks with Freshdesk: one on Freshworks' hosts or in
- * Freshdesk's bucket (`onFreshworks`), a `mailto:` one of its mailboxes, or a
- * portal path on the portal's host or with no host at all.
+ * Whether an address is Freshdesk's: one on Freshworks' hosts or in Freshdesk's
+ * bucket (`onFreshworks`), a `mailto:` one of its mailboxes, or a portal path
+ * on the portal's host or with no host at all. All but a portal path break
+ * with Freshdesk; one on the portal's host stopped reaching it when that host
+ * moved here (the header above).
  *
  * Narrower than the audit's pattern, which matches its words anywhere in an
  * address. A blog post about leaving Freshdesk, or another company's own

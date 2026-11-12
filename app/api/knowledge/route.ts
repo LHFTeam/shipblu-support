@@ -34,8 +34,8 @@ export async function GET(request: Request) {
   const locale = isLocale(requested) ? requested : DEFAULT_LOCALE;
 
   // The origin the agent is on, not the one we publish: an article they cannot
-  // open is no use to them, and nothing checks that the domain `KB_PUBLIC_HOST`
-  // names answers from this app (`requestBaseUrl` says when it did not).
+  // open is no use to them, and nothing checks that the published host answers
+  // from this app (`requestBaseUrl` says when it did not).
   const origin = requestBaseUrl(request.headers);
 
   return Response.json({ articles: await searchForAgent(origin, agent.role, locale, query) });

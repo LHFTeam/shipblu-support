@@ -521,9 +521,9 @@ export function articlePath(locale: string, slug: string): string {
  * them resolvable — the title text after the id changes whenever somebody edits
  * the title, and was never the key. A relative one (`/en/support/solutions/
  * articles/<id>`) is the portal's path pasted without its host: none is stored
- * today, and wherever this app draws one it reaches the article only by a 301
- * through `app/help/legacy`, on `support.shipblu.com` too since that name
- * moved here on 2026-11-11.
+ * today, and on whichever host of ours draws one — `support.shipblu.com`
+ * among them since 2026-11-11 — it reaches the article only through
+ * `app/help/legacy`'s redirect.
  *
  * The pattern finds the shape anywhere; whether the address is *ours* is
  * `isFreshdeskAddress`, asked of every match (`legacyFreshdeskLink`), so the

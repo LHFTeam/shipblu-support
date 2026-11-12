@@ -48,10 +48,10 @@ export async function GET(request: Request) {
     title: article.title,
     bodyHtml: article.bodyHtml,
     // The origin this request actually arrived on, which is the one that served
-    // the frame, not the one we publish. `publicBaseUrl()` names whatever
-    // KB_PUBLIC_HOST says, which nothing checks answers from this app, and
-    // when it did not that was a canonically correct link that 404'd for the
-    // person who clicked it (`requestBaseUrl` says when).
+    // the frame, not the one we publish. Nothing checks that `publicBaseUrl()`
+    // answers from this app, and when it did not, the link was canonically
+    // correct and 404'd for the person who clicked it (`requestBaseUrl` says
+    // when).
     url: `${requestBaseUrl(request.headers)}/${locale}/a/${encodeURI(article.slug)}`,
   });
 }

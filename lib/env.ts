@@ -37,14 +37,18 @@ const schema = z.object({
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
 
   /**
-   * Hostname the public help centre is served on, e.g. support.shipblu.com: a
-   * bare hostname, because `proxy.ts` compares it with `Host` as written. The
-   * proxy rewrites everything arriving there under /help and serves no console
-   * on it, and every address we publish is built from it (`publicBaseUrl()`):
-   * the widget's snippet, the sitemap, the canonicals and the survey and portal
-   * links. Unset, the help centre is reachable at /en, /ar and /help on every
-   * hostname, beside the console. Nothing checks that the name answers from
-   * this app, and one that does not publishes a 404 (`requestBaseUrl`).
+   * Hostname the public help centre is published on, e.g. support.shipblu.com:
+   * a bare hostname, because `proxy.ts` compares it with the request's `Host`
+   * and strips no scheme. That host serves no console: past the app's own
+   * plumbing (`KB_HOST_PASSTHROUGH`), the head files and the Freshdesk portal
+   * pages `lib/kb/freshdesk-portal.ts` redirects, everything there is rewritten
+   * under /help. `publicBaseUrl()` builds what we publish from it, or from
+   * APP_URL while it is unset: the sitemap, the canonicals, the survey and
+   * portal links, and the origin the widget snippet falls back to. On every
+   * other hostname, and on all of them while it is unset, the help centre
+   * answers at /en, /ar and /help beside the console. Nothing checks that the
+   * name answers from this app, and one that does not publishes a 404
+   * (`requestBaseUrl`).
    */
   KB_PUBLIC_HOST: z.string().optional(),
 

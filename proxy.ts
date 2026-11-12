@@ -37,10 +37,11 @@ import { LOCALES } from '@/lib/kb/locale';
  *    so a browser leaves it off a POST from another site. Site, not origin: a
  *    page on another subdomain of the same registrable domain is the same site,
  *    its POSTs carry the cookie, and only Next's check is left to refuse them.
- *    So the console is one site with every other shipblu.com subdomain
- *    wherever it is served under shipblu.com: on support.shipblu.com whenever
- *    `KB_PUBLIC_HOST` does not name it, as on 2026-11-12, the day after that
- *    name moved here, and on any console domain there later.
+ *    So wherever the console is served under shipblu.com, it is one site with
+ *    every other shipblu.com subdomain. That includes support.shipblu.com
+ *    whenever `KB_PUBLIC_HOST` does not name it, as on 2026-11-12, the day
+ *    after that name moved here, and any shipblu.com domain the console moves
+ *    to later.
  *
  * Both ask where a request came from, never what made it, so neither can tell
  * the console from anything else answered on the console's origin: script
@@ -252,7 +253,8 @@ export default function proxy(request: NextRequest) {
   // this the public site would work only on the host `KB_PUBLIC_HOST` names,
   // which makes it unreviewable on the Render URL and unbrowsable in
   // development, and leaves a domain pointed here before the variable names it
-  // (support.shipblu.com on 2026-11-12) with no help centre at all.
+  // (support.shipblu.com on 2026-11-12) with its front door and every article
+  // address asking for a password, the help centre answering only under /help.
   // `/en` and `/ar` are not console routes, so nothing collides.
   if (LOCALE_PREFIX.test(pathname)) {
     const url = request.nextUrl.clone();

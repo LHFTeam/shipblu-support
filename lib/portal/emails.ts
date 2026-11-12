@@ -10,12 +10,14 @@ import { publicBaseUrl } from '@/lib/kb/site';
  * sentence stitched together from four translated pieces reads like a machine
  * in Arabic even when every piece is correct.
  *
- * Links are built against the help-centre hostname, not APP_URL: a customer
- * clicking through to the Render service URL would land on a hostname that is
- * not the one they trust and, for a customer who signed in on the custom
- * domain, not the one the session cookie was set on. Both hold while
- * `KB_PUBLIC_HOST` does not name the domain, as on 2026-11-12, the day after
- * `support.shipblu.com` moved here.
+ * Links are built on `publicBaseUrl()`, meant to be the help-centre hostname
+ * rather than APP_URL: a customer sent to the Render service URL lands on a
+ * hostname that is not the one they trust and, if they signed in on the custom
+ * domain, not the one their host-only session cookie was set on. While
+ * `KB_PUBLIC_HOST` does not name that domain, `publicBaseUrl()` is another host
+ * — the one it names, or APP_URL's while it is unset — and both happen: on
+ * 2026-11-12, the day after `support.shipblu.com` moved here, it was the Render
+ * host.
  */
 
 /**

@@ -22,7 +22,8 @@ import proxy from './proxy';
 /**
  * Host routing, which nothing else checks before `KB_PUBLIC_HOST` names the
  * host it routes on. The domain answering here is not enough:
- * support.shipblu.com did from 2026-11-11 while the variable did not name it.
+ * support.shipblu.com has answered here since 2026-11-11, and on 2026-11-12
+ * the variable still did not name it.
  *
  * The failure this is here to prevent is a quiet one: a path that should be
  * served as itself gets rewritten under /help instead, 404s, and does so only

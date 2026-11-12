@@ -296,9 +296,9 @@ describe('rewriteLegacyArticleLinks', () => {
     expect(rewriteLegacyArticleLinks(html, resolve)).toBe(html);
   });
 
-  // The portal's path pasted without its host: on every host of ours since
-  // the domain moved, an article reached only by a 301 through the legacy
-  // route.
+  // The portal's path pasted without its host resolves against whichever host
+  // of ours draws it, support.shipblu.com included since 2026-11-11, and
+  // reaches the article only through the legacy route's redirect.
   it('rewrites a relative portal link, with or without a locale', () => {
     expect(
       rewriteLegacyArticleLinks(
