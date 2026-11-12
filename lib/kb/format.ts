@@ -632,9 +632,11 @@ export function legacyArticleResolver(
  * `/solutions/articles/<id>` and `app/help/legacy/route.ts` looks the id up, so
  * a reader who clicks one takes a 301 through a compatibility route that exists
  * for inbound traffic from search engines and old bookmarks. Worse, the URLs are
- * absolute to `support.shipblu.com`, and that hostname still serves Freshdesk —
- * so an article linking to another article currently sends the reader out of
- * this knowledge base and into the old portal.
+ * absolute to `support.shipblu.com`, which served Freshdesk until 2026-11-11,
+ * so such a link sent the reader out of this knowledge base and into the old
+ * portal. No live article has carried one since 2026-09-03. This still runs in
+ * the formatting pass and in `pointedHere`, so Save, Restore and the import
+ * write the link to the article here rather than through the legacy route.
  *
  * `resolve` is passed in rather than read from the database here so this module
  * stays pure and testable; its callers do the lookup (`legacyArticleResolver`).

@@ -16,18 +16,25 @@ open, an iframe pointing back at the host it was loaded from — so the chat run
 on **our** origin, where the host page's CSS cannot reach it and where the
 visitor's token lives in storage the host page cannot read.
 
-`<helpdesk-host>` is whichever hostname serves this app: today
-`shipblu-support.onrender.com`, and `support.shipblu.com` once that domain's DNS
-points here. Load it from the same host in every environment — the script frames
-the origin it was served from, so a staging dashboard pointing at production
-opens production's chat.
+`<helpdesk-host>` is whichever hostname serves this app:
+`shipblu-support.onrender.com`, or `support.shipblu.com`, whose DNS has pointed
+here since 2026-11-11. Pick one and keep it. The visitor's token lives in the
+frame's own storage, which belongs to the host the script was loaded from, so
+moving to the other host later starts every visitor afresh: their stored
+conversation stays behind on the first. `support.shipblu.com` is the name to
+pick, since it is the one meant to last. Load it from the same host in every
+environment — the script frames the origin it was served from, so a staging
+dashboard pointing at production opens production's chat.
 
 **A third-party origin must be allowlisted before the frame will load.** The
 `/widget` route answers with `frame-ancestors 'self' …WIDGET_ALLOWED_ORIGINS`,
 so `https://app.shipblu.com` has to be in that variable or the merchant sees a
-launcher that opens an empty box. Measured 2026-08-31, production answers
-`frame-ancestors 'self';` — the variable is unset, and setting it is the first
-step of any rollout.
+launcher that opens an empty box. Measured 2026-08-31, production answered
+`frame-ancestors 'self';`: the variable was unset. Measured 2026-11-12, on both
+hosts, it answers `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`, so those origins can
+frame the widget today, and any other has to be added first.
 
 ## What it puts on your page
 
