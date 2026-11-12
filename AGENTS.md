@@ -2522,8 +2522,10 @@ from the library is reported rather than deleted. `canned-library.test.ts` is
 the style guide.
 Every body is sendable exactly as it stands, because nothing interpolates and an
 automation sends it unread, so it carries no placeholder. It carries no link,
-because `support.shipblu.com` still serves Freshdesk and agents add links from
-the knowledge panel. It is at most 1000 bytes of UTF-8, Instagram's limit for a
+because the address the help centre publishes has not settled and agents add
+links from the knowledge panel: `support.shipblu.com` has served this app since
+2026-11-12, and every published URL still names `shipblu-support.onrender.com`
+until `KB_PUBLIC_HOST` is set (`plans/freshdesk-disconnection.md`). It is at most 1000 bytes of UTF-8, Instagram's limit for a
 direct message, so roughly 550 Arabic characters. The Arabic addresses the customer as «حضرتك» and uses no
 imperative, because neither the customer's gender nor the agent's is known. Any
 policy a response states is quoted from the help centre, so a change to a

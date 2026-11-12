@@ -13,6 +13,16 @@ Freshworks. The Meta side of the cutover — Freshchat is still Messenger's
 primary receiver — is §5.1 of `docs/PROJECT-STATE.md` and is not repeated here;
 it is one line in the checklist.
 
+> **2026-11-12: `support.shipblu.com` has moved here, and one step of the
+> move is still open.** The name is now a CNAME of
+> `shipblu-support.onrender.com` and answers from this app; the first web chat
+> from it was at 08:23 UTC. `KB_PUBLIC_HOST` was not set with it, so every
+> published URL still names the Render host and the console is reachable on
+> the support host. The [checklist](#checklist-before-freshdesk-is-disconnected)
+> has what was read and what is left. Everything below that says the name
+> "still" serves Freshdesk is the audit of 2026-11-06 and 2026-11-07, kept as
+> the record of what was measured then.
+
 ## How it was measured
 
 Read-only, 2026-11-06 and 2026-11-07, against production
@@ -639,12 +649,21 @@ Order matters. The check beside each item is what proves it, not the merge.
 
 **Moving `support.shipblu.com`, if the name is kept**
 
-- [ ] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
-      host.
-- [ ] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead.
-- [ ] **Add `support.shipblu.com` as a custom domain** on the
+The name moved on 2026-11-12, and nobody recorded it: the boxes ticked below
+were read from DNS and from output at about 15:10 UTC that day, not from the
+Render dashboard. The last two are open.
+
+- [x] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
+      host. Live since `932e8ea`; the three article shapes 301, and the folder
+      shape still 404s for want of a `kb_redirects` row
+      (`docs/PROJECT-STATE.md`, header).
+- [ ] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead. Not
+      observed either way; the record read 14400 after the move.
+- [x] **Add `support.shipblu.com` as a custom domain** on the
       `shipblu-support` web service, then switch the CNAME and wait for the
-      certificate.
+      certificate. Read 2026-11-12: the CNAME answers
+      `shipblu-support.onrender.com`, and `https://support.shipblu.com/`
+      answers `307 → /ar` with `x-render-origin-server: Render`.
 - [ ] **Only then** set `KB_PUBLIC_HOST=support.shipblu.com` — a bare
       hostname, because `proxy.ts` compares it with `Host` as written — on the
       web service **and** the worker, which builds the survey and portal-email
@@ -653,7 +672,14 @@ Order matters. The check beside each item is what proves it, not the merge.
 - [ ] _Check:_ `/widget/embed.js`'s `BASE`, the sitemap and the canonicals name
       `support.shipblu.com`; `/en/a/packaging-guidelines` answers 200 there; a
       Freshdesk URL from the tables above 301s to its article; `/inbox` there
-      is the help centre's 404, not the console.
+      is the help centre's 404, not the console. Read 2026-11-12, with the
+      variable not yet set: `BASE`, all 114 sitemap `<loc>`, the `Sitemap:`
+      line of `robots.txt` and the canonicals name
+      `shipblu-support.onrender.com` on both hosts, and `/inbox` on the
+      support host answers `307 → /login?next=%2Finbox`, the console. The two
+      halves that do not depend on the variable already pass there:
+      `/en/a/packaging-guidelines` answers 200, and
+      `/support/solutions/articles/154000189336` 301s to its article.
 
 **After the disconnection**
 
@@ -707,7 +733,8 @@ From a shell:
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/
 ```
 
-Today `302 https://support.shipblu.com/support/home` — still Freshdesk.
+On 2026-11-07 `302 https://support.shipblu.com/support/home`, Freshdesk. Since
+2026-11-12 `307 https://support.shipblu.com/ar`, this app.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336
@@ -719,5 +746,5 @@ On 2026-11-07 `404`; `301` to the article once PR 3 is deployed.
 curl -sS https://shipblu-support.onrender.com/widget/embed.js | grep -o 'var BASE = "[^"]*"'
 ```
 
-Today `https://shipblu-support.onrender.com`; the custom domain once it has
-moved.
+`https://shipblu-support.onrender.com`, still so on 2026-11-12 on both hosts;
+the custom domain once `KB_PUBLIC_HOST` names it.

@@ -16,18 +16,23 @@ open, an iframe pointing back at the host it was loaded from — so the chat run
 on **our** origin, where the host page's CSS cannot reach it and where the
 visitor's token lives in storage the host page cannot read.
 
-`<helpdesk-host>` is whichever hostname serves this app: today
-`shipblu-support.onrender.com`, and `support.shipblu.com` once that domain's DNS
-points here. Load it from the same host in every environment — the script frames
-the origin it was served from, so a staging dashboard pointing at production
-opens production's chat.
+`<helpdesk-host>` is whichever hostname serves this app. In production two do:
+`support.shipblu.com`, whose DNS has pointed here since 2026-11-12, and
+`shipblu-support.onrender.com`. Load it from the same host in every environment
+— the script frames the origin it was served from, so a staging dashboard
+pointing at production opens production's chat. And pick one of the two and
+keep it: the visitor's token is stored under the frame's origin, so a page that
+moves its snippet from one host to the other starts every visitor on a new
+conversation.
 
 **A third-party origin must be allowlisted before the frame will load.** The
 `/widget` route answers with `frame-ancestors 'self' …WIDGET_ALLOWED_ORIGINS`,
 so `https://app.shipblu.com` has to be in that variable or the merchant sees a
-launcher that opens an empty box. Measured 2026-08-31, production answers
-`frame-ancestors 'self';` — the variable is unset, and setting it is the first
-step of any rollout.
+launcher that opens an empty box. Measured 2026-11-12, production answers
+`frame-ancestors 'self' https://app.shipblu.com https://app.staging.shipblu.com
+https://merchant.staging.shipblu.com https://merchant.shipblu.com
+https://business.shipblu.com;` on both hosts. An origin not on that list is
+added to the variable first; that is the first step of any rollout.
 
 ## What it puts on your page
 
@@ -181,9 +186,12 @@ or `identify(user, signature)` — and the widget links the person to their
 shipping account, so an agent opens the ticket with the account's shipments
 already in front of them.
 
-Both halves are the values _after_ normalisation: the account id as digits and
-letters only, the email lower-cased and trimmed. Empty fields are still their
-side of the `|`. The signature covers the identifying half only, deliberately:
+Both halves are the values _after_ normalisation. The account id is trimmed,
+loses every character that is not a letter, a digit, `_` or `-`, and is cut to
+64 characters; its case is kept and so are its hyphens, so `SB-4471` is signed
+as `SB-4471`, not `SB4471` and not `sb-4471`. The email is lower-cased and
+trimmed, and a value that is not an address counts as empty. Empty fields are
+still their side of the `|`. A signature over anything else is a 401. The signature covers the identifying half only, deliberately:
 name, phone and `meta` are decoration, and covering them would mean a merchant
 renaming themselves in the dashboard silently stops being identified at all.
 

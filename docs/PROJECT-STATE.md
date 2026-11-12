@@ -480,8 +480,10 @@ ticket one more way to find its group: its category, on a channel an admin has
 moved off `default_group`, with the ticket held unassigned for a few minutes
 while the classifier files it (README, "Ticket assignment"; §5.1 below). Web
 Chat has been in `category` mode since 2026-10-30, with the classifier in
-`apply`, and every other channel is on `default_group`; no ticket has routed
-yet, because no web chat ticket has opened since 2026-10-20 (read 2026-11-07).
+`apply`, and every other channel is on `default_group`. Nothing routed until
+2026-11-12, because no web chat ticket opened between 2026-10-20 and the
+merchant dashboard's launch of the widget that morning; the first decision was
+written at 08:24 UTC that day, and §5.1 has the count.
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -924,7 +926,10 @@ nine rows, all active, and none defaults to `Support` since 2026-10-30. The
 mailbox, Web Chat, the Facebook Page, Instagram, WhatsApp Support and ShipBlu
 Admin default to Customer Care, the two coexistence numbers (Magdy Mohamed and
 Nayera Mohamed) to Merchant Care, and the bot to no group; still no `portal`
-row, and no comment row. Seven web chat tickets exist in all.
+row, and no comment row. Seven web chat tickets existed in all then. _Read
+2026-11-12 at 15:16 UTC:_ 33, 26 of them created that day, the first at 08:23
+UTC, when the merchant dashboard began loading the widget; the one before it
+was opened at 14:15 UTC on 2026-10-20. So web chat is no longer test traffic.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
 tickets after 3 days", §6.30), so both crons finally have work. `locations` holds
@@ -1992,12 +1997,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   **Both were what stood between the widget and the merchant dashboard.**
   Measured 2026-08-31, `https://shipblu-support.onrender.com/widget` answered
   `content-security-policy: frame-ancestors 'self';`. Measured 2026-11-06 it
-  answers `frame-ancestors 'self' https://app.shipblu.com
+  answered `frame-ancestors 'self' https://app.shipblu.com
 https://app.staging.shipblu.com https://merchant.staging.shipblu.com
-https://merchant-web-production.onrender.com`. The new merchant app's
-  production domain, `https://merchant.shipblu.com`, is not on that list,
-  although its `render.yaml` sets `NEXT_PUBLIC_SUPPORT_WIDGET_URL`: the
-  launcher there opens an empty box until the origin is added. `WIDGET_IDENTITY_SECRET` is the
+https://merchant-web-production.onrender.com`, without the new merchant app's
+  production domain, `https://merchant.shipblu.com`, where the launcher
+  therefore opened an empty box. Measured 2026-11-12, on
+  `support.shipblu.com` and on the Render host alike, it answers
+  `frame-ancestors 'self' https://app.shipblu.com
+https://app.staging.shipblu.com https://merchant.staging.shipblu.com
+https://merchant.shipblu.com https://business.shipblu.com`:
+  `merchant.shipblu.com` and `business.shipblu.com` are on the list and
+  `merchant-web-production.onrender.com` is off it. Nobody recorded the
+  change; it was read from the header. `WIDGET_IDENTITY_SECRET` is the
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
@@ -2029,6 +2040,27 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   that name answers from this app, on both services together
   (`plans/freshdesk-disconnection.md`). What follows is the record of
   August and September._
+
+  _**`support.shipblu.com` answers from this app since 2026-11-12, and
+  `KB_PUBLIC_HOST` still does not name it.** Read at about 15:10 UTC that
+  day: the name is a CNAME of `shipblu-support.onrender.com` (TTL 14400; it
+  was Freshdesk's on 2026-11-07), `/` answers `307 → /ar` with
+  `x-render-origin-server: Render`, `/en/track`, `/widget` and
+  `/en/a/packaging-guidelines` answer 200, and Freshdesk's article URLs 301 to
+  their articles there (`/support/solutions/articles/154000189336` to the
+  Arabic article, the same path under `/en` to the English one). The first web
+  chat after the move was created at 08:23 UTC. Nobody recorded the move; it
+  was read from DNS and from output. But the web service's variable was not
+  changed with it. On both hosts `/widget/embed.js`'s fallback `BASE`, all 114
+  sitemap `<loc>`, the `Sitemap:` line of `robots.txt` and the article's
+  canonical and hreflang still name `shipblu-support.onrender.com`. And
+  because `proxy.ts` gives the console to every host the variable does not
+  name, the console is reachable on the support host: `/inbox` there answers
+  `307 → /login?next=%2Finbox`, `/login` 200, and `/support/home` the same
+  redirect to the login page rather than the help centre's 404. So the last
+  two steps of the plan's checklist are open: set
+  `KB_PUBLIC_HOST=support.shipblu.com` on the web service and the worker
+  together, then run its check. The worker's value is still unverified._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2208,8 +2240,8 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   ticket already carries writes a `category_agreed` event, which the router
   reads and Filed by Jev counts as Jev's filing.
 
-- **Routing by category is deployed; Web Chat routes, and no ticket has routed
-  yet** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
+- **Routing by category is deployed; Web Chat routes, and its first tickets
+  routed on 2026-11-12** (Stage 5.1 of `plans/ticket-category-routing.md`, #432, first live on
   all six services on `1470902` by 06:35:36 UTC on 2026-10-29, and amended by
   #477 and #481, on all six with `db4268c` since 16:29:38 UTC on 2026-11-07;
   `lib/routing/`). A channel's mode on
@@ -2223,7 +2255,14 @@ https://merchant-web-production.onrender.com`. The new merchant app's
   every other channel is on `default_group`. No web chat ticket has opened
   since 14:15 UTC on 2026-10-20, and a customer writing again on an existing
   one never routes, so at about 21:20 UTC on 2026-11-07 there was no
-  `routing_decisions` row and no `settle_routing` job. Since 14:10 UTC
+  `routing_decisions` row and no `settle_routing` job. _That ended on
+  2026-11-12, when the merchant dashboard began loading the widget: the first
+  web chat ticket in three weeks opened at 08:23 UTC and its decision was
+  written at 08:24. Read at 15:16 UTC that day, 26 web chat tickets had opened
+  and `routing_decisions` held 26 rows, every one decided, with a
+  `settle_routing` job each: 15 `rule`, 6 `no_route_for_category`, 3
+  `fallback` and 2 `category`. Whether the 15 are the two web chat rules below
+  ending the hold has not been read._ Since 14:10 UTC
   on 2026-10-30 three
   categories have route groups (the plan's Q5: sales to Inbound Sales Team,
   customer support to Customer Care, merchant support to Merchant Care), so
@@ -2389,8 +2428,8 @@ nobody has run, that somebody has to actually watch against the real provider:
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
   which was read as "nothing links to them" and was not: 29 links **inside the
   articles** pointed at those legacy paths until 2026-09-03, and `support.
-shipblu.com` still serves Freshdesk, so each one took a reader out of this
-  help centre and into the old portal. They are now `/{locale}/a/{slug}`
+shipblu.com` served Freshdesk until 2026-11-12 (§5.1), so each one took a
+  reader out of this help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
 
@@ -3206,7 +3245,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
   _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
-  either; §5.1 has the measurement.)_
+  either, and since 2026-11-12 that name answers from this app while the
+  variable still does not name it; §5.1 has both measurements.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
