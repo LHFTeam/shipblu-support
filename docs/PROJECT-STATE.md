@@ -502,9 +502,10 @@ moved off `default_group`, with the ticket held unassigned for a few minutes
 while the classifier files it (README, "Ticket assignment"; §5.1 below). Web
 Chat has been in `category` mode since 2026-10-30, with the classifier in
 `apply`, and every other channel is on `default_group`. Nothing routed until
-2026-11-12, because no web chat ticket opened between 2026-10-20 and the
-merchant dashboard's launch of the widget that morning; the first decision was
-written at 08:24 UTC that day, and §5.1 has the count.
+2026-11-12, because no web chat ticket opened between 2026-10-20 and that
+morning; the first decision was written at 08:24 UTC that day, and §5.1 has
+the count. That is the day the merchant dashboard began loading the widget, on
+the owner's word: which page each chat was opened from was not read.
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -2195,7 +2196,8 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   blueprint does not show. Read a survey link built on the worker before CSAT
   is switched on.
   Once it is set, the domain serves only the help centre, and the console
-  stays on the Render host._
+  stays on the Render host. What follows is the record of August and
+  September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2391,7 +2393,8 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   between 14:15 UTC on 2026-10-20 and 2026-11-12, and a customer writing again on an existing
   one never routes, so at about 21:20 UTC on 2026-11-07 there was no
   `routing_decisions` row and no `settle_routing` job. _That ended on
-  2026-11-12, the day the merchant dashboard began loading the widget: the first
+  2026-11-12, the day the merchant dashboard began loading the widget (the
+  owner's word; which page each chat was opened from was not read): the first
   web chat ticket in three weeks opened at 08:23 UTC and its decision was
   written at 08:24. Read at 15:16 UTC that day, 26 web chat tickets had opened
   and `routing_decisions` held 26 rows, every one decided, with a
@@ -2549,10 +2552,11 @@ nobody has run, that somebody has to actually watch against the real provider:
   Outlook, confirm it threads rather than opening a new ticket. Threading is the
   thing naive helpdesks get wrong, and the two bugs in §6.4 were both found by
   reading the API docs rather than by testing — there may be a third.
-- **The widget on a genuine third-party origin**, not localhost. _It runs on
-  one in production since 2026-11-12: `frame-ancestors` names five origins
-  that are not this app's and 26 web chats opened that day (§5.1). Which
-  origin each came from, and a signed identity, have not been read._ The
+- **The widget on a genuine third-party origin**, not localhost. _Since
+  2026-11-12 the allowlist names five origins that are not this app's, and 26
+  web chats opened that day (§5.1); whether any of them came from one of those
+  origins has not been read, nor has a signed identity, so this is still to
+  watch._ The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.
