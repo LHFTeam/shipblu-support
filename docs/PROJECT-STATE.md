@@ -5,12 +5,36 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-12, against `main` at `7605993`. The figures in §1 and §5
+Last updated: 2026-11-12, against `main` at `aa0131d`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `7605993`, which deployed itself on 2026-11-11, all six
+**Production runs `aa0131d`, which deployed itself on 2026-11-12, all six
+services by 20:38:58 UTC:** release LHFTeam/shipblu-support#522, which carries:
+
+- #514: a Messenger reply typed in Meta Business Suite is filed from its echo
+  (§6.118);
+- #516: a coexistence number's tickets are its owner's alone;
+- #517: one definition of an email address;
+- #510, #513, #515 and #520: the proxy's head files and Freshdesk's old
+  portal, category and folder URLs;
+- #511: the widget's unsigned claim;
+- docs.
+
+It was merged at 20:27:49 with all nine checks green on the pull request. The
+four crons were live at 20:36:45–20:37:01, the worker at 20:38:27 and the web
+service at 20:38:58 (read on Render). It adds no migration. At 21:08
+`/api/health` answered `ok` on `aa0131d`, with the database at 7 ms, nothing
+pending or processing, no lost admission, and 28 dead jobs. The one added
+since the 27 below is a `send_notification_email` refused at 15:51 for an
+address the old format check rejected, the case #517 fixes. Its way back is
+`7605993` on each service, by a revert through `dev` or a dashboard rollback.
+No migration lies between the two.
+
+The release before it:
+
+**Production ran `7605993`, which deployed itself on 2026-11-11, all six
 services by 14:19:54 UTC:** release #508, which carries #491 — a form's new
 requester is written in the transaction that opens the ticket, so a refused or
 failed submission leaves no contact behind — #503, `robots.txt` and the sitemap
@@ -8958,13 +8982,35 @@ found"}` and not Next's page. The same route called by its own URL
       (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
       name by the Sales team, most on Customer Care tickets.
 
-      **The 220 Page Inbox echoes are still in `webhook_events`**, one per
-      delivery: 49 in `messaging` and 171 in `standby`, received 2026-10-13 to
-      2026-11-12 13:55 UTC, all marked processed. The nightly cleanup deletes a
-      processed delivery 30 days after it was processed. 13 go at 00:00 UTC on
-      2026-11-13, then a few most nights, and the last on 2026-12-13. Once this
-      is deployed, a replay files them, and a replay is a production write:
-      `process_webhook` skips a processed row. The deliveries are listed by:
+      **Replayed on 2026-11-12, once production ran this build.** The release
+      (LHFTeam/shipblu-support#522, aa0131d) put every service on it by 20:38:58
+      UTC. At 21:02:35 one statement cleared `processed_at` on the 220 kept
+      deliveries holding a Page Inbox echo and queued a `process_webhook` job
+      for each, without a dedupe key, since the live key is still taken for a
+      week. The 220 are 49 in `messaging` and 171 in `standby`, received
+      2026-10-13 to 2026-11-12 13:55 UTC, each holding only the echo. The
+      selection was bounded to deliveries received before the new worker went
+      live, so nothing it had filed was replayed. Every job completed on its
+      first attempt.
+
+      - **210 echoes were filed, on 120 tickets:** 45 from `messaging` and 165
+        from `standby`, all labelled `meta_business_suite`, none with an
+        author. All 120 tickets now carry a `first_responded_at`.
+      - **10 were refused by the rules above**, as a read beforehand predicted
+        from the tickets' state: 3 with no live ticket (one of them closed), 6
+        older than every customer message on the customer's current ticket,
+        and 1 sent within 10 s of the customer.
+      - **Nothing else moved.** No message was sent, no event or survey was
+        written on those tickets, and no job went dead. Two `download_media`
+        jobs ran for the echoes that carried a file.
+
+      The rebuild ran as one `rollup_metrics` job with `from=2026-10-13` and
+      `max_attempts` 1. A failed rebuild is deterministic, and five attempts
+      would rebuild thirty days five times. Each replayed delivery's
+      `processed_at` is now 2026-11-12, so it is kept until about 2026-12-12.
+
+      The deliveries were found by this query. Bound `received_at` again before
+      reusing it.
 
       ```sql
       select distinct w.id from webhook_events w
@@ -8974,23 +9020,17 @@ found"}` and not Next's page. The same route called by its own URL
       cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
         when 'array' then en.entry->arr.k else '[]' end) e(value)
       where w.provider = 'meta' and w.payload->>'object' = 'page'
-        and (e.value->'message'->>'is_echo')::boolean
+        and w.received_at < '2026-11-12 20:38:27+00'
+        and e.value->'message'->>'is_echo' = 'true'
         and e.value->'message'->>'app_id' = '263902037430900';
       ```
 
-      A replayed echo files only on its customer's live ticket, and only when
-      the ticket has a customer message no newer than the echo. So an old reply
-      whose customer has written again since, on a new ticket, stays out. One
-      whose ticket is closed stays out too.
-
-      For each id: set its `processed_at` to null, then run
-      `npm run job -- process_webhook webhookEventId=<id>`. Every other item in
-      a delivery is idempotent on a second run (`process-meta-webhook.ts`).
-      Then run `rollup_metrics from=2026-10-13` so the reports take the first
-      responses. The way back is deleting the rows the replay filed (`messages`
-      whose `meta->>'echoSource'` is `meta_business_suite`), which leaves the
-      tickets' `last_agent_message_at` and `first_responded_at` where the
-      replay moved them.
+      **The way back** is deleting the `messages` rows whose
+      `channel_message_id` is an echo mid in those deliveries and whose
+      `meta->>'echoSource'` is set, then running the same rollup. The
+      replayed rows are dated by the echo, before 20:38:27, which tells them
+      from echoes filed live. It leaves the tickets' `last_agent_message_at`
+      and `first_responded_at` where the replay moved them.
 
 ### Tooling notes for this environment
 
