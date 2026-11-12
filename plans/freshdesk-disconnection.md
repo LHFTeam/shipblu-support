@@ -17,9 +17,8 @@ it is one line in the checklist.
 
 **Every pull request this plan needed before the disconnection is live, and
 `support.shipblu.com` answers from this app.** What is left: setting
-`KB_PUBLIC_HOST`, deciding whether to run the import once more, writing the
-domain into `render.yaml`, the items other teams own, and what waits for the
-account to close.
+`KB_PUBLIC_HOST`, deciding whether to run the import once more, the items
+other teams own, and what waits for the account to close.
 
 - **PRs 1 to 5 are in production**, with the fixes from PR 5's review (#504):
   PR 1 in #497 (`918ac12`, 2026-11-08), PRs 2, 3 and 4 in #502 (`932e8ea`,
@@ -1207,14 +1206,17 @@ Order matters. The check beside each item is what proves it, not the merge.
       the sitemap and the canonicals name the Render host, and `/inbox` goes
       to the console's sign-in._
 
-- [ ] **Write the domain into `render.yaml`**, independent of the variable
+- [x] **Write the domain into `render.yaml`**, independent of the variable
       and of its check. It was added in the dashboard, and the blueprint
-      declares no `domains:` for `shipblu-support`, so the file no longer
-      describes the running service (AGENTS.md, **Land config in the repo
-      too**). Its own small change into `dev`: `render.yaml` reaches
-      production by the merge into `main`, and a Blueprint sync applies what
-      it says (`docs/PROJECT-STATE.md` §2). Say so in §2's service table in
-      the same change.
+      declared no `domains:` for `shipblu-support`, so the file no longer
+      described the running service (AGENTS.md, **Land config in the repo
+      too**). Done on 2026-11-12, in its own change into `dev`, with §2 of
+      `docs/PROJECT-STATE.md` saying so. `render.yaml` reaches production by
+      the merge into `main`, and a Blueprint sync applies what it says.
+      Render's spec does not say whether a sync removes a custom domain the
+      file leaves out, so the list was checked against the hosts the request
+      logs name: in the 30 days to 2026-11-12, only this one and the
+      `onrender.com` host.
 
 **After the disconnection**
 

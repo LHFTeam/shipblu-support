@@ -306,6 +306,18 @@ projects:
             preDeployCommand: npm run db:migrate
             startCommand: npm run start
             healthCheckPath: /api/health
+            # The help centre's public host. It was added in the dashboard on
+            # 2026-11-11, when the CNAME moved here from Freshdesk, and is
+            # written down so the file describes the running service. On
+            # 2026-11-12 it was the only custom domain any request had reached
+            # in 30 days, beside the onrender.com host. Not an apex and not
+            # www., so Render adds no redirect beside it. The onrender.com host
+            # stays on (renderSubdomainPolicy is left out, which keeps the
+            # current value): the console is served there once KB_PUBLIC_HOST
+            # names this domain, which proxy.ts then serves only as the help
+            # centre.
+            domains:
+              - support.shipblu.com
             scaling:
               minInstances: 1
               maxInstances: 3
