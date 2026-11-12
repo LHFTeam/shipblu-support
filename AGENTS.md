@@ -1134,7 +1134,8 @@ previous owner for good. Six rules hold:
   (`effectiveOwnerId`): new tickets and reopens treat it as a team number — the
   group's rota assigns, and a breach counts against whoever holds the ticket —
   the tickets the owner had stay theirs until a handover, and reactivating them
-  restores the number. `/admin/channels` warns.
+  restores the number. `/admin/channels` warns. A coexistence number is never
+  a team number: there nothing assigns the new tickets (below).
 - **Whose breach it is reads `accountableOrAssignee()`**
   (`lib/tickets/accountable.ts`) everywhere that says so — the rollup's agent
   slices as `accountableOrAssigneeAt` (as of each figure's own instant, from the
@@ -1175,7 +1176,10 @@ who can see it — so every writer that hands tickets out asks the same module:
 
 - **The rota never picks for one.** `assignConversation` hands it back to an
   active owner as it does any owned ticket, and otherwise answers `owner_only`,
-  unrecorded, since its candidates are a group's members.
+  unrecorded, since its candidates are a group's members. A ticket accountable
+  to nobody on a number that has an active owner — it arrived while the owner
+  was deactivated — is made theirs first (`takeForOwner`), since nothing else
+  realigns an open ticket and the rota that would have taken it may not.
 - **The console and a rule leave one only with somebody who sees it.** The
   Assignee picker offers the owner and the agents who see every ticket
   (`listAssignableAgents`), `updateTicket` refuses anybody else, and a rule's
@@ -1184,7 +1188,8 @@ who can see it — so every writer that hands tickets out asks the same module:
   open or pending ticket held by somebody it is hidden from goes to the new
   owner, a ticket somebody was deliberately given included; handed to nobody,
   those tickets are unassigned, with an `unassigned` line naming `from`.
-  `alignAccountable` does the same for a ticket coming back out of resolved.
+  `alignAccountable` does the same for a ticket coming back out of resolved or
+  closed, whether or not the number changed hands meanwhile.
   "Sees every ticket" is `can()` over each active agent's role and overrides
   (`agentsWhoSeeEveryTicket`), never a role test, so one statement of what a
   role holds decides it.

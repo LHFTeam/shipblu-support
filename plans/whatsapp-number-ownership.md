@@ -76,7 +76,9 @@ Each was put as a question with the alternatives below, and answered.
    tickets and reopens treat it as a team number: the group's rota assigns, and
    a breach counts against whoever holds the ticket. The tickets the owner
    already had stay with them until an admin hands the number over.
-   Reactivating them undoes it. Reason: it can be undone, it never blocks an
+   Reactivating them undoes it. (On a coexistence number, since 2026-11-12,
+   nothing assigns the new tickets and only agents who see every ticket see
+   them; the reactivated owner takes them at the next assignment pass.) Reason: it can be undone, it never blocks an
    urgent offboarding, and it is how deactivation treats every other reference
    to an agent. `/admin/channels` shows a warning, which is what prompts the
    handover. Asked in review whether those tickets' breaches should show on
@@ -270,8 +272,8 @@ hint on `/reports/agents` says what it counts.
 
 ## Who sees what
 
-`heldByOrInGroupsOf` ORs in `answerableBy(agent)` on both of its branches:
-accountable to them, or on a channel they own. The inbox list and counts, the
+`heldByOrInGroupsOf` ORs in, on both of its branches, what an agent answers
+for: accountable to them, or on a channel they own (`onNumberOwnedBy`). The inbox list and counts, the
 ticket page, the console guards, the attachments route and the shipment read
 model all read that one predicate, so they all inherit it. The halves cover
 different tickets. The number's half covers what arrives on it now, including
@@ -299,7 +301,8 @@ it is hidden from is in nobody's list:
 | `updateTicket`, the Assignee picker | Offers and accepts only the owner and agents who see every ticket   |
 | `assign_agent`                      | Skipped, with a warning, for anybody else                           |
 | `handOverNumber`                    | Moves every holder it is hidden from to the new owner, or unassigns |
-| `alignAccountable`                  | The same, for a ticket reopened after the number changed            |
+| `alignAccountable`                  | The same, for any ticket coming back out of resolved or closed      |
+| `takeForOwner`                      | An unassigned ticket accountable to nobody goes to an active owner  |
 
 Production on the day: three coexistence numbers, two with no owner, 188
 tickets, 130 open or pending, and none held by anybody but its number's owner,
@@ -321,6 +324,10 @@ Left as they are, each a change of its own if it is wanted:
   the re-read is the scoped list.
 - **A plain number adopted as a coexistence one, or a ticket filed under no
   row adopted onto one** (`findOrAdoptLive`), keeps the assignee it had.
+- **The handover's record.** `channel_owner_changes` counts the tickets moved
+  and reassigned, and has no column for those a handover to nobody unassigned;
+  that count is in the notice and on each ticket's `unassigned` line, which
+  names the change.
 - **Reclaim** takes an abandoned ticket off a supervisor on an ownerless
   coexistence number and leaves it unassigned, where the rota once re-placed it.
 
@@ -449,7 +456,9 @@ These are in `docs/PROJECT-STATE.md` §5.5 with their detail:
 - Rolling back the code leaves the columns and the table unread, and every
   report falls back to the assignee. Undoing a handover is a handover to
   "Nobody — team number": accountability clears, and the assignees keep what
-  they hold.
+  they hold. On a coexistence number, since 2026-11-12, it is "Nobody —
+  supervisors and admins only", and whoever cannot see the tickets loses them
+  (**A coexistence number is its owner's alone**).
 
 ## How it was verified
 

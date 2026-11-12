@@ -161,7 +161,41 @@ export async function recordOwnerAssigned(
  * WhatsApp and the portal alike), or an agent or a rule moved it back out of
  * resolved or closed. Two reasons rather than one so the timeline can say which.
  */
-export type AlignReason = 'reopened_after_handover' | 'reopened_by_status';
+export type AlignReason = 'reopened_after_handover' | 'reopened_by_status' | 'owner_returned';
+
+/**
+ * Give an unassigned ticket on a coexistence number to the number's active
+ * owner, and make it theirs to answer for — for `assignConversation`, which
+ * has found one that is accountable to nobody.
+ *
+ * That is a ticket that arrived while its number's owner was deactivated, or
+ * before the number had one: stamped with nobody (`ownerStamp`), and from then
+ * on realigned by nothing, since only a handover or a reopen writes
+ * accountability and neither happens when the owner is simply reactivated. On
+ * a plain number the group's rota takes such a ticket. Here the rota may not
+ * (`owner_only`), so without this it would wait unassigned for good beside an
+ * owner who answers the number.
+ *
+ * Null when the number has no active owner, or somebody took the ticket
+ * meanwhile. The channel's lock before the ticket's, the order a handover
+ * takes them.
+ */
+export async function takeForOwner(
+  conversationId: string,
+  channelId: string,
+): Promise<string | null> {
+  return db.transaction(async (tx) => {
+    const ownerId = await lockedOwnerId(tx, channelId);
+    if (!ownerId) return null;
+    const { reassigned } = await alignAccountable(tx, {
+      conversationId,
+      ownerId,
+      channelId,
+      reason: 'owner_returned',
+    });
+    return reassigned ? ownerId : null;
+  });
+}
 
 /**
  * Write a ticket's status, keeping it with its number's owner when the write
@@ -275,28 +309,31 @@ export async function alignAccountable(
     .where(eq(conversations.id, input.conversationId))
     .for('update');
 
-  if (!ticket || ticket.accountableAgentId === input.ownerId) {
-    return { changed: false, reassigned: false };
-  }
+  if (!ticket) return { changed: false, reassigned: false };
 
   // On a coexistence number the holder also has to be somebody the ticket is
   // not hidden from (`lib/tickets/owner-only.ts`): the previous owner, or a
-  // colleague it was given to, would hold a reopened ticket that is in none
-  // of their lists and reads as taken to everybody who can see it. It goes to
-  // the owner it came back to, or to nobody when the number has none.
+  // colleague it was given to, would hold a ticket that is in none of their
+  // lists and reads as taken to everybody who can see it. It goes to the
+  // number's owner, or to nobody when the number has none. Asked whether or
+  // not the accountability moves: a ticket a colleague held when it was
+  // resolved comes back with its number in the same hands.
   const stranded =
     ticket.assigneeAgentId !== null &&
     ticket.assigneeAgentId !== input.ownerId &&
     (await hiddenFromHolder(tx, input.channelId, ticket.assigneeAgentId, input.ownerId));
+  const moves = ticket.accountableAgentId !== input.ownerId;
+  if (!moves && !stranded) return { changed: false, reassigned: false };
+
   const reassign =
-    movesAssignee(ticket, ticket.accountableAgentId, input.ownerId) ||
+    (moves && movesAssignee(ticket, ticket.accountableAgentId, input.ownerId)) ||
     (stranded && input.ownerId !== null);
   const unassign = stranded && input.ownerId === null;
 
   await tx
     .update(conversations)
     .set({
-      accountableAgentId: input.ownerId,
+      ...(moves ? { accountableAgentId: input.ownerId } : {}),
       ...(reassign ? { assigneeAgentId: input.ownerId, assignedAt: input.now ?? new Date() } : {}),
       ...(unassign ? { assigneeAgentId: null, assignedAt: null } : {}),
     })
@@ -309,17 +346,19 @@ export async function alignAccountable(
   // the same default: on one instant the reopen counts against the owner the
   // ticket came back to, where a stamp a moment later would file it against
   // the one it left.
-  await tx.insert(conversationEvents).values({
-    conversationId: input.conversationId,
-    type: 'accountable_changed',
-    actorLabel: 'number_owner',
-    data: {
-      from: ticket.accountableAgentId,
-      to: input.ownerId,
-      channelId: input.channelId,
-      reason: input.reason,
-    },
-  });
+  if (moves) {
+    await tx.insert(conversationEvents).values({
+      conversationId: input.conversationId,
+      type: 'accountable_changed',
+      actorLabel: 'number_owner',
+      data: {
+        from: ticket.accountableAgentId,
+        to: input.ownerId,
+        channelId: input.channelId,
+        reason: input.reason,
+      },
+    });
+  }
 
   if (reassign && input.ownerId) {
     await recordOwnerAssigned(tx, {
@@ -343,7 +382,7 @@ export async function alignAccountable(
     });
   }
 
-  return { changed: true, reassigned: reassign };
+  return { changed: moves, reassigned: reassign };
 }
 
 /**

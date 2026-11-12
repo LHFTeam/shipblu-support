@@ -28,7 +28,7 @@ import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
-import { recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
+import { recordOwnerAssigned, takeForOwner } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
@@ -312,9 +312,19 @@ async function routeAndPick(
     );
   }
 
-  // A coexistence number's ticket with no active owner to take it: the rota's
-  // candidates are a group's members, and it is hidden from them.
-  if (ticket.ownerOnly) return { assignedTo: null, reason: 'owner_only' };
+  // A coexistence number's ticket that is accountable to nobody: the rota's
+  // candidates are a group's members, and it is hidden from them. Its number
+  // may have an active owner all the same — one reactivated since the ticket
+  // arrived — and then it is theirs (`takeForOwner`); otherwise nobody's.
+  if (ticket.ownerOnly) {
+    const ownerId =
+      assignable && conversation.channelId
+        ? await takeForOwner(conversationId, conversation.channelId)
+        : null;
+    return ownerId
+      ? { assignedTo: ownerId, reason: null }
+      : { assignedTo: null, reason: 'owner_only' };
+  }
 
   const groupId = options.groupId ?? conversation.groupId;
   if (!groupId) return { assignedTo: null, reason: 'no_group' };

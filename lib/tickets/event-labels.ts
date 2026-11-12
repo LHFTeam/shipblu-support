@@ -190,6 +190,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
         ? 'made the author of the thread’s first comment the requester: a reply under it had arrived first and opened the ticket'
         : 'changed the requester';
     case 'unassigned':
+      // Nobody clicked anything: a coexistence number's ticket was taken off
+      // a holder it is hidden from, and the sentence has to say why it is
+      // back in the queue.
+      if (data.reason === 'owner_only') {
+        return 'unassigned the ticket: its WhatsApp number has no owner now, and only the number’s owner, a supervisor or an admin can open its tickets';
+      }
       return 'unassigned the ticket';
     case 'group_changed':
       return 'moved the ticket to another group';
