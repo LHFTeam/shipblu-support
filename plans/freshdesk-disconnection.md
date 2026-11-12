@@ -618,15 +618,16 @@ does, and since its own pull request it goes there with the articles and the
 folders (below). The language is the path's own when the help centre has it,
 and Arabic otherwise:
 
-| Freshdesk                                            | Here                        |
-| ---------------------------------------------------- | --------------------------- |
-| `[/<l>]/support`, `/support/home`                    | `/<l>`                      |
-| `[/<l>]/support/solutions`                           | `/<l>`                      |
-| `[/<l>]/support/solutions/<category id>[-<title>]`   | `/<l>/c/<slug>`, by lookup  |
-| `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in |
-| `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in |
-| `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`           |
-| anything else under `/support` (`solutions.json`, …) | as before                   |
+| Freshdesk                                            | Here                                    |
+| ---------------------------------------------------- | --------------------------------------- |
+| `[/<l>]/support`, `/support/home`                    | `/<l>`                                  |
+| `[/<l>]/support/solutions`                           | `/<l>`                                  |
+| `[/<l>]/support/solutions/<category id>[-<title>]`   | `/<l>/c/<slug>`, by lookup              |
+| `[/<l>]/support/solutions/folders/<id>[/page/<n>]`   | `/<l>/c/<category>/<folder>`, by lookup |
+| `[/<l>]/support/tickets/new`, `/tickets[/…]`         | `/<l>#contact`, standing in             |
+| `[/<l>]/support/login`, `/signup`                    | `/<l>#contact`, standing in             |
+| `[/<l>]/support/search[/solutions]?term=…`           | `/<l>/search?q=…`                       |
+| anything else under `/support` (`solutions.json`, …) | as before                               |
 
 "As before" is the help centre's 404 for a locale path. For a bare one, it
 is the console's sign-in until `KB_PUBLIC_HOST` names `support.shipblu.com`,
@@ -734,13 +735,93 @@ which production does not yet, and the help centre's 404 from then on.
     units, and matched a unit at a time it threw `URI malformed`, so a
     category or an article named with one answered its old URL with a 500.
     None in production is.
-  - **Left out: a folder.** `/support/solutions/folders/<id>` still goes to the
-    home with a 301 whatever the folder's visibility, the employee guide's four
-    included (`resolveLegacyPath`'s folder branch reads none). So a folder id
-    still says a folder was imported under it, and the 301 pins the home where
-    the folder's own page, `/<l>/c/<category>/<folder>`, could now answer. It
-    is the folder branch's own change: production holds 16 public folders and
-    4 agents-only ones, every one with a Freshdesk id (2026-11-12).
+
+- **A folder goes to its own page, through the legacy route** (its own pull
+  request, after the category's). Until it, `resolveLegacyPath` read no
+  visibility for a folder and answered every imported one with a 301 to the
+  home, the employee guide's four agents-only folders included. So the
+  response confirmed that an internal folder existed under the id, and the
+  301 pinned the home in browsers and search indexes where the folder's own
+  page could answer. The importer kept the folders' ids as it kept the
+  categories' (`kb_folders.external_id`, `<id>:<locale>`), so the page,
+  `/<l>/c/<category>/<folder>`, is a lookup (`resolveFolder`), and each
+  translation is read with the category it is in now: a folder moved since
+  the import answers at the page it has there. `proxy.ts` hands the shape to
+  `/help/legacy` as it always has (`LEGACY_FOLDER`), now through the pattern
+  `freshdeskFolderId` reads the id with (`FRESHDESK_FOLDER`), unanchored as
+  it always was. What production's rows, read on 2026-11-12, make each answer
+  once it is deployed:
+
+  | Freshdesk                                      | Here                                                |
+  | ---------------------------------------------- | --------------------------------------------------- |
+  | `[/ar]/support/solutions/folders/154000746959` | `301 /ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة`           |
+  | `/en/support/solutions/folders/154000746959`   | `301 /en/c/shipblu-partners/faqs`                   |
+  | `/en/support/solutions/folders/154000746964`   | `301 /en/c/shipblu-customers/myblu-support`         |
+  | each of the 8 public ids, with any prefix      | `301` to its page, in the path's language or Arabic |
+  | any of them with `/page/<n>` after the id      | the same as without it                              |
+  | the guide's `154000745060`–`154000745063`      | 404                                                 |
+  | any other id                                   | 404                                                 |
+  - The translation is chosen as a category's is, by the same function
+    (`translationAnswer`): the path's language, then Arabic, then whichever
+    translation answers.
+  - Only a folder some reader can open answers: not agents-only, and holding
+    an article in its category's language that `someReaderMayOpen` passes,
+    which is what `getFolder` lists. `getFolder` does open a folder that
+    lists nothing, with a line saying it is empty. A 301 there would be a
+    soft 404 the browser keeps, so such a folder answers 404, as a category
+    with nothing to list does.
+  - The answer is 301 when it is the translation the URL names, and 302 while
+    another stands in for one closed for now (`LegacyAnswer`).
+  - **The guide's four folders answer 404**, with the same status, headers and
+    body as an id nothing was imported under, for the reasons the guide itself
+    does (above). In the log, only our own checks asked for any of them.
+  - **A page of a folder's list answers as the folder.** Freshdesk listed a
+    folder's articles over pages, `/folders/<id>/page/2`, and `LEGACY_FOLDER`
+    has always matched them. The help centre's folder page lists every article
+    at once (`getFolder` takes no limit), so whatever a page of Freshdesk's
+    listed is on it. A 404 would turn away a reader whose answer is one page
+    away, and a page here per page there would be the same list cut short.
+    It is a 301 like the folder's own, because the folder's page is where
+    those articles stay. The log's pages are of `154000746959`, production's
+    largest folder at 15 articles, and every `/page/` URL in the log since the
+    move is one of them. A category's `/<id>/page/2` stays out, by its
+    pattern's end anchor.
+  - Render's log for `support.shipblu.com`, from the move to 16:50 UTC on
+    2026-11-12, our own curl checks left out, holds 37 folder URLs answered
+    with the home's 301:
+    - 4 from browsers on Windows and a Mac, 1 fetched for a ChatGPT user, 2
+      from headless browsers, and 30 from crawlers (Petal, Semrush, Baidu,
+      Yandex, Exa and a vendor's);
+    - every one of the 8 public ids, under `/ar` and `/en`, and once with no
+      language (`/solutions/folders/<id>`);
+    - 5 of them a page of a list, `/page/1` or `/page/2`, and 9 more pages
+      with a trailing slash, which Next's own 308 answered first.
+
+    Two more, for ids nothing was imported under, answered 404, as they still
+    will.
+
+  - `lib/kb/legacy-resolve.db.test.ts` builds production's categories, three
+    of its public folders (two sharing an Arabic slug under different
+    categories) and the guide's four. It checks every answer against
+    `getFolder`, so none lands on a page that 404s or lists nothing. It also
+    covers:
+    - every prefix, a language with a region, one the help centre lacks;
+    - pages of a list, with and without a trailing slash;
+    - a translation closed three ways (articles archived, the folder
+      agents-only, only articles in the other language);
+    - the order of the translations, and the guide;
+    - a folder of drafts, of agents-only articles, of the other language's
+      articles, or of nothing, one in a language the help centre lacks, and a
+      native folder carrying the id;
+    - a `logged_in` folder, a folder moved to another category, and a
+      `kb_redirects` row for the URL.
+
+    `app/help/legacy/route.db.test.ts` checks the encoded Arabic `Location`
+    and that an agents-only folder's 404 is an unknown id's, status, headers
+    and body. `proxy.test.ts` checks the rewrite on both hosts, with the
+    variable set and unset, and that each path it sends is one
+    `freshdeskFolderId` reads an id from. 14 of the new cases fail against
+    the resolver as it was.
 
 ## To-dos outside this repository
 
@@ -868,7 +949,10 @@ Until the move on 2026-11-11, `302 https://support.shipblu.com/support/home` —
 Freshdesk. Since then, `307 https://support.shipblu.com/ar` (2026-11-12): this
 app's front door. `/support/home` answers `302` to `/ar` once PR 7 is deployed,
 and `/support/solutions/154000297679` answers `301` to `/ar/c/` and the
-category's slug once its category rule is.
+category's slug once its category rule is. `/support/solutions/folders/154000746959`
+answers `301` to `/ar` today, and to `/ar/c/` and the category's and folder's
+slugs once the folder rule is; `/support/solutions/folders/154000745060`, the
+employee guide's, answers `301` to `/ar` today and `404` then.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336

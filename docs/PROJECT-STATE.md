@@ -27,8 +27,11 @@ named below and no lost admission on the first pool; on the Render host
 `/robots.txt` and `/sitemap.xml` answered 200, where on 2026-11-10 both were
 404, and Freshdesk's three article URL shapes 301 to the article (PR 3, live
 since `932e8ea` below; the folder shape 301s to the home for an imported
-folder, and this check's `154000050001`, under which no folder was imported,
-answered 404). Its way back is `932e8ea` on each service: a code-only revert
+folder, the employee guide's four agents-only ones included, and this check's
+`154000050001`, under which no folder was imported, answered 404. The folder
+rule, which is not deployed until `dev` reaches `main`, sends an imported
+folder to its own page instead and answers the guide's four as it answers an
+unknown id, §5.1). Its way back is `932e8ea` on each service: a code-only revert
 through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
@@ -1604,8 +1607,16 @@ is code:
   by the Freshdesk id the importer kept. That is a 301, or a 302 while another
   translation stands in for a closed one. The internal employee guide
   (`154000297102`), whose folders are all agents-only, answers 404, as an
-  unknown id does: its own page is a 404 for every reader. Neither is deployed
-  until `dev` reaches `main`. Freshdesk's own notification emails still link
+  unknown id does: its own page is a 404 for every reader. A folder goes the
+  same way to its own page, `/<locale>/c/<category>/<folder>`, found by the
+  Freshdesk id the importer kept and read with the category it is in now, and
+  a page of its list (`/page/2`, followed by crawlers since the move) goes
+  with it. The guide's four folders answer 404 too, the same status, headers
+  and body as an unknown id, where each answered a 301 to the home that said
+  an internal folder was imported under the id. Render's log holds 37 folder
+  URLs answered with that 301 between the move and 16:50 UTC on 2026-11-12,
+  our own curl checks left out (`plans/freshdesk-disconnection.md`, PR 7). None
+  of the three is deployed until `dev` reaches `main`. Freshdesk's own notification emails still link
   `support.shipblu.com/support/tickets/<n>`, which no redirect here can answer
   with the ticket (the plan's to-dos).
 

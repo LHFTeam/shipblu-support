@@ -4,8 +4,8 @@ import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { resolveLegacyPath } from './legacy-resolve';
-import { getCategory } from './queries';
-import { ANONYMOUS } from './visibility';
+import { getCategory, getFolder } from './queries';
+import { ANONYMOUS, type KbViewer } from './visibility';
 
 /**
  * Where a Freshdesk URL goes, against real Postgres, with the `kb_redirects`
@@ -417,5 +417,358 @@ describe('resolveLegacyPath, for a category', () => {
 
     await db.update(kbArticles).set({ status: 'archived' }).where(eq(kbArticles.id, english));
     expect(await resolveLegacyPath(path)).toEqual(temporary('/ar/c/شركاء-شيب-بلو'));
+  });
+});
+
+/**
+ * Freshdesk's folder pages, `/support/solutions/folders/<id>`, built as
+ * production holds them (2026-11-12): eight public folders, each in Arabic and
+ * English under the two public categories, and the employee guide's four, Arabic
+ * only and agents-only. Three of the eight are here, two of which share their
+ * Arabic slug under different categories. Render's log showed the public ones
+ * followed since the domain moved, crawlers and browsers among them, a page of
+ * a folder's list (`/page/2`) included, each sent home with a 301.
+ */
+describe('resolveLegacyPath, for a folder', () => {
+  const FAQS = '154000746959';
+  const CUSTOMER_FAQS = '154000746963';
+  const MYBLU = '154000746964';
+  const GUIDE = ['154000745060', '154000745061', '154000745062', '154000745063'];
+
+  type Visibility = 'public' | 'logged_in' | 'agents_only';
+  type Article = {
+    locale?: string;
+    status?: 'draft' | 'published' | 'archived';
+    visibility?: Visibility;
+  };
+  type Category = { id: string; locale: string };
+
+  async function categoryRow(locale: string, slug: string): Promise<Category> {
+    const [row] = await db
+      .insert(kbCategories)
+      .values({ name: slug, slug, locale, sourceSystem: 'freshdesk' })
+      .returning({ id: kbCategories.id });
+    return { id: row!.id, locale };
+  }
+
+  /** One translation of a Freshdesk folder, with an article per entry in `articles`. */
+  async function folder(
+    category: Category,
+    externalId: string,
+    slug: string,
+    {
+      visibility = 'public',
+      articles = [{}],
+      sourceSystem = 'freshdesk',
+    }: {
+      visibility?: Visibility;
+      articles?: Article[];
+      sourceSystem?: 'freshdesk' | 'native';
+    } = {},
+  ) {
+    const [row] = await db
+      .insert(kbFolders)
+      .values({ categoryId: category.id, name: slug, slug, visibility, sourceSystem, externalId })
+      .returning({ id: kbFolders.id });
+    for (const [n, article] of articles.entries()) {
+      await db.insert(kbArticles).values({
+        folderId: row!.id,
+        title: `${slug} ${n}`,
+        slug: `${externalId.replace(':', '-')}-${n}`,
+        locale: article.locale ?? category.locale,
+        status: article.status ?? 'published',
+        visibility: article.visibility ?? 'public',
+      });
+    }
+    return row!.id;
+  }
+
+  /** Production's categories, three of its public folders and the guide's four. */
+  async function production() {
+    const partners = {
+      ar: await categoryRow('ar', 'شركاء-شيب-بلو'),
+      en: await categoryRow('en', 'shipblu-partners'),
+    };
+    const customers = {
+      ar: await categoryRow('ar', 'عملاء-شيب-بلو'),
+      en: await categoryRow('en', 'shipblu-customers'),
+    };
+    const guide = await categoryRow('ar', 'دليل-الموظف');
+
+    await folder(partners.ar, `${FAQS}:ar`, 'الأسئلة-الشائعة');
+    await folder(partners.en, `${FAQS}:en`, 'faqs');
+    await folder(customers.ar, `${CUSTOMER_FAQS}:ar`, 'الأسئلة-الشائعة');
+    await folder(customers.en, `${CUSTOMER_FAQS}:en`, 'faqs');
+    await folder(customers.ar, `${MYBLU}:ar`, 'دعم-تطبيق-ماي-بلو');
+    await folder(customers.en, `${MYBLU}:en`, 'myblu-support');
+    for (const [n, id] of GUIDE.entries()) {
+      await folder(guide, `${id}:ar`, `فريق-${n}`, { visibility: 'agents_only' });
+    }
+    return { partners, customers, guide };
+  }
+
+  /** The folder's page opens for this reader and lists something on it. */
+  async function expectOpens(answer: { to: string } | null, viewer: KbViewer = ANONYMOUS) {
+    const [, locale, , category, slug] = answer!.to.split('/');
+    const page = await getFolder(viewer, locale as 'ar' | 'en', category!, slug!);
+    expect(page?.articles.length, answer!.to).toBeGreaterThan(0);
+  }
+
+  async function translationOf(externalId: string) {
+    const [row] = await db
+      .select({ id: kbFolders.id })
+      .from(kbFolders)
+      .where(eq(kbFolders.externalId, externalId));
+    return row!.id;
+  }
+
+  it('sends each shape to the folder’s own page, in the language it names, permanently', async () => {
+    await production();
+
+    const answers: [string, string][] = [
+      [`/support/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      [`/ar/support/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      [`/en/support/solutions/folders/${FAQS}`, '/en/c/shipblu-partners/faqs'],
+      // The prefixes an article's URL takes, which the folder's has always
+      // been read in; the log shows the bare one followed.
+      [`/a/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      [`/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      // A language with a region reads as its language; one the help centre
+      // lacks as the default.
+      [`/en-US/support/solutions/folders/${FAQS}`, '/en/c/shipblu-partners/faqs'],
+      [`/fr/support/solutions/folders/${FAQS}`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      // The same Arabic slug under the other category: the category is read
+      // with the folder, so each id lands in its own.
+      [`/support/solutions/folders/${CUSTOMER_FAQS}`, '/ar/c/عملاء-شيب-بلو/الأسئلة-الشائعة'],
+      [`/en/support/solutions/folders/${CUSTOMER_FAQS}`, '/en/c/shipblu-customers/faqs'],
+      [`/en/support/solutions/folders/${MYBLU}`, '/en/c/shipblu-customers/myblu-support'],
+      [`/ar/support/solutions/folders/${MYBLU}`, '/ar/c/عملاء-شيب-بلو/دعم-تطبيق-ماي-بلو'],
+    ];
+    for (const [path, to] of answers) {
+      const answer = await resolveLegacyPath(path);
+      expect({ path, answer }).toEqual({ path, answer: permanent(to) });
+      await expectOpens(answer);
+    }
+  });
+
+  // The help centre's folder page lists every article at once, so whatever a
+  // page of Freshdesk's listed is on it (`freshdeskFolderId`). These are the
+  // shapes the log holds.
+  it('answers a page of a folder’s list as the folder', async () => {
+    await production();
+
+    const answers: [string, string][] = [
+      [`/en/support/solutions/folders/${FAQS}/page/2`, '/en/c/shipblu-partners/faqs'],
+      [`/en/support/solutions/folders/${FAQS}/page/1`, '/en/c/shipblu-partners/faqs'],
+      [`/ar/support/solutions/folders/${FAQS}/page/2`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+      [`/support/solutions/folders/${FAQS}/page/2/`, '/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'],
+    ];
+    for (const [path, to] of answers) {
+      expect({ path, answer: await resolveLegacyPath(path) }).toEqual({
+        path,
+        answer: permanent(to),
+      });
+    }
+    expect(await resolveLegacyPath(`/ar/support/solutions/folders/${GUIDE[0]}/page/2`)).toBeNull();
+  });
+
+  // A 301 to the stand-in would be kept by the browser and the search index
+  // once the closed translation opens again (`LegacyAnswer`).
+  const CLOSINGS: [string, (folder: string) => Promise<unknown>][] = [
+    [
+      'archiving every article in it',
+      (folder) =>
+        db.update(kbArticles).set({ status: 'archived' }).where(eq(kbArticles.folderId, folder)),
+    ],
+    [
+      'making it agents-only',
+      (folder) =>
+        db.update(kbFolders).set({ visibility: 'agents_only' }).where(eq(kbFolders.id, folder)),
+    ],
+    [
+      'leaving only articles in the other language in it',
+      (folder) =>
+        db.update(kbArticles).set({ locale: 'ar' }).where(eq(kbArticles.folderId, folder)),
+    ],
+  ];
+
+  for (const [how, close] of CLOSINGS) {
+    it(`answers a translation closed by ${how} with another, temporarily`, async () => {
+      await production();
+      await close(await translationOf(`${FAQS}:en`));
+
+      for (const path of [
+        `/en/support/solutions/folders/${FAQS}`,
+        `/en/support/solutions/folders/${FAQS}/page/2`,
+      ]) {
+        const asked = await resolveLegacyPath(path);
+        expect({ path, asked }).toEqual({
+          path,
+          asked: temporary('/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'),
+        });
+        await expectOpens(asked);
+      }
+      // The URLs naming the translation that answers keep their permanence.
+      for (const path of [
+        `/support/solutions/folders/${FAQS}`,
+        `/ar/support/solutions/folders/${FAQS}`,
+      ]) {
+        expect({ path, answer: await resolveLegacyPath(path) }).toEqual({
+          path,
+          answer: permanent('/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'),
+        });
+      }
+      // The other folders are untouched, the one sharing the Arabic slug too.
+      expect(await resolveLegacyPath(`/en/support/solutions/folders/${CUSTOMER_FAQS}`)).toEqual(
+        permanent('/en/c/shipblu-customers/faqs'),
+      );
+    });
+  }
+
+  it('takes whichever translation answers when the named and the default one do not', async () => {
+    const ID = '154000300400';
+    const english = await categoryRow('en', 'integrations');
+    await folder(english, `${ID}:en`, 'stores');
+
+    // No Arabic translation at all: English is the answer were every one open.
+    for (const path of [
+      `/support/solutions/folders/${ID}`,
+      `/ar/support/solutions/folders/${ID}`,
+    ]) {
+      expect({ path, answer: await resolveLegacyPath(path) }).toEqual({
+        path,
+        answer: permanent('/en/c/integrations/stores'),
+      });
+    }
+
+    // An Arabic one closed for now: English stands in for it.
+    const arabic = await categoryRow('ar', 'التكاملات');
+    await folder(arabic, `${ID}:ar`, 'المتاجر', { articles: [{ status: 'draft' }] });
+    expect(await resolveLegacyPath(`/support/solutions/folders/${ID}`)).toEqual(
+      temporary('/en/c/integrations/stores'),
+    );
+    expect(await resolveLegacyPath(`/en/support/solutions/folders/${ID}`)).toEqual(
+      permanent('/en/c/integrations/stores'),
+    );
+
+    // Opened, the Arabic one is the answer again, and for good.
+    await db.update(kbArticles).set({ status: 'published' });
+    expect(await resolveLegacyPath(`/support/solutions/folders/${ID}`)).toEqual(
+      permanent('/ar/c/التكاملات/المتاجر'),
+    );
+  });
+
+  // Their own pages are a 404 for every reader (`getFolder`), and an id nothing
+  // was imported under answers the same, so the response says nothing about
+  // whether an internal folder exists under the id. Until this change each
+  // answered a 301 to the home.
+  it('answers nothing for the employee guide’s folders, as for an id nothing was imported under', async () => {
+    await production();
+
+    expect(await getFolder(ANONYMOUS, 'ar', 'دليل-الموظف', 'فريق-0')).toBeNull();
+    for (const path of [
+      ...GUIDE.map((id) => `/support/solutions/folders/${id}`),
+      `/ar/support/solutions/folders/${GUIDE[1]}`,
+      `/en/support/solutions/folders/${GUIDE[2]}`,
+      `/solutions/folders/${GUIDE[3]}`,
+      '/support/solutions/folders/154000518595',
+    ]) {
+      expect({ path, answer: await resolveLegacyPath(path) }).toEqual({ path, answer: null });
+    }
+
+    // The folder's own visibility decides, not the id: one opened, and it answers.
+    await db
+      .update(kbFolders)
+      .set({ visibility: 'public' })
+      .where(eq(kbFolders.externalId, `${GUIDE[0]}:ar`));
+    const opened = await resolveLegacyPath(`/support/solutions/folders/${GUIDE[0]}`);
+    expect(opened).toEqual(permanent('/ar/c/دليل-الموظف/فريق-0'));
+    await expectOpens(opened);
+  });
+
+  it('answers nothing for a folder whose page would hold nothing for any reader', async () => {
+    const arabic = await categoryRow('ar', 'مخزن');
+    const french = await categoryRow('fr', 'entrepot');
+    // Only drafts; only agents-only articles; only articles in another
+    // language, which its page does not list; no articles at all; a category
+    // in a language the help centre lacks; and a native folder that happens to
+    // carry the id.
+    await folder(arabic, '154000300501:ar', 'مسودات', { articles: [{ status: 'draft' }] });
+    await folder(arabic, '154000300502:ar', 'داخلي', {
+      articles: [{ visibility: 'agents_only' }],
+    });
+    await folder(arabic, '154000300503:ar', 'انجليزي', { articles: [{ locale: 'en' }] });
+    await folder(arabic, '154000300504:ar', 'فارغ', { articles: [] });
+    await folder(french, '154000300505:fr', 'boutiques');
+    await folder(arabic, '154000300506:ar', 'أصلي', { sourceSystem: 'native' });
+
+    for (const id of [
+      '154000300501',
+      '154000300502',
+      '154000300503',
+      '154000300504',
+      '154000300505',
+      '154000300506',
+    ]) {
+      const path = `/support/solutions/folders/${id}`;
+      expect({ path, answer: await resolveLegacyPath(path) }).toEqual({ path, answer: null });
+    }
+
+    // `getFolder` opens the empty one, saying there is nothing in it: no page a
+    // reader should be sent to for good, as a category with nothing to list is
+    // a 404 there.
+    const empty = await getFolder(ANONYMOUS, 'ar', 'مخزن', 'فارغ');
+    expect(empty?.articles).toEqual([]);
+    expect((await getFolder(ANONYMOUS, 'ar', 'مخزن', 'انجليزي'))?.articles).toEqual([]);
+  });
+
+  // `logged_in` passes, as it does for an article and a category
+  // (`someReaderMayOpen`): the page opens for the signed-in customers it names.
+  it('answers a folder only signed-in customers can open', async () => {
+    const arabic = await categoryRow('ar', 'للعملاء');
+    await folder(arabic, '154000300600:ar', 'الحساب', { visibility: 'logged_in' });
+
+    const answer = await resolveLegacyPath('/support/solutions/folders/154000300600');
+    expect(answer).toEqual(permanent('/ar/c/للعملاء/الحساب'));
+    expect(await getFolder(ANONYMOUS, 'ar', 'للعملاء', 'الحساب')).toBeNull();
+    await expectOpens(answer, {
+      kind: 'customer',
+      contactId: '00000000-0000-0000-0000-000000000001',
+      companyId: null,
+    });
+  });
+
+  // The folder is read with the category it is in now, so a folder moved since
+  // the import is not sent to the category it left.
+  it('answers a folder moved to another category at the page it has there', async () => {
+    const { partners } = await production();
+    await db
+      .update(kbFolders)
+      .set({ categoryId: partners.en.id })
+      .where(eq(kbFolders.externalId, `${MYBLU}:en`));
+
+    const answer = await resolveLegacyPath(`/en/support/solutions/folders/${MYBLU}`);
+    expect(answer).toEqual(permanent('/en/c/shipblu-partners/myblu-support'));
+    await expectOpens(answer);
+  });
+
+  it('reads no folder out of an article or a category URL with the same id', async () => {
+    await production();
+    expect(await resolveLegacyPath(`/support/solutions/articles/${FAQS}`)).toBeNull();
+    expect(await resolveLegacyPath(`/support/solutions/${FAQS}`)).toBeNull();
+  });
+
+  // A row an admin wrote for the URL answers first, and when the article it
+  // names is closed with no `to_path`, the folder stands in for it.
+  it('follows a kb_redirects row for the URL, and stands the folder in for a closed one', async () => {
+    await production();
+    const { english } = await englishFirst();
+    const path = `/support/solutions/folders/${FAQS}`;
+    await db.insert(kbRedirects).values({ fromPath: path, articleId: english });
+
+    expect(await resolveLegacyPath(path)).toEqual(permanent('/en/a/shopify'));
+
+    await db.update(kbArticles).set({ status: 'archived' }).where(eq(kbArticles.id, english));
+    expect(await resolveLegacyPath(path)).toEqual(temporary('/ar/c/شركاء-شيب-بلو/الأسئلة-الشائعة'));
   });
 });
