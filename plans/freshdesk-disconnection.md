@@ -69,7 +69,7 @@ account to close.
   sent its own `/` to `/support/home` and then to `/ar/support/home`, so those
   are the URLs bookmarks hold, and `/ar/support/home` already answers the help
   centre's 404. A redirect to the locale's home page would keep the people who
-  arrive that way.
+  arrive that way. _Done in PR 7 below (#513), not yet in production._
 
 Measured read-only on 2026-11-11 and 2026-11-12, the same way as on
 2026-11-07: Render's deploys and logs, the production database, every public
@@ -855,7 +855,9 @@ page from a Freshdesk notification email, opened on an iPhone.
 the help-centre host, the locale rewrite and the sign-in check, on every host.
 `lib/kb/freshdesk-portal.ts` decides where each goes and carries the reasons.
 None needs a lookup, so none goes through `/help/legacy`. The language is the
-path's own when the help centre has it, and Arabic otherwise:
+path's own, then Freshdesk's `url_locale` parameter, then Arabic. A first
+segment of two letters that is not one of our languages (`/kb/support`, which is
+the console's) is not a Freshdesk path of ours and is left alone:
 
 | Freshdesk                                            | Here                        |
 | ---------------------------------------------------- | --------------------------- |
@@ -891,12 +893,18 @@ which production does not yet, and the help centre's 404 from then on.
   an account. Once a public form exists, the ticket form's rule becomes
   `/forms`. Once the portal opens, the sign-in's and the tickets' become the
   portal's.
-- `proxy.test.ts` checks every shape on the help-centre host and on the Render
-  host with `KB_PUBLIC_HOST` set and unset. It also checks that the answer is a
-  302 for any method, that a session cookie changes nothing, that the search
-  carries its term and nothing else, that articles and folders still reach the
-  legacy route, and that the leftovers answer as they did. Seven of its cases fail
-  against `proxy.ts` as it was.
+- `proxy.test.ts` checks every shape on both hosts, with `KB_PUBLIC_HOST` set
+  and unset. It also checks:
+  - that the answer is a 302 for any method;
+  - that a session cookie changes nothing;
+  - that `url_locale` names the language where the path does not;
+  - that the search carries its term, whole, and nothing else;
+  - that articles and folders still reach the legacy route;
+  - that the leftovers answer as they did, and so does a two-letter prefix
+    that is not one of our languages.
+
+  Eight of its cases fail against `proxy.ts` as it was.
+
 - A production build served locally answered each shape with a 302 and a
   relative `Location` on both hosts, with the variable set and unset:
   `/ar#contact` with its fragment, `/ar/search?q=` with the term encoded.

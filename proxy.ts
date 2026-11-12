@@ -207,11 +207,7 @@ export default function proxy(request: NextRequest) {
     // than a clone of `nextUrl`, because a clone remembers that the path it was
     // asked for ended in `/` and puts the slash back on whatever path it is
     // given.
-    const target = new URL(
-      `${portal.pathname}${portal.search}${portal.hash}`,
-      request.nextUrl.origin,
-    );
-    return NextResponse.redirect(target, portal.status);
+    return NextResponse.redirect(new URL(portal, request.nextUrl.origin), 302);
   }
 
   // --- Help centre hostname ------------------------------------------------

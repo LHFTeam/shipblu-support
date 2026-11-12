@@ -322,6 +322,8 @@ describe("Freshdesk's portal pages", () => {
   const RENDER_HOST = 'shipblu-support.onrender.com';
   const HOSTS = [
     ['the help-centre host', KB_HOST, { KB_PUBLIC_HOST: KB_HOST }],
+    // Production's setup today: the domain moved, the variable not yet set.
+    ['the help-centre host, KB_PUBLIC_HOST unset', KB_HOST, {}],
     ['the Render host, KB_PUBLIC_HOST set', RENDER_HOST, { KB_PUBLIC_HOST: KB_HOST }],
     ['the Render host, KB_PUBLIC_HOST unset', RENDER_HOST, {}],
   ] as const;
@@ -351,10 +353,15 @@ describe("Freshdesk's portal pages", () => {
     ['/ar/support/login', '/ar#contact'],
     ['/ar/support/signup', '/ar#contact'],
     ['/en/support/signup', '/en#contact'],
-    // A language with a region reads as its language; one the help centre lacks
-    // reads as Arabic, as no language at all does.
+    // A language with a region reads as its language, in any case.
     ['/en-US/support/home', '/en'],
-    ['/fr/support/home', '/ar'],
+    ['/EN/support/home', '/en'],
+    ['/Ar-eg/support/login', '/ar#contact'],
+    // Freshdesk's own language parameter, where the path names none.
+    ['/support/home?url_locale=en', '/en'],
+    ['/support/tickets/new?url_locale=en-US', '/en#contact'],
+    ['/ar/support/home?url_locale=en', '/ar'],
+    ['/support/home?url_locale=fr', '/ar'],
     ['/support/home/', '/ar'],
   ];
 
@@ -415,15 +422,14 @@ describe("Freshdesk's portal pages", () => {
     expect(landing(visit(`https://${KB_HOST}/support/search`))?.to).toBe('/ar/search');
     expect(landing(visit(`https://${KB_HOST}/support/search?term=%20%20`))?.to).toBe('/ar/search');
 
-    // Capped as a prefilled subject is, so a pasted page cannot become a URL
-    // longer than the help centre's search will read.
-    const long = visit(`https://${KB_HOST}/support/search?term=${'x'.repeat(500)}`);
-    expect(new URL(long.headers.get('location')!).searchParams.get('q')).toBe('x'.repeat(200));
+    // Whole, as our search takes it: no cut can split an emoji in two.
+    const emoji = visit(`https://${KB_HOST}/support/search?term=${encodeURIComponent('cod 📦')}`);
+    expect(new URL(emoji.headers.get('location')!).searchParams.get('q')).toBe('cod 📦');
   });
 
   it('drops the rest of the query, which nothing here reads', () => {
     for (const path of [
-      '/support/home?utm_source=whatsapp&url_locale=en',
+      '/support/home?utm_source=whatsapp',
       '/support/tickets/new?helpdesk_ticket%5Bsubject%5D=x',
     ]) {
       expect(landing(visit(`https://${RENDER_HOST}${path}`))?.to).toMatch(/^\/ar(#contact)?$/);
@@ -497,5 +503,23 @@ describe("Freshdesk's portal pages", () => {
   it('reads `support` only as a whole segment', () => {
     expect(visit(`https://${RENDER_HOST}/supporting`).status).toBe(307);
     expect(rewrittenTo(visit(`https://${RENDER_HOST}/ar/supporting`))).toBe('/help/ar/supporting');
+  });
+
+  // Two letters before `/support` that are not one of our languages are not a
+  // Freshdesk path of ours. `/kb/support` is the console's `/kb/[id]`, and this
+  // runs ahead of the sign-in check on every host, so a signed-in agent there
+  // must reach the console, not the help centre.
+  it('leaves a path whose first segment is not one of our languages alone', () => {
+    for (const path of ['/kb/support', '/kb/support/home', '/fr/support/home']) {
+      expect({ path, status: visit(`https://${RENDER_HOST}${path}`).status }).toEqual({
+        path,
+        status: 307,
+      });
+      const signedIn = visit(`https://${RENDER_HOST}${path}`, `${SESSION_COOKIE}=x`);
+      expect({ path, location: signedIn.headers.get('location') }).toEqual({
+        path,
+        location: null,
+      });
+    }
   });
 });
