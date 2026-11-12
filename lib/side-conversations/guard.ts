@@ -1,3 +1,5 @@
+import { isEmailAddress, normaliseEmail } from '@/lib/auth/normalise';
+
 /**
  * Who a side conversation may be addressed to.
  *
@@ -26,15 +28,12 @@
  */
 
 /**
- * Deliberately permissive. This is not an address validator — the provider is —
- * it exists to reject "Downtown Hub" and "hub-downtown" before they become a
- * failed job, and a stricter pattern would refuse legitimate addresses for no
- * gain.
+ * `normaliseEmail`, under the name this feature's callers already use: one
+ * normalisation for the address a side conversation is checked as, stored as
+ * and compared as, so the composer cannot check one string and send another.
  */
-const ADDRESS = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
-
 export function normaliseAddress(value: string): string {
-  return value.trim().toLowerCase();
+  return normaliseEmail(value);
 }
 
 /** `support+s4.abc@shipblu.com` → `support@shipblu.com`. */
@@ -56,7 +55,14 @@ export function refuseRecipient(raw: string, context: RecipientCheck): string | 
   const address = normaliseAddress(raw);
 
   if (!address) return 'Choose a recipient, or type an email address';
-  if (!ADDRESS.test(address)) return `"${raw.trim()}" is not an email address`;
+  // `isEmailAddress`, the app's one definition, asked of the address already
+  // normalised above. It is written from the provider's own published rule, so
+  // it refuses what Postmark would and nothing it sends to. This used to be a
+  // regex of its own, kept loose so a business address carrying `&` or `#` was
+  // not refused, which also let two dots in a row through to fail as a job
+  // (§6.117). It still turns away "Downtown Hub" and "hub-downtown", which is
+  // what it is here for.
+  if (!isEmailAddress(address)) return `"${raw.trim()}" is not an email address`;
 
   // Compared with the plus-suffix removed, so support+s4.sig@ is caught as
   // support@ — the address our own outbound mail actually advertises.

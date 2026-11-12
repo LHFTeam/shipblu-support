@@ -175,8 +175,13 @@ const schema = z.object({
    * services that never receive mail do not need it.
    */
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
-  /** Envelope sender, e.g. support@shipblu.com */
-  EMAIL_FROM_ADDRESS: z.email().optional(),
+  /**
+   * Envelope sender, e.g. support@shipblu.com. A plain string here, never a
+   * format rule: a value that failed one would stop every service at its first
+   * `env()` (§2). `senderAddress()` in `lib/email/sender.ts` asks every sender
+   * the question every recipient is asked, where the mail is sent (§6.117).
+   */
+  EMAIL_FROM_ADDRESS: z.string().optional(),
   EMAIL_FROM_NAME: z.string().default('ShipBlu Support'),
   /**
    * Domain used to build plus-addressed reply tokens

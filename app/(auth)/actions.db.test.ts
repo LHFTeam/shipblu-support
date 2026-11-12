@@ -26,7 +26,7 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-const { acceptInvite } = await import('./actions');
+const { acceptInvite, bootstrapAdmin } = await import('./actions');
 
 withCleanDatabase();
 
@@ -136,5 +136,22 @@ describe('acceptInvite', () => {
       .where(eq(agents.id, former!.id));
     expect(after).toEqual({ isActive: true, role: 'supervisor' });
     expect(sessions).toEqual([former!.id]);
+  });
+});
+
+describe('bootstrapAdmin', () => {
+  // `needsBootstrap` remembers an agent once it has seen one, for the life of
+  // the module; nothing above asks it, and each test starts from no agents.
+  it('refuses a first admin whose address the send path refuses, storing no agent', async () => {
+    const data = new FormData();
+    data.set('name', 'First Admin');
+    data.set('email', 'ops..team@shipblu.test');
+    data.set('password', PASSWORD);
+
+    // The address the survey test and low-rating alerts go to, through a job
+    // that refuses this spelling (§6.117).
+    expect(await bootstrapAdmin(INITIAL, data)).toEqual({ error: 'Enter a valid email address' });
+    expect(await db.$count(agents)).toBe(0);
+    expect(sessions).toEqual([]);
   });
 });

@@ -3187,14 +3187,50 @@ on node type (User)` with no subcode, which that predicate declines by design,
   `comment_hidden` / `comment_unhidden` / `comment_deleted` event.
   `plans/instagram-comment-management.md` has the whole order of operations.
 
-- **The portal's verification and reset emails through Postmark.** The whole
-  flow has been driven end to end against a local Postgres with
-  `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
-  exercised — but nothing has yet been delivered by a real provider to a real
-  inbox. Watch two things in particular: that the link survives corporate link
-  scanners (verification tolerates a replayed token for exactly this reason, a
-  reset deliberately does not), and that `Auto-Submitted: auto-generated` keeps
-  autoresponders from opening a ticket per verification email.
+- **The portal's verification and reset emails through Postmark.** _First
+  live on 2026-11-12._ Five customers registered that day, each answered with
+  the Arabic verification email. Postmark accepted four — queued at 08:40,
+  10:22, 13:08 and 16:23 UTC, each sent within half a second — and one of
+  those accounts was verified and has signed in by 16:36 UTC. The fifth,
+  queued at 15:51, went to `dead` on its first attempt with
+  `PermanentJobError: send_notification_email: invalid payload` on `to`:
+  registration had accepted a Gmail address with two dots in a row before the
+  `@`, which the job's schema refused, so the customer was told to check an
+  inbox nothing was sent to (§6.117). Registration, the job, the other portal
+  forms and the side conversations now ask one definition of an address,
+  `isEmailAddress` / `looksLikeEmail` in `lib/auth/normalise.ts`, written from
+  Postmark's published rule; a form refuses such an address with a sentence
+  naming the usual mistakes.
+
+  **The account that registration left, and what it needs.** Identity
+  `00759db7-4157-446a-b74b-65297b34db26` (contact
+  `09ad6e78-d870-496b-b3f1-a6f062ac498a`, made by that registration, no
+  tickets): unverified, a password set, one unused `verify_email` token that
+  expires at 15:51 UTC on 2026-11-13, and the dead job
+  `21d823cf-efd7-4187-9116-64eb1ce7df53`. Nothing needs writing to production,
+  and nothing was written. No link can ever reach that spelling — Postmark
+  refuses it and Gmail never issues one — so retrying the job or minting a
+  new token would only make another dead row, and the identity can never be
+  verified or sign in. The token is deleted by `cleanup` once it expires; the
+  dead row stays, its link expired with the token. The way forward is the
+  customer's: registering again with the address spelt the way Gmail issued
+  it, which works today and needed no deploy — a correct spelling passed both
+  checks all along. Once this release is live, trying the doubled-dot
+  spelling again on the registration, sign-in or forgotten-password form
+  answers "Enter a valid email address — check for … two dots in a row…"
+  rather than "check your inbox", which logs nothing; a sign-in from the
+  console (which has no format check) mints nothing for it and logs
+  `[portal_accounts] not issuing verify_email: … identity=00759db7-…`. If support wants to reach them first, it is a person's
+  call and a person's email: Gmail ignores dots in the local part, so any
+  single-dot spelling of the same letters is the mailbox they meant. If they
+  register again under that spelling it is a separate contact; the old one
+  holds nothing to merge.
+
+  Still to watch: that the link survives corporate link scanners
+  (verification tolerates a replayed token for exactly this reason, a reset
+  deliberately does not), and that `Auto-Submitted: auto-generated` keeps
+  autoresponders from opening a ticket per verification email. No reset email
+  has been sent yet.
 
   **Customers began registering on 2026-11-12**, the day after
   `support.shipblu.com` moved here: four identities with a password and four
@@ -8717,6 +8753,51 @@ found"}` and not Next's page. The same route called by its own URL
       GitHub's web editor is the one way it has happened — is merged back into
       `dev` the same day, before `dev` moves on. `AGENTS.md` says so now, under
       Git.
+
+117.  **Two checks of what an email address is disagreed, and a customer's
+      verification link died between them.** _2026-11-12._ The help centre's
+      registration asked `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` of the address,
+      and the `send_notification_email` job it queued parsed `to` with
+      `z.email()`. A Gmail address with two dots in a row before the `@`
+      passed the first and failed the second: registration made a contact and
+      an identity, stored the password, minted a `verify_email` token, queued
+      the email and answered "check your inbox", and the job went to `dead` on
+      its first attempt as an invalid payload, a zod `invalid_format` on `to`
+      (`PermanentJobError` from `parseJobPayload`). Nobody
+      reads a dead job, so the only sign was a customer who never got a link.
+      The other forms asked a third check (`looksLikeEmail`, as loose), the
+      side conversations and their recipient directory a fourth, and the
+      first-admin setup none at all.
+
+      Neither side was simply right. Registration was too loose: Postmark
+      documents that it refuses a leading, trailing or doubled dot in the local
+      part, citing RFC 5322, and Gmail's username rules forbid all three. But
+      `z.email()` was too strict the other way: it is Gmail's username rules,
+      so it refused `&`, `#`, `/` and the rest of RFC 5322's set, which a
+      business address can carry and Postmark sends to — exactly what the side
+      conversations' check had kept itself loose to avoid. So the one
+      definition, `isEmailAddress` in `lib/auth/normalise.ts` (and
+      `looksLikeEmail`, which normalises first), is Postmark's published rule —
+      its local-part characters, no dot at either end or two in a row, letter,
+      digit and hyphen labels — plus what DNS can route and RFC 5321's
+      lengths. Every form that stores an address or sends to one and the
+      job's schema ask it, and nothing stored in production failed it but the
+      one account above (§5.2 says what that account needs, which is nothing
+      written). `normaliseEmail` drops the bidi and zero-width marks an address
+      copied out of an RTL chat carries, and writes a domain in another script
+      in its `xn--` form, so the address a form checks is the one Postmark can
+      send to. It stays a plain pattern rather than a zod schema because the
+      widget's iframe imports it. `issueToken` mints nothing for an address it
+      refuses, since a stored one can still reach it on a resend, and logs the
+      identity. `EMAIL_FROM_ADDRESS` is asked the same question where mail is
+      sent from it (`senderAddress`), and `env()` no longer asks it anything:
+      it was `z.email()` there, a format rule that would have stopped every
+      service at its first `env()` over one variable (§2).
+
+      The lesson is the general one this file keeps relearning: two
+      definitions of one thing drift, and the drift surfaces where nobody
+      looks. The `email-check` repo rule now refuses a `z.email()` or an
+      address-shaped regex (`[^\s@`) anywhere but the definition.
 
 ### Tooling notes for this environment
 
