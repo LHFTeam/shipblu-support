@@ -62,16 +62,38 @@ export function signedClaim(identity: WidgetIdentity): string {
 }
 
 /**
+ * Whether a signature over this identity could vouch for anybody.
+ *
+ * The signed claim names an account id and an email and nothing else, so an
+ * identity carrying neither — a phone alone, an account name alone — signs the
+ * constant `"|"`. One HMAC of that, which any integrator's backend mints for its
+ * first phone-only user, is then a valid signature for every phone number there
+ * is, and `identityKey` falls back to the phone, so the contact would be marked
+ * verified under a key the signature never mentioned. Such a signature proves
+ * only that somebody once held the secret, not who this visitor is.
+ *
+ * Unverified rather than refused: the signature is not *wrong*, it says nothing,
+ * and a deployed integration that signs every user it has must not start
+ * failing with a 401 for the ones without an email. A phone-keyed integration
+ * that needs the phone vouched for gets a second accepted claim form, added
+ * beside this one, rather than a change to what this one covers.
+ */
+export function claimNamesSomebody(identity: WidgetIdentity): boolean {
+  return Boolean(identity.accountId || identity.email);
+}
+
+/**
  * Whether the platform, rather than the browser, is asserting this identity.
  *
  * False when no secret is configured: an integration that has not been given
  * one cannot be producing real signatures, and treating an unverifiable
- * signature as valid would make the whole mechanism decorative.
+ * signature as valid would make the whole mechanism decorative. False, too, for
+ * an identity whose claim names nobody (`claimNamesSomebody`).
  */
 export function verifyIdentity(identity: WidgetIdentity, signature: unknown): boolean {
   const secret = env().WIDGET_IDENTITY_SECRET;
   const supplied = typeof signature === 'string' ? signature.trim().toLowerCase() : '';
-  if (!secret || !supplied) return false;
+  if (!secret || !supplied || !claimNamesSomebody(identity)) return false;
 
   const expected = createHmac('sha256', secret).update(signedClaim(identity)).digest('hex');
   return safeEqual(expected, supplied);
@@ -89,4 +111,21 @@ export function verifyIdentity(identity: WidgetIdentity, signature: unknown): bo
  */
 export function identitySigningEnabled(): boolean {
   return Boolean(env().WIDGET_IDENTITY_SECRET);
+}
+
+export type SignatureVerdict = 'verified' | 'unverified' | 'refused';
+
+/**
+ * What a host page's signature makes of the identity it came with — the one
+ * decision `/api/widget/identify` acts on, kept here so it is tested.
+ *
+ * `refused` (a 401) only for a signature that claims to vouch for somebody and
+ * does not, while a secret is configured: see `identitySigningEnabled`. A
+ * signature over a claim that names nobody is `unverified` whether or not it
+ * matches, because it could not have proved anything either way.
+ */
+export function judgeSignature(identity: WidgetIdentity, signature: string): SignatureVerdict {
+  if (!signature || !claimNamesSomebody(identity)) return 'unverified';
+  if (verifyIdentity(identity, signature)) return 'verified';
+  return identitySigningEnabled() ? 'refused' : 'unverified';
 }

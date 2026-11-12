@@ -187,11 +187,23 @@ side of the `|`. The signature covers the identifying half only, deliberately:
 name, phone and `meta` are decoration, and covering them would mean a merchant
 renaming themselves in the dashboard silently stops being identified at all.
 
+**A signature proves only an account id or an email.** An identity with neither
+— a phone alone, say — signs the constant `"|"`, and one HMAC of that would be a
+valid signature for every phone number there is. So such an identity is always
+_unverified_, signed or not: its name and phone still reach the agent, marked as
+the dashboard's word, and no signature over it is refused with a 401 either,
+right or wrong, so an integration that signs every user keeps working for the
+ones without an email. To have a user verified, send their account id or email.
+A phone-keyed integration that needs the phone itself vouched for gets a second
+accepted claim form, added beside this one; the `<accountId>|<email>` form does
+not change.
+
 The secret is `WIDGET_IDENTITY_SECRET`, per environment and never shared with
 staging — a signature minted against one deployment would otherwise be
 replayable at the other. While it is unset, signatures are ignored and every
 identity is unverified; once it is set, a signature that does not verify is a
-401 rather than a quiet downgrade.
+401 rather than a quiet downgrade — except over an identity naming neither an
+account id nor an email, which is unverified whatever its signature (above).
 
 ## What the visitor sees before they type
 
