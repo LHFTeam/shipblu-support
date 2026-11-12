@@ -85,9 +85,9 @@ describe('requestAccount', () => {
 describe('requestPasswordReset', () => {
   /**
    * The row the 2026-11-12 registration left: an unverified identity holding a
-   * password, stored before registration asked the job's question. Every
-   * resend — a sign-in, on either form, and a forgotten password — reaches
-   * `issueToken` with its address.
+   * password, stored before registration asked the job's question. The help
+   * centre's forms now refuse its address before they call this; the console's
+   * sign-in still reaches `issueToken` with it, through `requestPasswordReset`.
    */
   async function storedBeforeTheFix(address: string, isVerified = false): Promise<string> {
     const [contact] = await db

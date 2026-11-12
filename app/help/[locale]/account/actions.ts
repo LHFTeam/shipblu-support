@@ -34,11 +34,12 @@ export async function portalSignIn(
   const password = String(formData.get('password') ?? '');
 
   if (!email || !password) return { error: 'errorMissingFields' };
-  // No account can stand on an address the send path refuses — it could never
-  // have been verified — so saying it is malformed gives nothing away, and it
-  // tells the one customer whose registration was let through with one what
-  // to change, where `errorUnverified` sent them to an inbox nothing reaches
-  // (§6.117).
+  // No customer's account can stand on an address the send path refuses — it
+  // could never have been verified — and every agent's address passed it when
+  // the checks were made one, as every form that makes an agent now asks it.
+  // So saying it is malformed gives nothing away, and it tells the one
+  // customer whose registration was let through with one what to change,
+  // where `errorUnverified` sent them to an inbox nothing reaches (§6.117).
   if (!looksLikeEmail(email)) return { error: 'errorInvalidEmail' };
 
   const outcome = await signInWithPassword(email, password, locale);

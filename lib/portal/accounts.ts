@@ -121,8 +121,9 @@ export async function requestPasswordReset(rawEmail: string, locale: Locale): Pr
   const email = normaliseEmail(rawEmail);
   // An address the send path refuses is left to `issueToken`, past the lookup
   // rather than before it, so a stored one is refused with a warning naming
-  // its identity: a customer still trying an account no link can reach shows
-  // up in the logs instead of nowhere.
+  // its identity. The help centre's forms refuse such an address before they
+  // get here; what still arrives is the console's sign-in, which has no format
+  // check, and any caller added later.
   if (!email) return;
 
   const rows = await db
@@ -261,13 +262,14 @@ export async function recordSignIn(identityId: string): Promise<void> {
  *
  * Nothing is issued for an address `send_notification_email` would refuse.
  * Registration refuses one before it stores anything, but an identity stored
- * before the two checks were one can still hold such an address — the one of
- * 2026-11-12 does (§6.117) — and every resend reaches it here: a sign-in to an
- * unverified account, on the help centre or the console, and a forgotten
- * password. Queued, each would mint a link nobody can receive and a job that
- * dies on its first attempt, with its link in the dead row's payload for good.
- * The warning names the identity rather than the address: the row is what
- * somebody looks up, and the address is a customer's.
+ * before the checks were one can still hold such an address — the one of
+ * 2026-11-12 does (§6.117). The help centre's sign-in and forgotten-password
+ * forms refuse it before they reach this; the console's sign-in to an
+ * unverified account does not, and nor might the next caller. Queued, each
+ * would mint a link nobody can receive and a job that dies on its first
+ * attempt, with its link in the dead row's payload for good. The warning
+ * names the identity rather than the address: the row is what somebody looks
+ * up, and the address is a customer's.
  */
 async function issueToken(
   identityId: string,

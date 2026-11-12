@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   isEmailAddress,
   looksLikeEmail,
@@ -62,11 +63,12 @@ describe('looksLikeEmail', () => {
     expect(looksLikeEmail('cairo hub@shipblu.com')).toBe(false);
   });
 
-  // The checks this one replaced, kept only to show that every address in
-  // the first list is one where a form and the send path used to disagree:
-  // the help centre's registration asked the first regex, the side
-  // conversations the second, every other form the third, and
-  // `send_notification_email` asked `z.email()`, which refused them all
+  // The checks this one replaced, kept to show which forms let each address
+  // through: the help centre's registration asked the first regex, the side
+  // conversations the second, every other form the third. `z.email()`, which
+  // the job asked, refused every address in the first list but the last three
+  // — a label ending in a hyphen and the two lengths — so those are where the
+  // new rule is stricter than both old sides, not where they disagreed
   // (§6.117).
   const RETIRED_REGISTRATION_CHECK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const RETIRED_SIDE_CONVERSATION_CHECK = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
@@ -85,12 +87,13 @@ describe('looksLikeEmail', () => {
     'amira@gmail.c',
     'amira@mail_box.com',
     'amira@-gmail.com',
-    'amira@gmail-.com',
     'amira@[192.0.2.1]',
     // Arabic letters typed on an Arabic keyboard, either side of the @.
     'أميرة@gmail.com',
     'amira@جيميل.com',
-    // RFC 5321's limits: 64 before the @, 254 in all.
+    // `z.email()` took these three as well: a label ending in a hyphen, and
+    // RFC 5321's limits, 64 before the @ and 254 in all.
+    'amira@gmail-.com',
     `${'a'.repeat(65)}@gmail.com`,
     `amira@${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`,
   ];
@@ -98,6 +101,14 @@ describe('looksLikeEmail', () => {
   it.each(LET_THROUGH)('refuses %s, which registration accepted', (address) => {
     expect(RETIRED_REGISTRATION_CHECK.test(normaliseEmail(address))).toBe(true);
     expect(looksLikeEmail(address)).toBe(false);
+  });
+
+  it('is where registration and the job disagreed, but for the last three', () => {
+    // The job's old check, asked of the list: what it refused and registration
+    // accepted is the disagreement that killed a link.
+    const oldJob = (address: string) => z.email().safeParse(normaliseEmail(address)).success;
+    expect(LET_THROUGH.slice(0, -3).filter(oldJob)).toEqual([]);
+    expect(LET_THROUGH.slice(-3).every(oldJob)).toBe(true);
   });
 
   it('refuses the same addresses wherever else a form let them through', () => {

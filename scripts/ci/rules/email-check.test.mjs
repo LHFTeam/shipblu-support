@@ -58,9 +58,23 @@ describe('email-check', () => {
       'lib/queue/payloads.ts': "import { z } from 'zod';\n\nexport const to = z.email();\n",
       'lib/env.ts':
         "import { z } from 'zod';\n\nexport const from = z.string().email().optional();\n",
+      // A normalise-then-validate chain is the same schema.
+      'lib/forms/schema.ts': [
+        "import { z } from 'zod';",
+        'export const a = z.string().trim().email();',
+        'export const b = z.string().min(1).toLowerCase().email();',
+        'export const c = z.coerce.string().email();',
+        '',
+      ].join('\n'),
     });
 
-    expect(found).toEqual([at('lib/env.ts:3'), at('lib/queue/payloads.ts:3')]);
+    expect(found).toEqual([
+      at('lib/env.ts:3'),
+      at('lib/forms/schema.ts:2'),
+      at('lib/forms/schema.ts:3'),
+      at('lib/forms/schema.ts:4'),
+      at('lib/queue/payloads.ts:3'),
+    ]);
   });
 
   it('refuses an address-shaped regex, either way round', async () => {
@@ -69,6 +83,10 @@ describe('email-check', () => {
         "'use server';",
         'export const a = (e: string) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(e);',
         'export const b = (e: string) => /^[^@\\s,;]+@[^@\\s,;]+$/.test(e);',
+        // The retired side-conversation class, its members reordered.
+        'export const c = (e: string) => /^[^,;\\s@]+@[^,;\\s@]+$/.test(e);',
+        'export const d = (e: string) => /^\\S+@\\S+\\.\\S+$/.test(e);',
+        'export const f = (e: string) => /^[^@]+@[^@]+\\.[^@]+$/.test(e);',
         '',
       ].join('\n'),
     });
@@ -76,6 +94,9 @@ describe('email-check', () => {
     expect(found).toEqual([
       at('app/help/account/actions.ts:2'),
       at('app/help/account/actions.ts:3'),
+      at('app/help/account/actions.ts:4'),
+      at('app/help/account/actions.ts:5'),
+      at('app/help/account/actions.ts:6'),
     ]);
   });
 

@@ -3217,11 +3217,10 @@ on node type (User)` with no subcode, which that predicate declines by design,
   it, which works today and needed no deploy — a correct spelling passed both
   checks all along. Once this release is live, trying the doubled-dot
   spelling again on the registration, sign-in or forgotten-password form
-  answers "not a valid email address — check for two dots in a row…" rather
-  than "check your inbox", and a sign-in from the console (which has no
-  format check) mints nothing for it and logs
-  `[portal_accounts] not issuing verify_email: … identity=00759db7-…`, so a
-  retry is visible. If support wants to reach them first, it is a person's
+  answers "Enter a valid email address — check for … two dots in a row…"
+  rather than "check your inbox", which logs nothing; a sign-in from the
+  console (which has no format check) mints nothing for it and logs
+  `[portal_accounts] not issuing verify_email: … identity=00759db7-…`. If support wants to reach them first, it is a person's
   call and a person's email: Gmail ignores dots in the local part, so any
   single-dot spelling of the same letters is the mailbox they meant. If they
   register again under that spelling it is a separate contact; the old one
@@ -8766,8 +8765,9 @@ found"}` and not Next's page. The same route called by its own URL
       its first attempt as an invalid payload, a zod `invalid_format` on `to`
       (`PermanentJobError` from `parseJobPayload`). Nobody
       reads a dead job, so the only sign was a customer who never got a link.
-      The other forms asked a third check (`looksLikeEmail`, as loose), and
-      the side conversations and their recipient directory a fourth.
+      The other forms asked a third check (`looksLikeEmail`, as loose), the
+      side conversations and their recipient directory a fourth, and the
+      first-admin setup none at all.
 
       Neither side was simply right. Registration was too loose: Postmark
       documents that it refuses a leading, trailing or doubled dot in the local
@@ -8780,7 +8780,8 @@ found"}` and not Next's page. The same route called by its own URL
       `looksLikeEmail`, which normalises first), is Postmark's published rule —
       its local-part characters, no dot at either end or two in a row, letter,
       digit and hyphen labels — plus what DNS can route and RFC 5321's
-      lengths. Every form, the job's schema and `EMAIL_FROM_ADDRESS` ask it,
+      lengths. Every form that stores an address or sends to one, the job's
+      schema and `EMAIL_FROM_ADDRESS` ask it,
       and nothing stored in production failed it but the one account above
       (§5.2 says what that account needs, which is nothing written). It stays
       a plain pattern rather than a zod schema because the widget's iframe

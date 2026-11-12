@@ -18,17 +18,21 @@ import { fail, requireAtLeast, scan, scannableSource } from '../lib.mjs';
  *
  * So, outside the definition and outside tests (which hold the retired checks
  * to show where they disagreed):
- *   - no `z.email(`, nor zod's older `z.string().email(` spelling: a schema
- *     refines with `isEmailAddress`;
- *   - no regex holding a character class that excludes `@` and whitespace,
- *     `[^\s@` or `[^@\s`, which is the shape both retired checks were written
- *     in: a form asks `looksLikeEmail`.
- * A plus-address or local-part parser, `[^@]` or `[^+@]`, is a different
- * question and passes.
+ *   - no `z.email(`, nor zod's older spelling at the end of a string chain —
+ *     `z.string().email(`, `z.string().trim().email(`, `z.coerce.string()…`:
+ *     a schema refines with `isEmailAddress`;
+ *   - no address-shaped regex: a negated character class holding both `@`
+ *     and `\s`, in any order and beside anything else (`[^\s@]`,
+ *     `[^,;\s@]`), which is how every retired check was written, and the two
+ *     other usual spellings, `\S+@` and `[^@]+@[^@]`: a form asks
+ *     `looksLikeEmail`.
+ * A plus-address or local-part parser — `[^+@]+\+`, `\+[^@]*(?=@)` — is a
+ * different question and passes.
  *
  * What it cannot see: a pattern built from a string (`new RegExp(…)`), an
- * address check spelled another way (`[a-z0-9._%+-]+@…`), a validator from
- * another package, and `.email(` on a zod chain split across a variable.
+ * address check spelled another way (`[a-z0-9._%+-]+@…`, `.+@.+`), a
+ * validator from another package, and `.email(` on a zod chain split across a
+ * variable or holding a nested call.
  */
 export function checkOneEmailCheck() {
   const rule = 'email-check';
@@ -39,7 +43,7 @@ export function checkOneEmailCheck() {
 
   scan(
     sources,
-    /\bz\s*\.\s*email\s*\(|\bz\s*\.\s*string\(\s*\)\s*\.\s*email\s*\(/g,
+    /\bz\s*\.\s*email\s*\(|\bz\s*\.\s*(?:coerce\s*\.\s*)?string\(\s*\)(?:\s*\.\s*\w+\([^()]*\))*\s*\.\s*email\s*\(/g,
     (file, line) => {
       fail(
         rule,
@@ -51,7 +55,8 @@ export function checkOneEmailCheck() {
 
   // Once per line: one regex holds the class on both sides of its `@`.
   const reported = new Set();
-  scan(sources, /\[\^(?:\\s@|@\\s)/g, (file, line) => {
+  const addressShaped = /\[\^(?=[^\]\n]*@)(?=[^\]\n]*\\s)[^\]\n]*\]|\\S\+@|\[\^@\]\+@\[\^@\]/g;
+  scan(sources, addressShaped, (file, line) => {
     if (reported.has(`${file}:${line}`)) return;
     reported.add(`${file}:${line}`);
     fail(

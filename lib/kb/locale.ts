@@ -255,9 +255,10 @@ const STRINGS = {
     errorPasswordShort: 'Password must be at least 12 characters',
     errorPasswordLong: 'Password must be at most 200 characters',
     // Names the mistakes the send path refuses that a browser's own check lets
-    // through, so a customer who typed two dots knows what to look for (§6.117).
+    // through — `type="email"` takes `name@gmail` and two dots in a row — so a
+    // customer knows where to look (§6.117).
     errorInvalidEmail:
-      'Enter a valid email address — check for two dots in a row, a dot at the start or just before the @, or letters that are not Latin',
+      'Enter a valid email address — check for a missing ending such as .com, two dots in a row, or a dot at the start or just before the @',
     errorSubjectRequired: 'Give your request a subject',
     errorMessageRequired: 'Write your message',
     errorGeneric: 'Something went wrong. Try again.',
@@ -461,8 +462,9 @@ const STRINGS = {
       'البريد الإلكتروني لم يُؤكَّد بعد — رابط التأكيد الذي أرسلناه في بريد حضرتك الإلكتروني.',
     errorPasswordShort: 'يجب ألا تقل كلمة المرور عن ١٢ حرفًا',
     errorPasswordLong: 'يجب ألا تزيد كلمة المرور عن ٢٠٠ حرف',
+    // \u200E keeps `.com` reading left to right inside the Arabic sentence.
     errorInvalidEmail:
-      'البريد الإلكتروني غير صالح — قد يكون فيه نقطتان متتاليتان، أو نقطة في أوله أو قبل @ مباشرة، أو حروف غير لاتينية',
+      'البريد الإلكتروني غير صالح — قد تنقصه نهاية مثل \u200E.com، أو يكون فيه نقطتان متتاليتان، أو نقطة في أوله أو قبل @ مباشرة',
     errorSubjectRequired: 'موضوع الطلب مطلوب',
     errorMessageRequired: 'نص الرسالة مطلوب',
     errorGeneric: 'حدث خطأ ما. يمكن لحضرتك المحاولة مرة أخرى.',
