@@ -502,38 +502,40 @@ describe('send_notification_email', () => {
   });
 
   // Whatever a form accepts, normalises and queues, this job accepts, and
-  // whatever it refuses the form refused first: one answer, asked of the same
-  // string. A list of both kinds, the edges of each rule included.
+  // whatever it refuses the form refused first. Each address carries the answer
+  // both must give, so a change to the pattern itself fails here, not only a
+  // schema that stopped asking it.
   it.each([
-    'amira.hassan@gmail.com',
-    ' Amira.Hassan@Gmail.com ',
-    'amira+orders@shipblu.com',
-    "o'brien@example.co.uk",
-    'cairo_hub-2@mail.shipblu.com',
-    'amira@gmail.co',
-    'amira..hassan@gmail.com',
-    '.amira@gmail.com',
-    'amira.@gmail.com',
-    "amira'@gmail.com",
-    'amira@gmail.c',
-    'amira@gmail.c0m',
-    'amira@gmail..com',
-    'amira@gmail.com.',
-    'amira@mail_box.com',
-    'amira@-gmail.com',
-    'amira@[192.0.2.1]',
-    'amira!hassan@gmail.com',
-    'amira?@gmail.com',
-    'amira@gmail-.com',
-    'أميرة@gmail.com',
-    'amira@جيميل.com',
-    'amira@xn--mgbh0fb.xn--wgbh1c',
-    'amira@localhost',
-    'amira@',
-    '',
-  ])('a form and the job give one answer for %j', (typed) => {
-    const stored = normaliseEmail(typed);
-    expect(parses(stored)).toBe(looksLikeEmail(typed));
+    ['amira.hassan@gmail.com', true],
+    [' Amira.Hassan@Gmail.com ', true],
+    ['amira.hassan@gmail.com\u200F', true],
+    ['amira+orders@shipblu.com', true],
+    ["o'brien@example.co.uk", true],
+    ["amira'@gmail.com", true],
+    ['amira!hassan@gmail.com', true],
+    ['cairo_hub-2@mail.shipblu.com', true],
+    ['amira@gmail.co', true],
+    ['amira@xn--mgbh0fb.xn--wgbh1c', true],
+    ['amira@جيميل.com', true],
+    ['amira..hassan@gmail.com', false],
+    ['.amira@gmail.com', false],
+    ['amira.@gmail.com', false],
+    ['amira@gmail.c', false],
+    ['amira@gmail.c0m', false],
+    ['amira@gmail..com', false],
+    ['amira@gmail.com.', false],
+    ['amira@mail_box.com', false],
+    ['amira@-gmail.com', false],
+    ['amira@gmail-.com', false],
+    ['amira@[192.0.2.1]', false],
+    ['amira?@gmail.com', false],
+    ['أميرة@gmail.com', false],
+    ['amira@localhost', false],
+    ['amira@', false],
+    ['', false],
+  ] as const)('a form and the job both answer %j with %s', (typed, expected) => {
+    expect(looksLikeEmail(typed)).toBe(expected);
+    expect(parses(normaliseEmail(typed))).toBe(expected);
   });
 });
 

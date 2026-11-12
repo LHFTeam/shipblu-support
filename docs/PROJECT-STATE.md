@@ -8780,13 +8780,19 @@ found"}` and not Next's page. The same route called by its own URL
       `looksLikeEmail`, which normalises first), is Postmark's published rule —
       its local-part characters, no dot at either end or two in a row, letter,
       digit and hyphen labels — plus what DNS can route and RFC 5321's
-      lengths. Every form that stores an address or sends to one, the job's
-      schema and `EMAIL_FROM_ADDRESS` ask it,
-      and nothing stored in production failed it but the one account above
-      (§5.2 says what that account needs, which is nothing written). It stays
-      a plain pattern rather than a zod schema because the widget's iframe
-      imports it. `issueToken` mints nothing for an address it refuses, since
-      a stored one can still reach it on a resend, and logs the identity.
+      lengths. Every form that stores an address or sends to one and the
+      job's schema ask it, and nothing stored in production failed it but the
+      one account above (§5.2 says what that account needs, which is nothing
+      written). `normaliseEmail` drops the bidi and zero-width marks an address
+      copied out of an RTL chat carries, and writes a domain in another script
+      in its `xn--` form, so the address a form checks is the one Postmark can
+      send to. It stays a plain pattern rather than a zod schema because the
+      widget's iframe imports it. `issueToken` mints nothing for an address it
+      refuses, since a stored one can still reach it on a resend, and logs the
+      identity. `EMAIL_FROM_ADDRESS` is asked the same question where mail is
+      sent from it (`senderAddress`), and `env()` no longer asks it anything:
+      it was `z.email()` there, a format rule that would have stopped every
+      service at its first `env()` over one variable (§2).
 
       The lesson is the general one this file keeps relearning: two
       definitions of one thing drift, and the drift surfaces where nobody

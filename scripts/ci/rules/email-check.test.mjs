@@ -44,6 +44,14 @@ describe('email-check', () => {
       'app/inbox/new/actions.db.test.ts': 'z.email();\n',
       // Plus-addressing and reply tokens ask something else of an address.
       'lib/email/threading.ts': 'export const token = /^[^+@]+\\+([^@]+)@/;\n',
+      // So does finding or pulling an address out of a header or a body: only
+      // a pattern anchored at both ends answers "is this an address?".
+      'lib/email/extract.ts': [
+        'export const angled = /<([^<>\\s@]+@[^<>\\s]+)>/;',
+        'export const found = (body: string) => body.match(/\\S+@\\S+/g);',
+        'export const header = /^From: ([^\\s@]+@[^\\s]+)/m;',
+        '',
+      ].join('\n'),
       'lib/side-conversations/guard.ts':
         "export const bare = (a: string) => a.replace(/\\+[^@]*(?=@)/, '');\n",
       // Somebody else's `email` method.

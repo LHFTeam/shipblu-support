@@ -3,6 +3,7 @@ import { emailProvider } from '@/lib/email/providers';
 import { formatMessageId } from '@/lib/email/threading';
 import type { NotificationEmail } from '@/lib/email/notify';
 import type { OutboundEmail } from '@/lib/email/types';
+import { senderAddress } from '@/lib/email/sender';
 import { env, replyDomain } from '@/lib/env';
 import { logger } from '@/lib/log';
 
@@ -24,15 +25,15 @@ export async function sendTransactionalEmail(
   label: string,
 ): Promise<void> {
   const e = env();
-  if (!e.EMAIL_FROM_ADDRESS) throw new Error(`${label} requires EMAIL_FROM_ADDRESS`);
+  const from = senderAddress();
 
   const outbound: OutboundEmail = {
     to: [{ address: email.to }],
-    from: { address: e.EMAIL_FROM_ADDRESS, name: e.EMAIL_FROM_NAME },
+    from: { address: from, name: e.EMAIL_FROM_NAME },
     // Not a plus-addressed reply token: a reply to a sign-in link is a person
     // asking for help, and it should open a normal ticket on the support
     // mailbox rather than thread onto a conversation that does not exist.
-    replyTo: e.EMAIL_FROM_ADDRESS,
+    replyTo: from,
     subject: email.subject,
     textBody: email.textBody,
     htmlBody: email.htmlBody,

@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { internalRecipients } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
-import { looksLikeEmail } from '@/lib/auth/normalise';
+import { isEmailAddress, normaliseEmail } from '@/lib/auth/normalise';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { errorMessage } from '@/lib/errors';
@@ -37,9 +37,10 @@ export async function saveInternalRecipient(
   const id = uuidField(formData, 'id');
   if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
-  // Lowercased on write, because the unique index and every lookup compare the
-  // canonical form — the same discipline contact_identities needs.
-  const email = text(formData, 'email').toLowerCase();
+  // Normalised on write, because the unique index and every lookup compare the
+  // canonical form — `normaliseEmail`, the one contact_identities uses, so a
+  // directory entry and a typed address are the same string (§6.117).
+  const email = normaliseEmail(text(formData, 'email'));
   const kind = String(formData.get('kind') ?? 'hub');
   const description = text(formData, 'description') || null;
   const isActive = formData.get('isActive') === 'on';
@@ -48,7 +49,7 @@ export async function saveInternalRecipient(
   // The app's one definition, which the side conversation sent to this
   // recipient is checked with too (`refuseRecipient`): a directory entry the
   // composer would refuse is a dead end (§6.117).
-  if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
+  if (!isEmailAddress(email)) return { error: 'Enter a valid email address' };
   // No 'hub'. A hub is a `locations` row, which is a register somebody else's
   // screen owns; letting one be entered here would mean the Downtown hub's
   // address is maintained in two places with nothing keeping them in step.

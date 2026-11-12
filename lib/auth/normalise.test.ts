@@ -88,9 +88,9 @@ describe('looksLikeEmail', () => {
     'amira@mail_box.com',
     'amira@-gmail.com',
     'amira@[192.0.2.1]',
-    // Arabic letters typed on an Arabic keyboard, either side of the @.
+    // Arabic letters before the @: Postmark's class is ASCII, and nothing here
+    // sends SMTPUTF8. After it they are a domain, made ASCII (below).
     'أميرة@gmail.com',
-    'amira@جيميل.com',
     // `z.email()` took these three as well: a label ending in a hyphen, and
     // RFC 5321's limits, 64 before the @ and 254 in all.
     'amira@gmail-.com',
@@ -152,6 +152,39 @@ describe('looksLikeEmail', () => {
     'a!b$c%d*e=f^g`h{i|j}k~l@merchant.example',
   ])('accepts %s, which the job used to refuse and the provider takes', (address) => {
     expect(looksLikeEmail(address)).toBe(true);
+  });
+
+  it('drops the bidi and zero-width marks an address copied out of an RTL chat carries', () => {
+    // `trim()` keeps them: they are format characters, not whitespace.
+    expect(normaliseEmail('amira.hassan@gmail.com\u200F')).toBe('amira.hassan@gmail.com');
+    expect(normaliseEmail('\u200E Amira@Gmail.com')).toBe('amira@gmail.com');
+    expect(normaliseEmail('ami\u200Bra@gmail.com')).toBe('amira@gmail.com');
+    expect(looksLikeEmail('amira.hassan@gmail.com\u200F')).toBe(true);
+  });
+
+  it('writes a domain in another script in its ASCII form, which is what can be sent to', () => {
+    expect(normaliseEmail('Nour@مثال.مصر')).toBe('nour@xn--mgbh0fb.xn--wgbh1c');
+    expect(normaliseEmail('amira@münchen.de')).toBe('amira@xn--mnchen-3ya.de');
+    expect(normaliseEmail('amira@ｇｍａｉｌ.com')).toBe('amira@gmail.com');
+    expect(looksLikeEmail('nour@مثال.مصر')).toBe(true);
+    // The raw string is not what the job is handed; the normalised one is.
+    expect(isEmailAddress('nour@مثال.مصر')).toBe(false);
+    expect(isEmailAddress(normaliseEmail('nour@مثال.مصر'))).toBe(true);
+  });
+
+  it('hands the URL parser only a bare host name, so nothing after one is dropped', () => {
+    // Read as a URL, `/x` would end the host and vanish, and the address pass.
+    expect(normaliseEmail('amira@مثال.مصر/x')).toBe('amira@مثال.مصر/x');
+    expect(looksLikeEmail('amira@مثال.مصر/x')).toBe(false);
+    expect(looksLikeEmail('amira@مثال مصر')).toBe(false);
+    expect(looksLikeEmail('a@b@مثال.مصر')).toBe(false);
+  });
+
+  it('asks nothing of case, the xn-- prefix included', () => {
+    // `isEmailAddress` is asked of strings nobody lowercased: a sender in the
+    // environment, a payload a person wrote.
+    expect(isEmailAddress('Support@ShipBlu.COM')).toBe(true);
+    expect(isEmailAddress('support@shipblu.XN--WGBH1C')).toBe(true);
   });
 
   it('asks the question of the address as a form stores it', () => {
