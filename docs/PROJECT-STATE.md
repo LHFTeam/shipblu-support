@@ -3169,6 +3169,15 @@ on node type (User)` with no subcode, which that predicate declines by design,
   reset deliberately does not), and that `Auto-Submitted: auto-generated` keeps
   autoresponders from opening a ticket per verification email.
 
+  **Customers began registering on 2026-11-12**, the day after
+  `support.shipblu.com` moved here: four identities with a password and four
+  `verify_email` tokens by 16:00 UTC. The first link was followed 18 seconds
+  after it was issued, once its `send_notification_email` job had completed.
+  The next two were sent and not followed. The fourth was never sent: its job
+  went `dead` on its first attempt, because the job's payload schema refused
+  an address the registration form had accepted. That customer cannot verify
+  until registration and the job agree on what an address is.
+
 ### 5.3 Phase 7 — ticket, conversation and contact importers
 
 Not started. The KB importer is the working model: idempotent on

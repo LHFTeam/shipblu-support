@@ -52,9 +52,8 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  *    help centre's own contact buttons open the chat instead (`AskSupport`).
  *  - `/<locale>/account/login` is the portal's sign-in, but nobody arriving from
  *    Freshdesk has an account here. Freshdesk's requester accounts were not
- *    migrated (2 portal identities hold a password, 2026-11-12), and making one
- *    waits on a verification email no real provider has delivered yet
- *    (PROJECT-STATE §5.2).
+ *    migrated: every portal identity with a password was made here after the
+ *    move (four on 2026-11-12, one of them verified).
  *  - `/<locale>/portal` is the ticket list, but Freshdesk's tickets were not
  *    imported and its ticket numbers are not ours, so the list would be empty
  *    behind that same sign-in — and `/portal/t/<n>` could open a different
@@ -69,9 +68,11 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from './locale';
  * no browser has kept the old answer.
  *
  * **What is not answered here.** Anything unmatched falls through to whatever
- * the proxy does with it — for a locale path, the help centre's 404 — because
- * sending every unknown URL to the home is the well-known way to make a site
- * unsearchable (`app/help/legacy/route.ts`). In particular: Freshdesk's search
+ * the proxy does with it, because sending every unknown URL to the home is the
+ * well-known way to make a site unsearchable (`app/help/legacy/route.ts`). For
+ * a locale path that is the help centre's 404. For a bare one it is the
+ * console's sign-in, as before, until `KB_PUBLIC_HOST` names
+ * `support.shipblu.com`; from then on it is the help centre's 404 there too. In particular: Freshdesk's search
  * autocomplete (`/support/search/solutions.json`), which a stale Freshdesk tab
  * still calls and which parses JSON, so an HTML page answers it no better than
  * a 404; its ticket and forum searches, which nothing here stands in for; and

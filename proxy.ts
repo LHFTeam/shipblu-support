@@ -196,14 +196,17 @@ export default function proxy(request: NextRequest) {
   // why every answer is a 302.
   const portal = freshdeskPortalRedirect(pathname, request.nextUrl.searchParams);
   if (portal) {
-    // An absolute URL on the host the request named, and not the relative
-    // `Location` `lib/http/redirect.ts` builds for a route handler. Next parses
-    // a proxy's `Location` with no base, so a relative one throws
-    // (`ERR_INVALID_URL`) and the request answers 500; a same-host absolute one
-    // it makes relative itself, so `/ar#contact` is what goes out on the wire,
-    // as for the sign-in redirect below. A plain URL on `nextUrl`'s origin
-    // rather than a clone of it: a clone remembers that the path it was asked
-    // for ended in `/`, and puts the slash back on whatever path it is given.
+    // An absolute URL on `nextUrl`'s origin, and not the relative `Location`
+    // `lib/http/redirect.ts` builds for a route handler. Next parses a proxy's
+    // `Location` with no base, so a relative one throws (`ERR_INVALID_URL`) and
+    // the request answers 500. One on the proxy's own origin it makes relative
+    // before it goes out, so `/ar#contact` is what the browser gets, as for the
+    // sign-in redirect below. That origin is not the host the request named:
+    // under `next start` it is the server's listen address, `localhost:<port>`,
+    // so it is safe only in a `Location` Next relativises. A plain URL rather
+    // than a clone of `nextUrl`, because a clone remembers that the path it was
+    // asked for ended in `/` and puts the slash back on whatever path it is
+    // given.
     const target = new URL(
       `${portal.pathname}${portal.search}${portal.hash}`,
       request.nextUrl.origin,

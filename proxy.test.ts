@@ -340,6 +340,7 @@ describe("Freshdesk's portal pages", () => {
     ['/en/support/solutions', '/en'],
     ['/ar/support/solutions/154000297679', '/ar'],
     ['/en/support/solutions/154000297680', '/en'],
+    ['/en/support/solutions/154000297680-shipblu-customers', '/en'],
     // The ticket form, a ticket from a Freshdesk email, the sign-in and sign-up.
     ['/support/tickets/new', '/ar#contact'],
     ['/ar/support/tickets/new', '/ar#contact'],
@@ -413,6 +414,11 @@ describe("Freshdesk's portal pages", () => {
     );
     expect(landing(visit(`https://${KB_HOST}/support/search`))?.to).toBe('/ar/search');
     expect(landing(visit(`https://${KB_HOST}/support/search?term=%20%20`))?.to).toBe('/ar/search');
+
+    // Capped as a prefilled subject is, so a pasted page cannot become a URL
+    // longer than the help centre's search will read.
+    const long = visit(`https://${KB_HOST}/support/search?term=${'x'.repeat(500)}`);
+    expect(new URL(long.headers.get('location')!).searchParams.get('q')).toBe('x'.repeat(200));
   });
 
   it('drops the rest of the query, which nothing here reads', () => {
@@ -441,24 +447,50 @@ describe("Freshdesk's portal pages", () => {
   });
 
   // Sending every unknown URL to the home is how a site makes itself
-  // unsearchable, so what has no counterpart here keeps its 404.
-  it('leaves what has no counterpart here to the help centre’s 404', () => {
-    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
-    for (const path of [
+  // unsearchable, so what has no counterpart here is answered as it was before.
+  // A locale path gets the help centre's 404 on every host. A bare one gets the
+  // console's sign-in until `KB_PUBLIC_HOST` names the help centre's host, which
+  // is production's setup today, and the help centre's 404 there after it.
+  const LEFTOVERS = {
+    localePaths: [
       '/ar/support/search/solutions.json',
       '/en/support/search/tickets',
       '/en/support/search/topics',
       '/ar/support/solutions/articles/most-viewed',
       '/en/support/discussions',
-      '/support/sitemap.xml',
-      '/support/recaptcha',
-    ]) {
+    ],
+    barePaths: ['/support/sitemap.xml', '/support/recaptcha', '/support/search/solutions.json'],
+  };
+
+  it('leaves what has no counterpart here to the help centre’s 404 on its host', () => {
+    setTestEnv({ KB_PUBLIC_HOST: KB_HOST });
+    for (const path of [...LEFTOVERS.localePaths, ...LEFTOVERS.barePaths]) {
       const response = visit(`https://${KB_HOST}${path}`);
       expect({ path, location: response.headers.get('location') }).toEqual({
         path,
         location: null,
       });
       expect(rewrittenTo(response)).toBe(`/help${path}`);
+    }
+  });
+
+  it('leaves the same paths as they were with KB_PUBLIC_HOST unset, as production runs today', () => {
+    for (const host of [KB_HOST, RENDER_HOST]) {
+      for (const path of LEFTOVERS.localePaths) {
+        const response = visit(`https://${host}${path}`);
+        expect({ path, location: response.headers.get('location') }).toEqual({
+          path,
+          location: null,
+        });
+        expect(rewrittenTo(response)).toBe(`/help${path}`);
+      }
+      for (const path of LEFTOVERS.barePaths) {
+        const location = visit(`https://${host}${path}`).headers.get('location');
+        expect({ path, to: location && new URL(location).pathname }).toEqual({
+          path,
+          to: '/login',
+        });
+      }
     }
   });
 
