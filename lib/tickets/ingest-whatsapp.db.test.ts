@@ -1785,6 +1785,40 @@ describe('a customer writing to two of our numbers', () => {
       }
     });
 
+    // The orphan read above is filed by somebody else while this filing waits
+    // for its row — `db/sql/009` at a deploy — under another number. It is no
+    // longer this number's to continue, and the message opens a ticket here
+    // rather than landing on the other number's (§6.99).
+    it('opens a ticket here when another writer files the orphan elsewhere first', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const before = await ingestWhatsAppMessage(inbound({ phoneNumberId: NUMBER_B }));
+        await phone('Ali', NUMBER_B);
+        const elsewhere = await phone('Somebody else', NUMBER_A);
+
+        const hold = holdNextTransaction('after');
+        const filing = db.transaction((tx) =>
+          tx
+            .update(conversations)
+            .set({ channelId: elsewhere })
+            .where(eq(conversations.id, before.conversationId)),
+        );
+        await hold.atHold;
+
+        const arriving = again();
+        expect(await untilWaitingOnALock(db, { rowLockIn: '^\\s*select' })).toBe(true);
+        hold.release();
+        await filing;
+        const after = await arriving;
+
+        expect(after).toMatchObject({ createdConversation: true });
+        expect(after.conversationId).not.toBe(before.conversationId);
+        expect(await held(before.conversationId)).toMatchObject({ channelId: elsewhere });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     // A plain number's tickets are hidden from nobody, so filing one changes
     // nothing about who may hold it.
     it('leaves a colleague holding a ticket filed under a plain number', async () => {

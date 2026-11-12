@@ -4,7 +4,7 @@ import { channels, conversations, messages } from '@/db/schema';
 import { logger } from '@/lib/log';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply } from '@/lib/sla';
-import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
+import { afterInboundMessage, afterMessageStored, autoAssign } from '@/lib/tickets/lifecycle';
 import {
   accountForPhoneNumberId,
   listAccounts,
@@ -22,7 +22,6 @@ import type {
   NormalisedStatus,
 } from '@/lib/whatsapp/types';
 import { windowState } from '@/lib/whatsapp/window';
-import { assignConversation } from '@/lib/assignment';
 import { fileUnderNumber, ownerStamp } from './assignee';
 import { isReadOnlyChannel } from './channel-policy';
 import { findContactByIdentity, resolveContact } from './contacts';
@@ -474,13 +473,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
   // holder it is hidden from there (`findOrAdoptLive`): the number's owner
   // takes it now, rather than at the customer's next message. Best-effort, as
   // every assignment after a stored message is: the echo is stored.
-  if (assignAgain) {
-    try {
-      await assignConversation(result.conversationId);
-    } catch (error) {
-      log.error(`could not assign conversation ${result.conversationId} after filing it`, error);
-    }
-  }
+  if (assignAgain) await autoAssign(result.conversationId);
 
   if (echo.media) {
     await enqueue(
@@ -920,10 +913,18 @@ async function findOrAdoptLive(
   const orphan = await findLiveConversation(contactId, unfiled, tx);
   if (!orphan || (await lastInboundPhoneNumberId(orphan.id)) !== phoneNumberId) return null;
 
-  const { unassigned } = await fileUnderNumber(tx, {
+  const { filed, unassigned } = await fileUnderNumber(tx, {
     conversationId: orphan.id,
     channelId: thread.channelId,
   });
+  // Somebody filed it first — `db/sql/009` at a deploy, whose lock the filing
+  // waited for — so it is no longer the ticket under no row the read above
+  // found, and may now be another number's. Asked again on this number's
+  // thread, whose lock this transaction holds: the ticket if it was filed
+  // here, else whatever is live on this number, else nothing and a new
+  // ticket. Returned as it was, the message landed on a ticket of whichever
+  // number filed it (§6.99).
+  if (!filed) return findLiveConversation(contactId, thread, tx);
   return { ...orphan, lostHolder: unassigned };
 }
 

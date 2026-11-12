@@ -129,13 +129,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       // who has left, where nobody will ever answer it.
       if (assigneeAgentId) {
         if (!isUuid(assigneeAgentId)) return { error: 'Unknown agent' };
+        // Whether they exist and can sign in, and nothing more: who may see
+        // the ticket is `admits`', inside the transaction below.
         const [found] = await db
-          .select({
-            id: agents.id,
-            isActive: agents.isActive,
-            role: agents.role,
-            permissions: agents.permissions,
-          })
+          .select({ isActive: agents.isActive })
           .from(agents)
           .where(eq(agents.id, assigneeAgentId))
           .limit(1);

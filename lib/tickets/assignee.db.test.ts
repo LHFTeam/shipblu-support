@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, channels, contacts, conversations, ticketStatuses } from '@/db/schema';
@@ -130,6 +131,48 @@ describe('who a number admits', () => {
       expect(await admits(tx, holders, leftOwner)).toBe(false);
       expect(await admits(tx, holders, leftSupervisor)).toBe(false);
     });
+  });
+});
+
+// The answer holds until the transaction ends because the row is locked, a
+// plain one included: the onboarding that makes a plain number a coexistence
+// one takes FOR UPDATE first and so waits, where locking only coexistence rows
+// let an assignment read while the row was plain commit after it became one.
+describe('the lock lockHolders takes', () => {
+  it('holds a plain row and a coexistence row against FOR UPDATE until it commits', async () => {
+    const other = postgres(process.env.TEST_DATABASE_URL!, {
+      max: 1,
+      prepare: false,
+      onnotice: () => {},
+    });
+    try {
+      for (const channelId of [await number({}), await phone(await agent())]) {
+        const forUpdate = () =>
+          other`select id from channels where id = ${channelId} for update nowait`;
+        await db.transaction(async (tx) => {
+          await lockHolders(tx, channelId);
+          await expect(forUpdate()).rejects.toMatchObject({ code: '55P03' });
+        });
+        await expect(forUpdate()).resolves.toHaveLength(1);
+      }
+    } finally {
+      await other.end();
+    }
+  });
+
+  it('answers the owner of any number, and owner-only only on a coexistence one', async () => {
+    const nayera = await agent();
+    const left = await agent({ isActive: false });
+    const answers = await db.transaction(async (tx) => [
+      await lockHolders(tx, await number({}, nayera)),
+      await lockHolders(tx, await phone(nayera)),
+      await lockHolders(tx, await number({}, left)),
+    ]);
+    expect(answers.map((h) => [h.ownerId, h.ownerOnly])).toEqual([
+      [nayera, null],
+      [nayera, { ownerId: nayera }],
+      [null, null],
+    ]);
   });
 });
 

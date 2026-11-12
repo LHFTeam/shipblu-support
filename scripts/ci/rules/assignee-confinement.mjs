@@ -152,6 +152,10 @@ function stampsOwner(node) {
   if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
     if (node.expression.text === 'ownerStamp') return true;
   }
+  // A callback in the argument is its own code, called or not: a
+  // `onConflictDoUpdate` given a function that builds a stamp for an insert
+  // elsewhere is not an update of the assignee.
+  if (ts.isFunctionLike(node)) return false;
   return ts.forEachChild(node, (child) => stampsOwner(child)) ?? false;
 }
 
@@ -194,7 +198,8 @@ function builderWrites(file) {
  *   trigger. `IF NEW.assignee_agent_id = …` is a comparison.
  * - `set (assignee_agent_id, assigned_at) = (…)`, the row form.
  * - `insert into conversations (…, assignee_agent_id, …)`.
- * - in a `sql` template, `set … ${conversations.assigneeAgentId} =`.
+ * - in a `sql` template, `set … ${conversations.assigneeAgentId} =`, before
+ *   any `where`.
  */
 const SQL_WRITES = [
   /(?<![.\w"])"?assignee_agent_id"?\s*=(?!=)/gi,
@@ -202,7 +207,9 @@ const SQL_WRITES = [
   /(?:^|;|\bthen\b|\belse\b|\bbegin\b)\s*new\."?assignee_agent_id"?\s*=(?!=)/gim,
   /\bset\s*\([^)]*\bassignee_agent_id\b[^)]*\)\s*=/gi,
   /\binsert\s+into\s+"?conversations"?[^(;]*\([^)]*\bassignee_agent_id\b/gi,
-  /\bset\b[^;`]*?\$\{\s*conversations\.assigneeAgentId\s*\}\s*=(?!=)/gi,
+  // Stopped at a `where`: the column object renders table-qualified, and on
+  // that side of the statement it is a comparison.
+  /\bset\b(?:(?!\bwhere\b)[^;`])*?\$\{\s*conversations\.assigneeAgentId\s*\}\s*=(?!=)/gi,
 ];
 
 const blank = (m) => m.replace(/[^\n]/g, ' ');

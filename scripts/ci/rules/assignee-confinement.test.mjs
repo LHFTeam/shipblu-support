@@ -48,6 +48,9 @@ export async function pick(tx, holders, id, agentId, now) {
   const shape = { assigneeAgentId: conversations.assigneeAgentId };
   await tx.select(shape).from(conversations);
   await db.execute(sql\`select count(*) from \${conversations} c where \${conversations.assigneeAgentId} = \${agentId}\`);
+  await db.execute(sql\`update \${conversations} set priority = \${p} where \${conversations.assigneeAgentId} = \${agentId}\`);
+  await tx.insert(conversations).values(row).onConflictDoUpdate({ target: conversations.id, set: { subject: row.subject }, setWhere: (() => ownerStamp(agentId, now))() && undefined });
+  await tx.update(conversations).set({ priority: pick(() => ownerStamp(agentId, now)) });
   return assignTicket(tx, holders, { conversationId: id, to: agentId, at: now });
 }
 `,

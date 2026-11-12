@@ -40,8 +40,12 @@
 -- is written — the channel, then the ticket, as everywhere — and the second
 -- reads the owner in a snapshot of its own, taken once that lock is held. Read
 -- in one statement, a handover committing while it ran left the ticket filed
--- under the number and held by the owner it had just left. Only while there is
--- a ticket to file: a replay with nothing to do locks nothing.
+-- under the number and held by the owner it had just left. Only a number with
+-- a ticket to file — one under no row whose customer wrote to that number,
+-- which is the update's own join — so a replay with nothing to do locks
+-- nothing. Asked of any ticket under no row instead, it locked every
+-- coexistence number on every deploy, since a ticket whose number has no row
+-- stays under none, and waited behind any handover in flight.
 --
 -- A ticket whose holder changed while the update waited for its row is left
 -- for the next replay (`held_by`): the line written is about the holder the
@@ -53,9 +57,17 @@
 select ch.id
 from channels ch
 where ch.type = 'whatsapp'
+  and ch.is_active
   and jsonb_typeof(ch.config -> 'coexistence') is not distinct from 'object'
   and exists (
-    select 1 from conversations c where c.channel = 'whatsapp' and c.channel_id is null
+    select 1
+    from conversations c
+    join messages m on m.conversation_id = c.id
+    where c.channel = 'whatsapp'
+      and c.channel_id is null
+      and m.direction = 'inbound'
+      and m.meta->>'whatsappType' is distinct from 'reaction'
+      and m.meta->>'phoneNumberId' = ch.config->>'phoneNumberId'
   )
 for key share of ch;
 

@@ -1,8 +1,8 @@
-import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { db } from '@/db/client';
-import { agents, conversationEvents, conversations } from '@/db/schema';
+import { agents, channels, conversationEvents, conversations } from '@/db/schema';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
-import { ownerOnlyNumber, seesOwnerOnlyTicket } from '@/lib/tickets/owner-only';
+import { isCoexistenceNumber, seesOwnerOnlyTicket } from '@/lib/tickets/owner-only';
 
 /**
  * The one writer of `conversations.assignee_agent_id`.
@@ -59,9 +59,15 @@ export type Holders = {
   /** The `channels` row the answer is about; null for a ticket under no row. */
   readonly channelId: string | null;
   /**
-   * Set on a coexistence number, whose tickets are its owner's alone: the
-   * owner while they are active, or null. A deactivated owner counts as nobody
-   * (`effectiveOwnerId`): they cannot sign in, so they see nothing.
+   * The number's owner while they are active, on a `whatsapp` row; null
+   * otherwise. A deactivated owner counts as nobody (`effectiveOwnerId`):
+   * they cannot sign in, so new work is not stamped on them and they see
+   * nothing. What `lockedOwnerId` answers, since it is this read.
+   */
+  readonly ownerId: string | null;
+  /**
+   * Set on a coexistence number, whose tickets are its owner's alone, with
+   * that same owner, or null for none.
    */
   readonly ownerOnly: { readonly ownerId: string | null } | null;
 };
@@ -72,25 +78,46 @@ export type Holders = {
  * Call it inside the transaction that assigns, and before that transaction
  * locks or writes the ticket's row: the channel first, then the ticket, the
  * order a handover takes them. A transaction that already holds the channel's
- * lock (`lockedOwnerId`, or the handover's own FOR UPDATE) may call it at any
+ * lock (an earlier call, or the handover's own FOR UPDATE) may call it at any
  * point, since it then waits for nobody.
  *
- * Only a coexistence row is locked (`ownerOnlyNumber`), and a ticket under no
- * row reads nothing: every other number's tickets may be held by anybody.
+ * FOR KEY SHARE on the row whatever it is, which is the lock a ticket's own
+ * foreign key takes on it anyway, so it holds up nothing an ordinary edit of
+ * the channel does: it conflicts only with FOR UPDATE, which a handover takes
+ * (`handOverNumber`) and so does the onboarding that makes a plain row a
+ * coexistence one (`complete_coexistence_onboarding`). So the answer holds
+ * until the transaction ends, a plain row's included: locked only when it was
+ * already a coexistence row, an assignment a moment before a plain number
+ * became one committed after it, held by somebody its tickets are now hidden
+ * from. A ticket under no row reads nothing.
+ *
+ * The one read of a number's owner under its lock: `lockedOwnerId`, which
+ * ingest and a reopen ask, is this function's `ownerId`, so the two cannot
+ * answer differently.
  */
 export async function lockHolders(tx: Executor, channelId: string | null): Promise<Holders> {
-  const number = await ownerOnlyNumber(tx, channelId, { lock: true });
-  if (!number) return { channelId, ownerOnly: null } as Holders;
-
-  // The owner's activity in a second read, never joined to the locked row
-  // (`lockedOwnerId` says why).
-  const [owner] = number.ownerId
-    ? await tx.select({ active: agents.isActive }).from(agents).where(eq(agents.id, number.ownerId))
+  if (!channelId) return { channelId: null, ownerId: null, ownerOnly: null } as Holders;
+  // The channel alone, and the owner in a second read. A row that waited for a
+  // handover's lock is re-read at its new version, but a table joined to it and
+  // not locked keeps the row the first look found — the previous owner's —
+  // so a join here reads the new owner as matching nobody, and so as inactive.
+  const [row] = await tx
+    .select({
+      type: channels.type,
+      ownerId: channels.ownerAgentId,
+      ownerOnly: sql<boolean>`${isCoexistenceNumber()}`,
+    })
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .for('key share');
+  if (!row || row.type !== 'whatsapp') {
+    return { channelId, ownerId: null, ownerOnly: null } as Holders;
+  }
+  const [owner] = row.ownerId
+    ? await tx.select({ active: agents.isActive }).from(agents).where(eq(agents.id, row.ownerId))
     : [];
-  return {
-    channelId,
-    ownerOnly: { ownerId: owner?.active ? number.ownerId : null },
-  } as Holders;
+  const ownerId = owner?.active ? row.ownerId : null;
+  return { channelId, ownerId, ownerOnly: row.ownerOnly ? { ownerId } : null } as Holders;
 }
 
 /**
@@ -209,13 +236,18 @@ export async function unassignTicket(
   return written.length > 0;
 }
 
-/** `unassignTicket` for several tickets in one statement, as a handover does. */
-export async function unassignTickets(tx: Executor, conversationIds: string[]): Promise<void> {
-  if (conversationIds.length === 0) return;
-  await tx
+/**
+ * `unassignTicket` for several tickets in one statement, as a handover does.
+ * The ids written, so a caller records only those.
+ */
+export async function unassignTickets(tx: Executor, conversationIds: string[]): Promise<string[]> {
+  if (conversationIds.length === 0) return [];
+  const written = await tx
     .update(conversations)
     .set({ assigneeAgentId: null, assignedAt: null })
-    .where(inArray(conversations.id, conversationIds));
+    .where(inArray(conversations.id, conversationIds))
+    .returning({ id: conversations.id });
+  return written.map((row) => row.id);
 }
 
 /**

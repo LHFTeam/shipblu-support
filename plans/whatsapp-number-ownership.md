@@ -327,7 +327,10 @@ Left as they are, each a change of its own if it is wanted:
 - **A plain number adopted as a coexistence one** keeps the assignees its
   tickets had, until a handover or each ticket's next reopen. Becoming a
   coexistence number is a write of `channels.config`, which nothing below
-  watches.
+  watches. Only an assignment in flight is ordered with it: the onboarding
+  takes FOR UPDATE on the row, and every writer of the assignee FOR KEY SHARE
+  (`lockHolders`), so one read while the row was plain commits first or waits
+  and reads the record.
 - **A holder who stops seeing every ticket** — a role lowered, the
   `ticket.view.all` override removed, a deactivation — keeps the
   coexistence-number tickets they hold, until a handover or each ticket's
@@ -356,12 +359,12 @@ to copy.
 | Writer                             | Through the helper                                                            |
 | ---------------------------------- | ----------------------------------------------------------------------------- |
 | The rota's pick, `handBackToOwner` | `lockHoldersOf` before the ticket's lock, then `assignTicket`                 |
-| `takeForNumberOwner`               | The same, behind `lockedOwnerId`                                              |
+| `takeForNumberOwner`               | The same: one `lockHolders` read gives the owner and the holders              |
 | `updateTicket`, `assign_agent`     | `assignTicket`, or `unassignTicket` for "Unassigned"                          |
 | `handOverNumber`                   | `assignTickets` and `unassignTickets`, behind its own lock on the number      |
 | `alignAccountable`                 | `assignTicket` or `unassignTicket`; accountability stays its own write        |
 | Hand to, the sweep's reclaim       | `unassignTicket`                                                              |
-| WhatsApp ingest's insert           | `ownerStamp`, with the owner `lockedOwnerId` read                             |
+| WhatsApp ingest's insert           | `ownerStamp`, with the owner `lockedOwnerId` (`lockHolders`) read             |
 | `findOrAdoptLive`                  | `fileUnderNumber`: files the ticket, and unassigns a holder it is hidden from |
 | `db/sql/009`                       | SQL, named in the rule: unassigns anybody but the number's active owner       |
 
@@ -384,10 +387,12 @@ What changed for the two writers that did not ask:
   it itself, so with an active owner it is theirs in the same request. An
   agent who sees every ticket keeps it. At a deploy, `db/sql/009` unassigns
   anybody but the number's active owner, since SQL cannot ask who sees every
-  ticket, and assigns nobody: where the ticket's group routes, the sweep
-  hands it to the owner, and elsewhere it waits for its customer's next
-  message, the phone's reply or an edit. Its line's reason is
-  `filed_under_number_at_deploy`.
+  ticket, and assigns nobody; the sweep hands it to the number's active owner
+  whatever its group (`assignWaiting`), since a group's mode says nothing
+  about a ticket only its owner may hold. Its line's reason is
+  `filed_under_number_at_deploy`. It locks only a coexistence number it has a
+  ticket to file under, before it reads the owner, so a deploy with nothing
+  to file waits for no handover in flight.
 - **Reclaim.** Unassigning was always allowed, so the helper refuses nothing
   there. What the reclaim did not ask was whose number the ticket is on: its
   exemption for an owner reads the ticket's accountability, and on a

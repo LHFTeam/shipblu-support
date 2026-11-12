@@ -1213,9 +1213,15 @@ which asks before it writes:
 - **Every write of `conversations.assignee_agent_id` goes through it**, in two
   steps, because of the order locks are taken in. `lockHolders(tx, channelId)`
   reads who may hold a ticket on the number, under the lock a handover waits
-  for (FOR KEY SHARE on the channel), inside the transaction that assigns and
-  before that transaction locks or writes the ticket's row: the channel, then
-  the ticket, the order `handOverNumber` takes them. A writer holding only the
+  for (FOR KEY SHARE on the channel, whatever the row is), inside the
+  transaction that assigns and before that transaction locks or writes the
+  ticket's row: the channel, then the ticket, the order `handOverNumber` takes
+  them. It is also the one read of a number's owner under that lock:
+  `lockedOwnerId`, which ingest and a reopen ask, is its `ownerId`, so the
+  owner stamped and the owner checked cannot differ. The onboarding that
+  makes a plain row a coexistence number takes FOR UPDATE on the row first,
+  so an assignment read while the row was plain commits before it or waits
+  and reads the record. A writer holding only the
   ticket's id, or a copy of its row read before the transaction, calls
   `lockHoldersOf(tx, conversationId)`, which reads the number the ticket is on
   now: a ticket under no row is filed under one by its customer's next
@@ -1247,9 +1253,10 @@ holders, …)` then answers `hidden` for an agent the ticket would be hidden
   but the number's active owner, an agent who sees every ticket included,
   since SQL cannot ask `can()`. It locks the coexistence numbers in a first
   statement and reads their owners in a second, so a handover cannot commit
-  between the read and the write, and nothing assigns the ticket afterwards:
-  in a group that does not route it waits for its customer, the phone or an
-  edit.
+  between the read and the write; only a number with a ticket to file is
+  locked, so a deploy with nothing to file waits for no handover. It assigns
+  nothing afterwards, and the sweep hands the ticket to the number's owner
+  (below).
 
 - **The rota never picks for one.** `assignConversation` hands it back to an
   active owner as it does any owned ticket, and otherwise answers `owner_only`,
@@ -1262,6 +1269,12 @@ holders, …)` then answers `hidden` for an agent the ticket would be hidden
   and the hand-back ask the number the ticket is on now, under that lock, so a
   ticket filed under a coexistence row since the snapshot answers `owner_only`
   before a roster is read or a cursor moved.
+- **The sweep asks every unassigned one on a number with an active owner,
+  whatever its group** (`assignWaiting`), and hands it to the owner. A group's
+  mode says nothing about a ticket its members may not hold, and the things
+  that leave one with nobody and assign nothing after — `db/sql/009`, an owner
+  coming back after it arrived — would otherwise leave one in a manual group
+  waiting for its customer's next message.
 - **The sweep never reclaims one from the number's active owner**, whoever
   the ticket is accountable to (`reclaimAbandoned`). On a plain number the
   owner is exempt by the ticket's accountability; here the number's word
@@ -1285,8 +1298,8 @@ holders, …)` then answers `hidden` for an agent the ticket would be hidden
   copy says "agents who can see every ticket" for the same reason, never
   "supervisors and admins".
 - **A writer that assigns reads the owner under the channel's lock, inside
-  its transaction and before it writes the ticket** (`lockHolders`,
-  `lockedOwnerId`): the order a handover takes them. Read ahead of the
+  its transaction and before it writes the ticket** (`lockHolders`, which
+  `lockedOwnerId` is): the order a handover takes them. Read ahead of the
   transaction, an assignment to the owner a handover was replacing passed and
   committed after the handover had collected the number's tickets. A
   transaction that already holds that lock may ask again at any point, as
@@ -1304,7 +1317,8 @@ inbox's live tick, which carries no content. Each is written down in
 `plans/whatsapp-number-ownership.md`, and is a change of its own. Nor the two
 ways a ticket comes to be hidden from its holder with no write of the
 assignee: a plain number's row becoming a coexistence one (a write of
-`channels.config`), and a holder who stops seeing every ticket — a role
+`channels.config`; an assignment in flight waits for it, one already
+committed is not moved), and a holder who stops seeing every ticket — a role
 lowered, the `ticket.view.all` override removed, a deactivation. Each such
 ticket keeps its holder until a handover or its next reopen.
 

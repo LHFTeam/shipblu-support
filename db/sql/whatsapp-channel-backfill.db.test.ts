@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import postgres from 'postgres';
 import { asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
@@ -330,6 +331,39 @@ describe('009_whatsapp_channel_backfill.sql', () => {
         assigneeAgentId: colleague,
         lines: [],
       });
+    });
+
+    // A handover holds the number's row FOR UPDATE. A replay with nothing to
+    // file there must not wait for it — a ticket under no row whose number
+    // has none is there on every deploy — and one with a ticket to file must,
+    // so that the owner it reads is the one the handover leaves.
+    it('waits for a handover only on a number it has a ticket to file under', async () => {
+      const owner = await person();
+      const channelId = await phone(owner);
+      const unplaceable = await ticket();
+      await message(unplaceable, '100000000000001', '09:00');
+
+      const other = postgres(process.env.TEST_DATABASE_URL!, {
+        max: 1,
+        prepare: false,
+        onnotice: () => {},
+      });
+      const replay = () =>
+        db.transaction(async (tx) => {
+          await tx.execute(sql`set local lock_timeout = '300ms'`);
+          await tx.execute(sql.raw(backfill));
+        });
+      try {
+        await other.begin(async (handover) => {
+          await handover`select id from channels where id = ${channelId} for update`;
+          await expect(replay()).resolves.toBeUndefined();
+
+          await message(await heldTicket(null), PHONE, '10:00');
+          await expect(replay()).rejects.toMatchObject({ cause: { code: '55P03' } });
+        });
+      } finally {
+        await other.end();
+      }
     });
 
     // Once filed, the ticket is on a row, and a replay reads only tickets on

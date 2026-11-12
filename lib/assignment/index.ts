@@ -30,7 +30,7 @@ import { openBacklog } from '@/lib/tickets/backlog';
 import { CHANGE_STAMP } from '@/lib/tickets/change-stamp';
 import { moveToGroupIfElsewhere } from '@/lib/tickets/move-group';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
-import { alignAccountable, lockedOwnerId, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
+import { alignAccountable, recordOwnerAssigned } from '@/lib/whatsapp/number-owner';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
@@ -852,7 +852,7 @@ async function handBackToOwner(
  * owner, and make it theirs to answer for where it is not already.
  *
  * `handBackToOwner` for a number whose word outranks the ticket's. The owner
- * is read under the channel's lock (`lockedOwnerId`), the one a handover
+ * is read under the channel's lock (`lockHolders`), the one a handover
  * waits on, and then the ticket's, the order a handover takes them; and the
  * ticket is asked again whether anybody holds it and whether it is still work,
  * as the hand-back asks and for its reasons. Taken off the snapshot, a ticket
@@ -871,9 +871,14 @@ async function takeForNumberOwner(
   { actorLabel, now }: { actorLabel: string | undefined; now: Date },
 ): Promise<Picked> {
   return db.transaction(async (tx) => {
-    const ownerId = await lockedOwnerId(tx, channelId);
-    if (!ownerId) return { assignedTo: null, reason: 'owner_only' as SkipReason };
+    // The number's owner and who may hold its tickets, in one read under the
+    // number's lock (`lockHolders`). A row that has stopped being a
+    // coexistence number since the snapshot is left to the next pass, which
+    // reads it as it now is.
     const holders = await lockHolders(tx, channelId);
+    if (!holders.ownerOnly) return { assignedTo: null, reason: 'not_assignable' as SkipReason };
+    const ownerId = holders.ownerOnly.ownerId;
+    if (!ownerId) return { assignedTo: null, reason: 'owner_only' as SkipReason };
 
     const [current] = await tx
       .select({
@@ -902,14 +907,17 @@ async function takeForNumberOwner(
     }
 
     if (current.accountableAgentId !== ownerId) {
-      await alignAccountable(tx, {
+      const { reassigned } = await alignAccountable(tx, {
         conversationId,
         ownerId,
         channelId,
+        holders,
         reason: 'owner_returned',
         now,
       });
-      return { assignedTo: ownerId, reason: null };
+      return reassigned
+        ? { assignedTo: ownerId, reason: null }
+        : { assignedTo: null, reason: 'not_assignable' as SkipReason };
     }
 
     const taken = await assignTicket(tx, holders, { conversationId, to: ownerId, at: now });

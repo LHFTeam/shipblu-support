@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-or
 import { db } from '@/db/client';
 import {
   agents,
+  channels,
   conversationEvents,
   conversationWatchers,
   conversations,
@@ -12,6 +13,7 @@ import { assignConversation } from '@/lib/assignment';
 import { reclaimDue } from '@/lib/assignment/reclaim';
 import { lockHolders, unassignTicket } from '@/lib/tickets/assignee';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { isCoexistenceNumber } from '@/lib/tickets/owner-only';
 import { logger } from '@/lib/log';
 import { isHeld } from '@/lib/routing/hold';
 
@@ -48,28 +50,57 @@ function routingGroups() {
 }
 
 /**
- * Every unassigned ticket in a routing group gets another attempt.
+ * The ticket is on a coexistence number whose owner is active: one only that
+ * owner may be handed. Correlated, since this read locks nothing; the owner is
+ * asked again under the number's lock when the ticket is assigned
+ * (`lockHolders`).
+ */
+function ownedCoexistenceNumber() {
+  return sql`exists (
+    select 1 from ${channels}
+    inner join ${agents} on ${agents.id} = ${channels.ownerAgentId}
+    where ${channels.id} = ${conversations.channelId}
+      and ${isCoexistenceNumber()}
+      and ${agents.isActive}
+  )`;
+}
+
+/**
+ * Every unassigned ticket in a routing group gets another attempt, and so does
+ * every unassigned ticket on a coexistence number whose owner is active,
+ * whatever its group.
  *
  * Bounded to the open backlog, so this is the queue an agent would be looking
  * at, not the archive. Each ticket is attempted individually rather than in one
  * transaction: they contend for the same group lock, and one ticket that cannot
  * be placed must not roll back the twenty before it.
  *
- * An owned WhatsApp ticket in no group, or in a manual one, is not in this list,
- * and does not need to be: it goes back to its owner on the spot — ingest
- * stamps it, and "Unassign" runs `assignConversation` in the same request — so
- * the sweep is only ever its second chance. One exception waits longer: a
- * ticket `db/sql/009` filed under a coexistence number at a deploy and took
- * off its holder is assigned by nothing there, and in such a group stays with
- * nobody until its customer writes, the phone answers, or somebody edits it.
+ * An owned ticket on a plain number in no group, or in a manual one, is not in
+ * this list, and does not need to be: it goes back to its owner on the spot —
+ * ingest stamps it, and "Unassign" runs `assignConversation` in the same
+ * request — so the sweep is only ever its second chance. A coexistence
+ * number's ticket can be left with nobody by something that assigns nothing
+ * after it: `db/sql/009` filing it under the number at a deploy and taking it
+ * off a holder it is hidden from, or its owner coming back after it arrived
+ * while they were deactivated. Its group's mode says nothing about it, since
+ * the group's members may not hold it anyway (`lib/tickets/owner-only.ts`),
+ * so it is asked whatever the group, and `assignConversation` hands it to the
+ * owner (`takeForNumberOwner`). Left to its group's mode, one in a manual
+ * group waited for its customer's next message, which could be days.
  */
 async function assignWaiting(): Promise<number> {
   const waiting = await db
     .select({ id: conversations.id })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .innerJoin(groups, eq(groups.id, conversations.groupId))
-    .where(and(isNull(conversations.assigneeAgentId), routingGroups(), openBacklog()))
+    .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .where(
+      and(
+        isNull(conversations.assigneeAgentId),
+        or(and(isNotNull(groups.id), routingGroups()), ownedCoexistenceNumber()),
+        openBacklog(),
+      ),
+    )
     // Oldest first: the queue drains in the order it filled, and a burst that
     // exceeds the team's capacity leaves the newest waiting rather than the
     // ticket that has already been waiting longest.

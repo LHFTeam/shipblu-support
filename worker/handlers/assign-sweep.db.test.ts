@@ -294,12 +294,14 @@ describe('assignSweep: reclaiming on a number that belongs to somebody', () => {
    * who the ticket is accountable to.
    */
   describe('on a coexistence number', () => {
+    let phones = 0;
     async function phone(ownerAgentId: string | null): Promise<string> {
+      phones += 1;
       const [row] = await db
         .insert(channels)
         .values({
           type: 'whatsapp',
-          name: 'Nayera Mohamed',
+          name: `Phone ${phones}`,
           ownerAgentId,
           config: { coexistence: { onboardedAt: '2026-10-01T09:00:00.000Z', wabaId: '1' } },
         })
@@ -383,6 +385,49 @@ describe('assignSweep: reclaiming on a number that belongs to somebody', () => {
         assigneeAgentId: nayera,
         reclaimed: [{ from: sara!.id, afterMins: WAIT_MINS }],
       });
+    });
+
+    // `db/sql/009` filing a ticket under the number at a deploy, or its owner
+    // coming back after it arrived, leaves it with nobody and assigns nothing.
+    // Its group's mode says nothing about a ticket only its owner may hold.
+    it('hands an unassigned one to the active owner whatever its group, and to nobody without one', async () => {
+      const nayera = await owner({ presence: 'offline', lastSeenAt: minutesAgo(30) });
+      const [manual] = await db
+        .insert(groups)
+        .values({ name: 'Picks by hand', assignmentStrategy: 'manual' })
+        .returning({ id: groups.id });
+      const [open] = await db
+        .select({ id: ticketStatuses.id })
+        .from(ticketStatuses)
+        .where(eq(ticketStatuses.name, 'Open'));
+      const waiting = async (channelId: string, groupId: string | null) => {
+        const [contact] = await db
+          .insert(contacts)
+          .values({ name: 'Amira' })
+          .returning({ id: contacts.id });
+        const [row] = await db
+          .insert(conversations)
+          .values({
+            requesterContactId: contact!.id,
+            statusId: open!.id,
+            channel: 'whatsapp',
+            channelId,
+            groupId,
+            lastCustomerMessageAt: minutesAgo(60),
+          })
+          .returning({ id: conversations.id });
+        return row!.id;
+      };
+      const owned = await phone(nayera);
+      const inManual = await waiting(owned, manual!.id);
+      const inNone = await waiting(owned, null);
+      const ownerless = await waiting(await phone(null), manual!.id);
+
+      await assignSweep();
+
+      expect((await outcome(inManual)).assigneeAgentId).toBe(nayera);
+      expect((await outcome(inNone)).assigneeAgentId).toBe(nayera);
+      expect((await outcome(ownerless)).assigneeAgentId).toBeNull();
     });
 
     it('and with nobody when the number has no owner, whoever is in its group', async () => {

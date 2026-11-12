@@ -113,28 +113,19 @@ export async function agentsWhoSeeEveryTicket(tx: Pick<typeof db, 'select'>): Pr
 }
 
 /**
- * Whether a channel row is a coexistence number, and who owns it: read by a
- * writer about to assign one of its tickets.
+ * Whether a channel row is a coexistence number, and who owns it, read with
+ * no lock: for a page saying who a ticket may be given to. A writer asks
+ * `lockHolders` (`lib/tickets/assignee.ts`), which reads the same under the
+ * number's lock.
  */
 export async function ownerOnlyNumber(
   tx: Pick<typeof db, 'select'>,
   channelId: string | null,
-  /**
-   * Held against a handover, for a writer about to assign inside a
-   * transaction: FOR KEY SHARE on the channel, the lock `lockedOwnerId` takes
-   * and for its reason. Read without it, an assignment to the owner a
-   * handover was replacing passed, and committed after the handover had
-   * collected the number's tickets: the previous owner holding a ticket on a
-   * number that is no longer theirs to see. Taken before the ticket's row is
-   * written, the order a handover takes them.
-   */
-  { lock = false }: { lock?: boolean } = {},
 ): Promise<{ ownerId: string | null } | null> {
   if (!channelId) return null;
-  const read = tx
+  const [row] = await tx
     .select({ ownerId: channels.ownerAgentId })
     .from(channels)
     .where(and(eq(channels.id, channelId), isCoexistenceNumber()));
-  const [row] = await (lock ? read.for('key share') : read);
   return row ?? null;
 }
