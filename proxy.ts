@@ -36,9 +36,11 @@ import { LOCALES } from '@/lib/kb/locale';
  *  - The session cookie is host-only and `SameSite=Lax` (`lib/auth/session.ts`),
  *    so a browser leaves it off a POST from another site. Site, not origin: a
  *    page on another subdomain of the same registrable domain is the same site,
- *    its POSTs carry the cookie, and only Next's check is left to refuse them —
- *    the console and support.shipblu.com become one site the day both are under
- *    shipblu.com.
+ *    its POSTs carry the cookie, and only Next's check is left to refuse them.
+ *    So the console is one site with every other shipblu.com subdomain
+ *    wherever it is served under shipblu.com: on support.shipblu.com whenever
+ *    `KB_PUBLIC_HOST` does not name it, as on 2026-11-12, the day after that
+ *    name moved here, and on any console domain there later.
  *
  * Both ask where a request came from, never what made it, so neither can tell
  * the console from anything else answered on the console's origin: script

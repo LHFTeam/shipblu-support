@@ -12,9 +12,10 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
  * Asked by the console's Save and Restore once the body has been pointed here
  * (`./off-freshdesk.ts`), so what it finds is what has no home here: a picture
  * nobody copied, a link to an article with no published copy here, a link to a
- * part of the portal nothing here replaces. Each of those breaks the day
- * Freshdesk is disconnected, and each is refused only when the write would
- * *add* it. One the stored row already carries is left alone: refusing it
+ * part of the portal nothing here replaces. One on Freshdesk's own hosts breaks
+ * the day Freshdesk is disconnected, one on the portal's hostname broke when
+ * that name moved here on 2026-11-11, and each is refused only when the write
+ * would *add* it. One the stored row already carries is left alone: refusing it
  * would make the article unsaveable until somebody found and removed it,
  * whatever the save was for, and leaving it costs nothing the article does not
  * already cost. `rehost_kb_images` and the audit in
@@ -24,9 +25,9 @@ import { decodeAttribute, imageSources, onFreshworks } from './image-src';
 export type FreshdeskReference = { kind: 'link' | 'image'; address: string };
 
 /**
- * The Freshdesk portal's own hostname. It serves Freshdesk until the domain
- * moves, and is ours afterwards, when `/<locale>/a/<slug>` there is a good
- * link — so the host alone is never refused, only Freshdesk's paths on it.
+ * The Freshdesk portal's own hostname. It served Freshdesk until 2026-11-11
+ * and has answered from this app since, so `/<locale>/a/<slug>` there is a
+ * good link — the host alone is never refused, only Freshdesk's paths on it.
  */
 const PORTAL_HOST = 'support.shipblu.com';
 
@@ -40,8 +41,9 @@ const RELATIVE_BASE = 'https://relative.invalid/';
  * (`/helpdesk/attachments/<id>`, which names no Freshworks domain at all). The
  * agent console's `/a/solutions/articles/<id>` matches too, though its host
  * already does. None of the forum or attachment shapes is stored today
- * (measured 2026-11-09); they are here because a paste from the portal can
- * carry them, and each breaks the day the domain moves.
+ * (measured 2026-11-09); they are here because an old portal address pasted
+ * in can carry them, and since the domain moved on 2026-11-11 each answers
+ * a 404 or the console's sign-in page there.
  */
 const PORTAL_PATH =
   /\/solutions\/(?:articles|folders|categories)(?:\/|$)|\/support\/(?:solutions|home|tickets|login|search|signup|profile|discussions|topics)(?:\/|$)|\/helpdesk\/attachments(?:\/|$)/i;

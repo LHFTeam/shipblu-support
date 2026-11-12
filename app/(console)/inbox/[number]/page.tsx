@@ -128,7 +128,8 @@ export default async function ConversationPage({
 
   // The host this agent is actually on, so the article they open and the link
   // they paste both resolve. `publicBaseUrl()` names the address we publish,
-  // which is only the same thing once that domain serves this app.
+  // which nothing checks answers from this app (`requestBaseUrl` says when it
+  // did not).
   const kbOrigin = requestBaseUrl(await headers());
 
   // Whether the reply box asks Jev for a canned response: only where there is a

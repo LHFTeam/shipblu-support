@@ -50,9 +50,10 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   // Built from the host this page is being served on rather than from
   // `publicBaseUrl()`. This link exists to be clicked by the person who just
-  // wrote the article, and the published hostname is only the right answer once
-  // it serves this app — until the domain cuts over it is a 404 wearing the
-  // canonical address.
+  // wrote the article. The host they are on has just answered from this app;
+  // the published hostname is only what `KB_PUBLIC_HOST` says, and while it
+  // named a host Freshdesk still served it was a 404 wearing the canonical
+  // address (`requestBaseUrl`).
   //
   // `effectiveVisibility`, never the column: a `published`/`public` article
   // inside an `agents_only` folder is not on the help centre, so its URL is a

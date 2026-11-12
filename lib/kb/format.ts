@@ -521,8 +521,9 @@ export function articlePath(locale: string, slug: string): string {
  * them resolvable — the title text after the id changes whenever somebody edits
  * the title, and was never the key. A relative one (`/en/support/solutions/
  * articles/<id>`) is the portal's path pasted without its host: none is stored
- * today, and once the domain moves it would be ours, reaching the article only
- * by a 301 through `app/help/legacy`.
+ * today, and wherever this app draws one it reaches the article only by a 301
+ * through `app/help/legacy`, on `support.shipblu.com` too since that name
+ * moved here on 2026-11-11.
  *
  * The pattern finds the shape anywhere; whether the address is *ours* is
  * `isFreshdeskAddress`, asked of every match (`legacyFreshdeskLink`), so the
@@ -643,8 +644,9 @@ export function legacyArticleResolver(
  *
  * Only the `href` changes. A `#fragment` on the old address is kept, since it
  * named a heading in the same article; the link's text is left as written,
- * because it is the author's words, and a bare old URL shown there still
- * reaches the article through `app/help/legacy` once the domain moves.
+ * because it is the author's words, and a bare old URL shown there has
+ * reached the article through `app/help/legacy` since the domain moved on
+ * 2026-11-11.
  */
 export function rewriteLegacyArticleLinks(
   html: string,

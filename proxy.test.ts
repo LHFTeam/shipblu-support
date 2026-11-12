@@ -226,17 +226,18 @@ describe("the files a page's head names", () => {
 
 /**
  * The `Sitemap:` line names `publicBaseUrl()`'s host, which is the Render host
- * until the domain moves and the help centre's after. Either way a crawler
- * reading it must reach the sitemap, so the address is followed through this
- * proxy as the crawler would follow it.
+ * until `KB_PUBLIC_HOST` names the help centre's, and that host after: the
+ * domain moving on 2026-11-11 did not change it, and only the variable does.
+ * Either way a crawler reading it must reach the sitemap, so the address is
+ * followed through this proxy as the crawler would follow it.
  */
 describe('the sitemap robots.txt advertises', () => {
   it.each([
     [
-      'the Render host, before the domain moves',
+      'the Render host, before KB_PUBLIC_HOST names the domain',
       { APP_URL: 'https://shipblu-support.onrender.com' },
     ],
-    ['the help-centre host, after it', { KB_PUBLIC_HOST: KB_HOST }],
+    ['the help-centre host, once it does', { KB_PUBLIC_HOST: KB_HOST }],
   ])('is an address this proxy serves the sitemap at, on %s', async (_, env) => {
     setTestEnv(env);
     const robots = await (await robotsTxt()).text();

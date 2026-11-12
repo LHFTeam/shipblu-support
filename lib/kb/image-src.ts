@@ -237,7 +237,8 @@ const KB_IMAGE_ROUTE = '/api/kb/images/';
  * A path, not a URL: an article is drawn on the help centre's own host, on the
  * Render host, inside the widget's iframe and in the console, all of them this
  * app, so a relative path loads on every one — as `articlePath` makes links.
- * An absolute URL would name one host and break the day the domain moves.
+ * An absolute URL would name one host, and break the day that host stopped
+ * answering from this app.
  */
 export function kbImageSrc(id: string): string {
   return `${KB_IMAGE_ROUTE}${id}`;

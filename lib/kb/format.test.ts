@@ -296,8 +296,9 @@ describe('rewriteLegacyArticleLinks', () => {
     expect(rewriteLegacyArticleLinks(html, resolve)).toBe(html);
   });
 
-  // The portal's path pasted without its host: ours once the domain moves,
-  // and an article reached only by a 301 through the legacy route.
+  // The portal's path pasted without its host: on every host of ours since
+  // the domain moved, an article reached only by a 301 through the legacy
+  // route.
   it('rewrites a relative portal link, with or without a locale', () => {
     expect(
       rewriteLegacyArticleLinks(

@@ -37,10 +37,14 @@ const schema = z.object({
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
 
   /**
-   * Hostname the public help centre is served on, e.g. support.shipblu.com.
-   * The proxy rewrites requests arriving here under /kb, and canonical and
-   * sitemap URLs are built from it. Unset means the help centre is only
-   * reachable at /kb on the console's own hostname.
+   * Hostname the public help centre is served on, e.g. support.shipblu.com: a
+   * bare hostname, because `proxy.ts` compares it with `Host` as written. The
+   * proxy rewrites everything arriving there under /help and serves no console
+   * on it, and every address we publish is built from it (`publicBaseUrl()`):
+   * the widget's snippet, the sitemap, the canonicals and the survey and portal
+   * links. Unset, the help centre is reachable at /en, /ar and /help on every
+   * hostname, beside the console. Nothing checks that the name answers from
+   * this app, and one that does not publishes a 404 (`requestBaseUrl`).
    */
   KB_PUBLIC_HOST: z.string().optional(),
 
