@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { attachments, messages } from '@/db/schema';
 import { notReaction } from '@/lib/tickets/not-reaction';
+import { teamEchoLabel } from '@/lib/tickets/team-echo';
 import { HISTORY_LIMIT, type HistoryAuthor, type HistoryMessage } from './request';
 
 /**
@@ -46,6 +47,7 @@ export async function readHistory(conversationId: string): Promise<ConversationH
       direction: messages.direction,
       authorAgentId: messages.authorAgentId,
       bodyText: messages.bodyText,
+      meta: messages.meta,
     })
     .from(messages)
     .where(
@@ -73,7 +75,7 @@ export async function readHistory(conversationId: string): Promise<ConversationH
 
   return {
     messages: oldestFirst.map((row) => ({
-      from: authorOf(row.direction, row.authorAgentId),
+      from: authorOf(row.direction, row.authorAgentId, row.meta),
       text: row.bodyText,
       attachments: filesFor.get(row.id) ?? 0,
     })),
@@ -87,8 +89,20 @@ export async function readHistory(conversationId: string): Promise<ConversationH
  * reply, the out-of-hours acknowledgement — and `lib/tickets/outbound.ts`
  * writes those without one. Labelling it as an agent would tell Jev the
  * customer had already been answered by a person.
+ *
+ * Bar one kind: the team's reply typed somewhere else and filed from its echo
+ * — on a coexistence number's phone, or in Meta Business Suite — has no author
+ * either, because no agent here wrote it, and it is a person's answer.
+ * `teamEchoLabel` is the thread's own test for it, so what Jev is told and
+ * what the agent sees agree. Called automatic, it told Jev nobody had
+ * answered, and invited a suggestion repeating what the person had just said.
  */
-function authorOf(direction: 'inbound' | 'outbound', authorAgentId: string | null): HistoryAuthor {
+function authorOf(
+  direction: 'inbound' | 'outbound',
+  authorAgentId: string | null,
+  meta: Record<string, unknown> | null,
+): HistoryAuthor {
   if (direction === 'inbound') return 'customer';
-  return authorAgentId ? 'support_agent' : 'automatic_message';
+  if (authorAgentId || teamEchoLabel(meta)) return 'support_agent';
+  return 'automatic_message';
 }

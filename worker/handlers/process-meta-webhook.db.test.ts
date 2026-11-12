@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { and, eq, sql } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   contactIdentities,
@@ -13,6 +13,7 @@ import {
   webhookEvents,
 } from '@/db/schema';
 import { sendSurvey } from '@/lib/csat';
+import { resetEnvCache } from '@/lib/env';
 import type { ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { processWebhook } from './process-webhook';
@@ -128,12 +129,16 @@ async function store(messaging: MessagingEvent[]): Promise<string> {
   return event!.id;
 }
 
-/** One run of the job for a stored delivery, as the queue makes on each attempt. */
-function run(webhookEventId: string): Promise<void> {
+/**
+ * One run of the job for a stored delivery, as the queue makes on each attempt:
+ * by default one that is not the job's last.
+ */
+function run(webhookEventId: string, attempt = { attempts: 1, maxAttempts: 5 }): Promise<void> {
   return processWebhook({
     id: 'job-1',
     type: 'process_webhook',
     payload: { webhookEventId },
+    ...attempt,
   } as unknown as ClaimedJob);
 }
 
@@ -354,5 +359,199 @@ describe('an app_roles event in a batch retried whole', () => {
     ]);
     // Nothing else came of it: the message beside it is the only one filed.
     expect(await storedMids()).toEqual(['m_beside']);
+  });
+});
+
+describe('echoes in a Messenger batch', () => {
+  // Production's ids: this app, and Meta Business Suite's Page Inbox.
+  const OURS = '1009187740467732';
+  const SUITE = 263902037430900;
+  const PAGE = 'page-1';
+  const PSID = 'psid-amira';
+
+  beforeEach(() => {
+    vi.stubEnv('META_APP_ID', OURS);
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvCache();
+  });
+
+  /** A Messenger batch, stored the way the webhook route stores it. */
+  async function storePage(messaging: MessagingEvent[], standby: MessagingEvent[] = []) {
+    const [event] = await db
+      .insert(webhookEvents)
+      .values({
+        provider: 'meta',
+        channel: 'facebook',
+        connection: 'facebook_page',
+        payload: { object: 'page', entry: [{ id: PAGE, time: Date.now(), messaging, standby }] },
+        signatureVerified: true,
+      })
+      .returning({ id: webhookEvents.id });
+    return event!.id;
+  }
+
+  function customer(mid: string, at: number) {
+    return {
+      sender: { id: PSID },
+      recipient: { id: PAGE },
+      timestamp: at,
+      message: { mid, text: 'Where is my parcel?' },
+    };
+  }
+
+  function echoOf(mid: string, at: number, appId: number | string) {
+    return {
+      sender: { id: PAGE },
+      recipient: { id: PSID },
+      timestamp: at,
+      message: { mid, app_id: appId, is_echo: true, text: 'هيتم التواصل خلال اليوم' },
+    };
+  }
+
+  async function outbound() {
+    return db
+      .select({
+        mid: messages.channelMessageId,
+        authorAgentId: messages.authorAgentId,
+        echoSource: sql<string>`${messages.meta}->>'echoSource'`,
+      })
+      .from(messages)
+      .where(eq(messages.direction, 'outbound'))
+      .orderBy(messages.createdAt);
+  }
+
+  async function ticket() {
+    const [row] = await db
+      .select({
+        lastAgentMessageAt: conversations.lastAgentMessageAt,
+        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+        firstRespondedAt: conversations.firstRespondedAt,
+      })
+      .from(conversations);
+    return row!;
+  }
+
+  it('files Business Suite’s replies wherever they arrived, and no other echo', async () => {
+    const now = Date.now();
+    const asked = now - 10 * MINUTE;
+    const replied = now - 5 * MINUTE;
+    const id = await storePage(
+      [
+        customer('m_customer', asked),
+        echoOf('m_suite', replied, SUITE),
+        // Our own send coming back, as an app id written as a string.
+        echoOf('m_ours', replied + MINUTE, OURS),
+      ],
+      // Business Suite again, on a thread another app held then: still the
+      // team's reply. And that other app's own send, which is not.
+      [
+        echoOf('m_standby', replied + 2 * MINUTE, SUITE),
+        echoOf('m_holder', replied + 3 * MINUTE, '576817601276249'),
+      ],
+    );
+    // The customer's message fails the first run, so the echo beside it finds
+    // no ticket then; the retry stores the message first and files the echo.
+    failing.mids.add('m_customer');
+
+    await expect(run(id)).rejects.toThrow('m_customer');
+    expect(await outbound()).toEqual([]);
+
+    await run(id);
+
+    expect(await outbound()).toEqual([
+      { mid: 'm_suite', authorAgentId: null, echoSource: 'meta_business_suite' },
+      { mid: 'm_standby', authorAgentId: null, echoSource: 'meta_business_suite' },
+    ]);
+    expect(await ticket()).toEqual({
+      lastAgentMessageAt: new Date(replied + 2 * MINUTE),
+      lastCustomerMessageAt: new Date(asked),
+      firstRespondedAt: new Date(replied),
+    });
+    expect(await delivery(id)).toMatchObject({ error: null });
+
+    // Run once more, as a duplicate delivery would be: nothing new.
+    await run(id);
+    expect((await outbound()).map((row) => row.mid)).toEqual(['m_suite', 'm_standby']);
+  });
+
+  it('waits for the customer’s message when the reply is processed first', async () => {
+    // Meta sends each event in a delivery of its own, so the reply can be
+    // processed while the message opening the ticket waits on its retry.
+    const now = Date.now();
+    const asked = await storePage([customer('m_customer', now - 3 * MINUTE)]);
+    const reply = await storePage([echoOf('m_suite', now - 2 * MINUTE, SUITE)]);
+
+    await expect(run(reply)).rejects.toThrow('no live ticket for its customer yet');
+    expect(await outbound()).toEqual([]);
+
+    await run(asked);
+    await run(reply);
+
+    expect(await outbound()).toEqual([
+      { mid: 'm_suite', authorAgentId: null, echoSource: 'meta_business_suite' },
+    ]);
+    expect(await delivery(reply)).toMatchObject({ error: null });
+  });
+
+  it('gives up on the job’s last run, though the customer’s message still waits', async () => {
+    const now = Date.now();
+    await storePage([customer('m_customer', now - 3 * MINUTE)]);
+    const reply = await storePage([echoOf('m_suite', now - 2 * MINUTE, SUITE)]);
+
+    await run(reply, { attempts: 5, maxAttempts: 5 });
+
+    expect(await delivery(reply)).toMatchObject({ error: null });
+    expect(await outbound()).toEqual([]);
+  });
+
+  it('gives up at once on a reply to somebody with nothing on its way', async () => {
+    // A follow-up to a customer this app never heard from, or whose ticket is
+    // closed: no retry, no logged failure.
+    const id = await storePage([echoOf('m_suite', Date.now() - MINUTE, SUITE)]);
+
+    await run(id);
+
+    expect(await delivery(id)).toMatchObject({ attempts: 1, error: null });
+    expect(await outbound()).toEqual([]);
+    expect(
+      await db.select().from(contactIdentities).where(eq(contactIdentities.identifier, PSID)),
+    ).toEqual([]);
+  });
+
+  it('files nothing while this app does not know its own id', async () => {
+    vi.stubEnv('META_APP_ID', '');
+    resetEnvCache();
+    const now = Date.now();
+    const id = await storePage([
+      customer('m_customer', now - 10 * MINUTE),
+      echoOf('m_suite', now - 5 * MINUTE, SUITE),
+    ]);
+
+    await run(id);
+
+    expect(await outbound()).toEqual([]);
+    expect(await ticket()).toMatchObject({ lastAgentMessageAt: null, firstRespondedAt: null });
+  });
+
+  it('files no Instagram echo', async () => {
+    const now = Date.now();
+    const id = await store([
+      dm('igsid-karim', 'm_customer', now - 10 * MINUTE),
+      {
+        sender: { id: ACCOUNT },
+        recipient: { id: 'igsid-karim' },
+        timestamp: now - 5 * MINUTE,
+        message: { mid: 'm_ig_echo', is_echo: true, text: 'أهلاً' },
+      },
+    ]);
+
+    await run(id);
+
+    expect(await storedMids()).toEqual(['m_customer']);
+    expect(await outbound()).toEqual([]);
   });
 });

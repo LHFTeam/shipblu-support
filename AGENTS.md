@@ -1040,6 +1040,34 @@ routing. Nor does a coexistence number route by category, whatever its row
 says: moving its tickets between groups changes nothing about who types the
 replies (`routingModeOf`, **Routing by category**).
 
+**A Messenger reply typed in Meta Business Suite is filed from its echo, the
+same way.** Meta echoes everything the Page sends, and `echoDisposition`
+(`lib/meta/echo.ts`) files an echo only when its `app_id` is named and is not
+`META_APP_ID`. Business Suite's (the Page Inbox app) is filed whichever app
+held the thread. Another app's is filed only from `messaging`, on a thread this
+app held, because in `standby` it is the holder's own send, automations
+included. `ingestMetaEcho` then stores it as the team's reply, outbound and
+with no author, on the customer's live direct-message ticket only. It is
+labelled by `teamEchoLabel` and carries a "Sent from Business Suite" chip
+(`teamEchoChip`, the `elsewhere` badge tone), so it reads as the team's and as
+not typed here. It moves `last_agent_message_at` forward, then `onAgentReply`
+runs, and on a held ticket it ends the hold as an agent's reply does. Our own
+echo is told apart by its app id, never by finding its mid: `send_meta` writes
+the mid after Graph answers, and the echo can race that write. Nor is an
+Instagram echo filed, which names no
+app and includes an automated welcome sent seconds after the customer; with
+`META_APP_ID` unset nothing is filed. Meta sends each Messenger event in a
+delivery of its own, so a reply can be processed before the customer's message
+it answers: an echo that finds no ticket fails its delivery while one of the
+customer's is still unprocessed (`metaDeliveryPendingFrom`), never on the job's
+last run, and one older than every customer message on the ticket is not filed
+there. Nor is one sent within 10 s of the customer's message: no person has
+answered that fast, and Business Suite's automations echo under the same app
+id. Anything that asks whether a person on
+the team answered treats a team echo as one (`teamEchoLabel`; the canned
+suggestion's `authorOf`), never as `automatic_message`
+(`docs/PROJECT-STATE.md` §6.118).
+
 **A Business-app number connected in Meta's own interface is adopted, not
 signed in.** WhatsApp Manager and Business Suite can put a phone's number on
 Cloud API without Meta's window, so no code is exchanged and nothing is stored.

@@ -8811,6 +8811,152 @@ found"}` and not Next's page. The same route called by its own URL
       looks. The `email-check` repo rule now refuses a `z.email()` or an
       address-shaped regex (`[^\s@`) anywhere but the definition.
 
+118.  **Every Messenger echo was dropped, so a reply typed in Meta Business
+      Suite never reached its ticket, which read as unanswered.**
+      _2026-11-11 to 2026-11-12._ From 09:50 UTC on 2026-11-11 Meta hands each
+      new Messenger thread to this app: it opens with a `pass_thread_control`
+      naming this app (16 by 12:37 on the 12th), and its messages arrive in
+      `messaging`. The team answers those threads in Business Suite, whose
+      inbox is Meta's Page Inbox app (`263902037430900`). `parseMetaWebhook`
+      counted every `is_echo` and dropped it, to keep our own replies from
+      being filed as the customer's, so by 15:15 UTC on the 12th 19 Business
+      Suite replies on 8 tickets were stored nowhere. Each ticket read as
+      unanswered, `first_responded_at` and `last_agent_message_at` null, its
+      clocks running. Ticket 96283, answered in Business Suite at 12:29 on the
+      11th, recorded its first response at 14:39 on the 12th, from a console
+      reply.
+
+      **Measured, read-only, over every Meta delivery kept (2026-10-13 to
+      2026-11-12 15:15 UTC):**
+
+      - Every Messenger echo names its app, as a JSON number. 37 were this
+        app's, and each matched a row `send_meta` had stored; in the 14 timed,
+        the mid was written 0.3–1.3 s before the echo reached us. 220 were Page
+        Inbox's, none stored: 49 in `messaging` and 171 in `standby`. No other
+        app appeared, Freshchat (576817601276249) included.
+      - No Instagram echo names one: 99 of 99, 45 in `messaging` and 54 in
+        `standby`. 15 are one automated welcome (431 characters, and a
+        474-character English twin), each sent 2–5.4 s after the customer's
+        message, still firing on 11-09 and 11-11. Our own Instagram sends
+        matched by mid, 4 of 4 direct messages and the private reply, and none
+        of the 19 since 11-09 was ours.
+      - No `take_thread_control` followed a Page Inbox reply: the thread stays
+        this app's.
+
+      **The decision, in `echoDisposition` (`lib/meta/echo.ts`):** an echo is
+      filed when it names its app and the app is not `META_APP_ID`. Page
+      Inbox's is filed whichever app held the thread. Another app's is filed
+      only from `messaging`, on a thread this app held. Everything else stays
+      dropped and is counted by reason on the job's log line, as
+      `echo(es) filed` and `echo(es) ignored` with the reasons beside it.
+
+      - **Page Inbox's in `standby` is filed** (decided 2026-11-12: "answered
+        in business suite should be filed and shown on the ticket"). Another
+        app held those threads, but the team answering in Business Suite still
+        answered the customer. All 171 read as typed: none within 10 s of the
+        customer, the same signed greetings. They fall on 101 tickets, 94
+        never answered in the console, 93 of them still open or pending, which
+        read as unanswered until the replay below files them. Only one has
+        arrived since the switch.
+      - **Ours** is dropped, told apart by its app id, not by finding its mid:
+        `send_meta` writes the mid after Graph answers, and a match would race
+        that write.
+      - **A third app's in `standby`** is dropped. It is the holder's own
+        send, automations included, and its id says which app sent it, not
+        whether a person typed it. None has been seen.
+      - **Instagram**, because with no app id our own send could be told apart
+        only by racing `send_meta`'s write, and the welcome not at all. Filed,
+        it would record a first response 4 seconds into every thread it greets.
+        Revisit when Instagram's echoes name their app and the welcome is off,
+        or the team answers Instagram here, as it can since 2026-11-05.
+      - **`META_APP_ID` unset** files nothing: our own replies would read as
+        another app's and be filed twice.
+
+      A filed echo is the team's reply, as a coexistence number's phone reply
+      is (`ingestMetaEcho`, modelled on `ingestWhatsAppEcho`). It is stored as
+      an outbound reply with no author, so `HUMAN_AGENT` is never derived from
+      it. Its author line reads "Meta Business Suite" (`teamEchoLabel`), and
+      a "Sent from Business Suite" chip beside it (`teamEchoChip`, the
+      `elsewhere` tone, an external-link glyph) tells it from an agent's reply
+      at a glance. The phone's echoes on a coexistence number now carry "Sent
+      from the phone" the same way. It moves
+      `last_agent_message_at` forward only, never `last_customer_message_at`,
+      and `onAgentReply` follows. It never reopens a ticket or opens one. On a
+      ticket held for the router it ends the hold as an agent's reply does
+      (`endHold` as `manual`, then `afterHoldEnded`), so it does not read
+      "Routing…" once answered. Facebook's row routes by `default_group`
+      (2026-11-12), but nothing stops an admin moving it to `category`. It
+      files only on the customer's live direct-message ticket: one of the 19
+      had no contact here at all. Echoes left out as unreadable (unsent, or
+      with no id, no customer or nothing to show) are counted on the log
+      line, so a payload change that hid every echo would show. What Jev
+      is shown before a canned suggestion now calls such a reply, and a
+      coexistence phone's, `support_agent` rather than `automatic_message`, for
+      the same reason.
+
+      **Order is handled, not assumed.** Meta sends every Messenger event in a
+      delivery of its own (838 of 838 Page deliveries kept), and Business Suite
+      answered one thread 4.9 s after its first message. So the reply can be
+      processed while the customer's message waits on its retry, or beside it
+      after a deploy. An echo that finds no ticket fails its delivery, for the
+      queue to try again, while a delivery from that customer is stored and
+      unprocessed (`metaDeliveryPendingFrom`), and never on the job's last run.
+      A follow-up to a customer whose ticket is closed, or whom this app never
+      heard from, costs no retry. And an echo files only onto a ticket with a
+      customer message no newer than itself. Without that, a follow-up to a
+      closed ticket, processed after the customer's answer opened a new one,
+      would become the new ticket's first response, before its question.
+
+      **Nothing sent within 10 s of the customer's message is filed**
+      (`TYPED_REPLY_FLOOR_MS`). Business Suite's automations, such as an
+      instant reply or an away message, echo under the Page Inbox's id, as a
+      person's reply does. Of all 220 Page Inbox echoes, timed against the
+      customer's message before each, two came sooner than 10 s: a card at
+      4.9 s and a 270-character "thanks for contacting us" at 8.6 s, both
+      shaped like an automation. The quickest typed reply took 13.2 s.
+      Instagram's welcome went 2–5.4 s after the customer. A reply refused
+      here leaves its ticket reading as unanswered, which somebody sees. One
+      filed wrongly reads as answered, which nobody does.
+
+      **Cost accepted:** the echo names no person, so the rollup credits the
+      first response to whoever holds the ticket then
+      (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
+      name by the Sales team, most on Customer Care tickets.
+
+      **The 220 Page Inbox echoes are still in `webhook_events`**, one per
+      delivery: 49 in `messaging` and 171 in `standby`, received 2026-10-13 to
+      2026-11-12 13:55 UTC, all marked processed. The nightly cleanup deletes a
+      processed delivery 30 days after it was processed. 13 go at 00:00 UTC on
+      2026-11-13, then a few most nights, and the last on 2026-12-13. Once this
+      is deployed, a replay files them, and a replay is a production write:
+      `process_webhook` skips a processed row. The deliveries are listed by:
+
+      ```sql
+      select distinct w.id from webhook_events w
+      cross join lateral jsonb_array_elements(case jsonb_typeof(w.payload->'entry')
+        when 'array' then w.payload->'entry' else '[]' end) en(entry)
+      cross join lateral (values ('messaging'), ('standby')) arr(k)
+      cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
+        when 'array' then en.entry->arr.k else '[]' end) e(value)
+      where w.provider = 'meta' and w.payload->>'object' = 'page'
+        and (e.value->'message'->>'is_echo')::boolean
+        and e.value->'message'->>'app_id' = '263902037430900';
+      ```
+
+      A replayed echo files only on its customer's live ticket, and only when
+      the ticket has a customer message no newer than the echo. So an old reply
+      whose customer has written again since, on a new ticket, stays out. One
+      whose ticket is closed stays out too.
+
+      For each id: set its `processed_at` to null, then run
+      `npm run job -- process_webhook webhookEventId=<id>`. Every other item in
+      a delivery is idempotent on a second run (`process-meta-webhook.ts`).
+      Then run `rollup_metrics from=2026-10-13` so the reports take the first
+      responses. The way back is deleting the rows the replay filed (`messages`
+      whose `meta->>'echoSource'` is `meta_business_suite`), which leaves the
+      tickets' `last_agent_message_at` and `first_responded_at` where the
+      replay moved them.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

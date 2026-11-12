@@ -24,7 +24,8 @@ export function latest(column: AnyPgColumn, at: Date): SQL {
  * `column` moved back to `at`, and never forward: the twin of `latest()` for a
  * "when did this first happen" stamp that a late-processed, older event can
  * still correct — `first_responded_at` when a reply typed on the WhatsApp
- * Business app is processed after a later one (`onAgentReply`).
+ * Business app or in Meta Business Suite is processed after a later one
+ * (`onAgentReply`).
  *
  * `least` ignores nulls, so a column nothing has written yet takes `at`. Bound
  * as `latest()` binds it, for its reason.

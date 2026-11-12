@@ -24,9 +24,11 @@ export type AgentReplyMessage = Omit<
  * the path that moves `lastAgentMessageAt` and stops the SLA clocks for a reply
  * written in the console, and the `automated-reply-boundary` check forbids the
  * first in `outbound.ts`: an acknowledgement written by software must leave the
- * ticket in the unanswered queue. (The one other path is a person too: a reply
- * the business typed on the WhatsApp Business app of a number connected
- * through coexistence, which `ingestWhatsAppEcho` counts the same way.) What each sender checks before it gets here — permission, read-only
+ * ticket in the unanswered queue. (The two other paths are a person too: a
+ * reply the business typed on the WhatsApp Business app of a number connected
+ * through coexistence, which `ingestWhatsAppEcho` counts the same way, and one
+ * typed in Meta Business Suite on a Messenger thread, which `ingestMetaEcho`
+ * does.) What each sender checks before it gets here — permission, read-only
  * channels, the messaging windows, the template's account — stays in its action.
  *
  * Returns the new message's id.

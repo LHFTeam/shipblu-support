@@ -24,8 +24,44 @@ describe('voiceOf', () => {
       author: 'WhatsApp Business app',
       avatar: 'business-app',
     });
-    // A person typed it, so it is not badged as the machine's.
-    expect(voice.badges).toEqual([]);
+    // A person typed it, so it is not badged as the machine's — only as sent
+    // from outside the console.
+    expect(voice.badges).toEqual([{ tone: 'elsewhere', label: 'Sent from the phone' }]);
+  });
+
+  it('names Meta Business Suite, and no agent, on a Messenger reply typed there', () => {
+    const voice = voiceOf(message(), {
+      echo: true,
+      echoSource: 'meta_business_suite',
+      metaKind: 'direct_message',
+    });
+
+    expect(voice).toMatchObject({
+      from: 'out',
+      kind: 'message',
+      author: 'Meta Business Suite',
+      avatar: 'business-app',
+    });
+    // A person typed it in Business Suite: a direct message, not the machine's,
+    // and said to be from Business Suite, so it is told from an agent's reply.
+    expect(voice.badges).toEqual([
+      { tone: 'elsewhere', label: 'Sent from Business Suite' },
+      { tone: 'private', label: 'Direct message' },
+    ]);
+  });
+
+  it('says another app sent a reply it filed from one, not that the bot did', () => {
+    const voice = voiceOf(message(), { echo: true, echoSource: 'other_app' });
+    expect(voice).toMatchObject({
+      author: 'Another Messenger app',
+      avatar: 'business-app',
+      badges: [{ tone: 'elsewhere', label: 'Sent from another app' }],
+    });
+  });
+
+  it('reads a source it does not know as the bot, as an echo with none', () => {
+    const voice = voiceOf(message(), { echo: true, echoSource: 'carrier_pigeon' });
+    expect(voice).toMatchObject({ kind: 'bot', author: 'Customer bot', avatar: 'bot' });
   });
 
   it('calls an echo with no source the customer bot, written by a machine', () => {

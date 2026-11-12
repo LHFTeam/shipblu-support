@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
-import type { ClaimedJob } from '@/lib/queue';
+import { isFinalAttempt, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { ingestInboundEmail } from '@/lib/tickets/ingest';
 import { processMetaWebhook } from './process-meta-webhook';
@@ -72,6 +72,7 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
         id: event.id,
         payload: event.payload,
         connection: event.connection,
+        finalAttempt: isFinalAttempt(job),
       });
       // A Meta batch fails whole on any failed item, so success means every
       // item went in, and an error an earlier attempt left would read as one
