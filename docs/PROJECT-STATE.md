@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-11, against `main` at `7605993`. The figures in §1 and §5
+Last updated: 2026-11-12, against `main` at `7605993`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
@@ -277,10 +277,11 @@ settings are unchanged since the switch, 36 tickets carry a category (`sales`
 20, `customer_support` 14, `merchant_support` 1, `courier_jobs` 1), every one
 of the 36 `category_changed` events is Jev's, and `ai_category_runs` holds 195
 `live` answers under `apply`, the last at 20:28 UTC; no person has labelled a
-ticket or moved a filing. Nothing has routed yet: Web Chat has been in
+ticket or moved a filing. Nothing had routed by then (the first decisions were
+written on 2026-11-12; §5.1 has the count): Web Chat has been in
 `category` mode since 14:45 UTC on 2026-10-30, set from the console, the first
-channel to route, and every other channel is on `default_group`; the widget has
-opened no ticket since 14:15 UTC on 2026-10-20, so at 21:20 UTC on 2026-11-07
+channel to route, and every other channel is on `default_group`; the widget
+opened no ticket between 14:15 UTC on 2026-10-20 and 2026-11-12, so at 21:20 UTC on 2026-11-07
 `routing_decisions` held no row and no `settle_routing` job existed (the plan's
 item 10 has the staffing a routed chat lands on). The backlog
 (`backfill_category_ai mode=apply`) waits for the user's go-ahead; the week of
@@ -912,8 +913,9 @@ time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
 Every human channel put together holds **173 conversations** — 140 Facebook, 18
-Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat are still
-test traffic from 18–21 August, but **Facebook and Instagram are not**: those 158
+Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat were still
+test traffic from 18–21 August when this was counted (web chat no longer: below,
+2026-11-12), but **Facebook and Instagram are not**: those 158
 threads are real people writing to a page and an account the public can already
 reach, filed under bare numeric ids and none of them answered by anybody.
 
@@ -928,7 +930,8 @@ Admin default to Customer Care, the two coexistence numbers (Magdy Mohamed and
 Nayera Mohamed) to Merchant Care, and the bot to no group; still no `portal`
 row, and no comment row. Seven web chat tickets existed in all then. _Read
 2026-11-12 at 15:16 UTC:_ 33, 26 of them created that day, the first at 08:23
-UTC, when the merchant dashboard began loading the widget; the one before it
+UTC, the day the merchant dashboard began loading the widget (the owner's
+word; which page each chat was opened from was not read); the one before it
 was opened at 14:15 UTC on 2026-10-20. So web chat is no longer test traffic.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
@@ -1595,7 +1598,12 @@ is code:
   2026-11-11. PR 6, retiring the importer, waits for the disconnection. The
   plan's checklist still shows PRs 2 and 3 unchecked: its own checks there (a
   Restore of a version carrying a Freshdesk link, the six shapes on the
-  deployed build) have not all been run.
+  deployed build) have not all passed. Read 2026-11-12, the five article
+  shapes 301 on both hosts and the folder shape 404s. _Since some day between
+  2026-11-07 and 2026-11-12 `support.shipblu.com` answers from this app (the
+  `KB_PUBLIC_HOST` paragraph below), so a Freshdesk article link on that name
+  301s to the article here; whether the dashboard still loads Freshchat has
+  not been read._
 
 - **Instagram through Unified Login — the next configuration task, and none of
   it is a deploy.** The direct connection's token expired on 2026-10-29 (the
@@ -2038,19 +2046,19 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   the CSAT and portal-email links. It is dormant while CSAT is off, so check it
   before CSAT is switched on. Set it to `support.shipblu.com` again only once
   that name answers from this app, on both services together
-  (`plans/freshdesk-disconnection.md`). What follows is the record of
-  August and September._
+  (`plans/freshdesk-disconnection.md`)._
 
-  _**`support.shipblu.com` answers from this app since 2026-11-12, and
+  _**`support.shipblu.com` answered from this app when read on 2026-11-12, and
   `KB_PUBLIC_HOST` still does not name it.** Read at about 15:10 UTC that
   day: the name is a CNAME of `shipblu-support.onrender.com` (TTL 14400; it
-  was Freshdesk's on 2026-11-07), `/` answers `307 → /ar` with
+  was Freshdesk's on 2026-11-07, and the day it changed was not recorded), `/` answers `307 → /ar` with
   `x-render-origin-server: Render`, `/en/track`, `/widget` and
   `/en/a/packaging-guidelines` answer 200, and Freshdesk's article URLs 301 to
   their articles there (`/support/solutions/articles/154000189336` to the
   Arabic article, the same path under `/en` to the English one). The first web
-  chat after the move was created at 08:23 UTC. Nobody recorded the move; it
-  was read from DNS and from output. But the web service's variable was not
+  chat in three weeks was created at 08:23 UTC that day; which host it was
+  loaded from was not read. Nobody recorded the move; it was read from DNS and
+  from output. But the web service's variable was not
   changed with it. On both hosts `/widget/embed.js`'s fallback `BASE`, all 114
   sitemap `<loc>`, the `Sitemap:` line of `robots.txt` and the article's
   canonical and hreflang still name `shipblu-support.onrender.com`. And
@@ -2060,7 +2068,8 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   redirect to the login page rather than the help centre's 404. So the last
   two steps of the plan's checklist are open: set
   `KB_PUBLIC_HOST=support.shipblu.com` on the web service and the worker
-  together, then run its check. The worker's value is still unverified._
+  together, then run its check. The worker's value is still unverified. What
+  follows is the record of August and September._
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -2252,11 +2261,11 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   to a category mode _while the classifier is in `apply`_. The classifier has
   been in `apply` since 18:37 UTC on 2026-10-29, and Web Chat has been in
   `category` mode since 14:45 UTC on 2026-10-30, the first channel to route;
-  every other channel is on `default_group`. No web chat ticket has opened
-  since 14:15 UTC on 2026-10-20, and a customer writing again on an existing
+  every other channel is on `default_group`. No web chat ticket opened
+  between 14:15 UTC on 2026-10-20 and 2026-11-12, and a customer writing again on an existing
   one never routes, so at about 21:20 UTC on 2026-11-07 there was no
   `routing_decisions` row and no `settle_routing` job. _That ended on
-  2026-11-12, when the merchant dashboard began loading the widget: the first
+  2026-11-12, the day the merchant dashboard began loading the widget: the first
   web chat ticket in three weeks opened at 08:23 UTC and its decision was
   written at 08:24. Read at 15:16 UTC that day, 26 web chat tickets had opened
   and `routing_decisions` held 26 rows, every one decided, with a
@@ -2414,7 +2423,10 @@ nobody has run, that somebody has to actually watch against the real provider:
   Outlook, confirm it threads rather than opening a new ticket. Threading is the
   thing naive helpdesks get wrong, and the two bugs in §6.4 were both found by
   reading the API docs rather than by testing — there may be a third.
-- **The widget on a genuine third-party origin**, not localhost. The
+- **The widget on a genuine third-party origin**, not localhost. _It runs on
+  one in production since 2026-11-12: `frame-ancestors` names five origins
+  that are not this app's and 26 web chats opened that day (§5.1). Which
+  origin each came from, and a signed identity, have not been read._ The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.
@@ -2428,7 +2440,7 @@ nobody has run, that somebody has to actually watch against the real provider:
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
   which was read as "nothing links to them" and was not: 29 links **inside the
   articles** pointed at those legacy paths until 2026-09-03, and `support.
-shipblu.com` served Freshdesk until 2026-11-12 (§5.1), so each one took a
+shipblu.com` served Freshdesk until November 2026 (§5.1), so each one took a
   reader out of this help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
@@ -3245,7 +3257,7 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   composer and the editor now come from `requestBaseUrl()` and follow the host
   the agent is on. §5.1 carries what is still broken for everything else.
   _(By 2026-11-07 the web service no longer publishes `support.shipblu.com`
-  either, and since 2026-11-12 that name answers from this app while the
+  either, and by 2026-11-12 that name answered from this app while the
   variable still does not name it; §5.1 has both measurements.)_
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in

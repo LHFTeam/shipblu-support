@@ -13,15 +13,15 @@ Freshworks. The Meta side of the cutover — Freshchat is still Messenger's
 primary receiver — is §5.1 of `docs/PROJECT-STATE.md` and is not repeated here;
 it is one line in the checklist.
 
-> **2026-11-12: `support.shipblu.com` has moved here, and one step of the
+> **Read 2026-11-12: `support.shipblu.com` has moved here, and one step of the
 > move is still open.** The name is now a CNAME of
-> `shipblu-support.onrender.com` and answers from this app; the first web chat
-> from it was at 08:23 UTC. `KB_PUBLIC_HOST` was not set with it, so every
+> `shipblu-support.onrender.com` and answers from this app; it was Freshdesk's
+> on 2026-11-07, and the day it changed was not recorded. `KB_PUBLIC_HOST` was not set with it, so every
 > published URL still names the Render host and the console is reachable on
 > the support host. The [checklist](#checklist-before-freshdesk-is-disconnected)
-> has what was read and what is left. Everything below that says the name
-> "still" serves Freshdesk is the audit of 2026-11-06 and 2026-11-07, kept as
-> the record of what was measured then.
+> has what was read and what is left. Everything below that speaks of the
+> name serving Freshdesk, or of the move as still to come, is the audit of
+> 2026-11-06 and 2026-11-07, kept as the record of what was measured then.
 
 ## How it was measured
 
@@ -609,7 +609,7 @@ holds one.
 | Marketing site and go.shipblu.com    | Point "Support" somewhere that is not Freshdesk, or leave it on `support.shipblu.com` and let the domain move fix it.                                                                                                          |
 | App Store Connect                    | The myBlu listing's support URL, as above.                                                                                                                                                                                     |
 | Mail admin (Zoho)                    | Say where `support@shipblu.com` and `help@shipblu.com` deliver. If it is Freshdesk, forward them here or change the address the help centre gives. Remove `include:email.freshdesk.com` from SPF once Freshdesk sends nothing. |
-| DNS                                  | The `support.shipblu.com` move, in the checklist's order.                                                                                                                                                                      |
+| DNS                                  | The `support.shipblu.com` move, in the checklist's order. The CNAME had moved by 2026-11-12; `KB_PUBLIC_HOST` on the web service and the worker, and the checklist's last check, are left.                                     |
 
 ## Checklist before Freshdesk is disconnected
 
@@ -649,14 +649,16 @@ Order matters. The check beside each item is what proves it, not the merge.
 
 **Moving `support.shipblu.com`, if the name is kept**
 
-The name moved on 2026-11-12, and nobody recorded it: the boxes ticked below
-were read from DNS and from output at about 15:10 UTC that day, not from the
-Render dashboard. The last two are open.
+The name moved between 2026-11-07 and 2026-11-12, and nobody recorded it:
+what is said below was read from DNS and from output at about 15:10 UTC on
+2026-11-12, not from the Render dashboard. The move itself is ticked. The
+last two steps are open, PR 3's check passes five shapes of six, and the TTL
+step, which nobody observed, gates nothing now.
 
-- [x] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
-      host. Live since `932e8ea`; the three article shapes 301, and the folder
-      shape still 404s for want of a `kb_redirects` row
-      (`docs/PROJECT-STATE.md`, header).
+- [ ] **PR 3 is deployed.** _Check:_ the six legacy shapes 301 on the Render
+      host. Deployed (`docs/PROJECT-STATE.md`, header). Read 2026-11-12, the
+      five article shapes 301 on both hosts and the folder shape 404s, for
+      want of a `kb_redirects` row, so the check has not passed.
 - [ ] **Lower the CNAME's TTL** (14400 today) at least a TTL ahead. Not
       observed either way; the record read 14400 after the move.
 - [x] **Add `support.shipblu.com` as a custom domain** on the
@@ -733,8 +735,8 @@ From a shell:
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://support.shipblu.com/
 ```
 
-On 2026-11-07 `302 https://support.shipblu.com/support/home`, Freshdesk. Since
-2026-11-12 `307 https://support.shipblu.com/ar`, this app.
+On 2026-11-07 `302 https://support.shipblu.com/support/home`, Freshdesk.
+On 2026-11-12 `307 https://support.shipblu.com/ar`, this app.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://shipblu-support.onrender.com/support/solutions/articles/154000189336

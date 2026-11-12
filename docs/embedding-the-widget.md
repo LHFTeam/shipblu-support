@@ -17,7 +17,7 @@ on **our** origin, where the host page's CSS cannot reach it and where the
 visitor's token lives in storage the host page cannot read.
 
 `<helpdesk-host>` is whichever hostname serves this app. In production two do:
-`support.shipblu.com`, whose DNS has pointed here since 2026-11-12, and
+`support.shipblu.com`, whose DNS pointed here when read on 2026-11-12, and
 `shipblu-support.onrender.com`. Load it from the same host in every environment
 — the script frames the origin it was served from, so a staging dashboard
 pointing at production opens production's chat. And pick one of the two and
@@ -191,7 +191,8 @@ loses every character that is not a letter, a digit, `_` or `-`, and is cut to
 64 characters; its case is kept and so are its hyphens, so `SB-4471` is signed
 as `SB-4471`, not `SB4471` and not `sb-4471`. The email is lower-cased and
 trimmed, and a value that is not an address counts as empty. Empty fields are
-still their side of the `|`. A signature over anything else is a 401. The signature covers the identifying half only, deliberately:
+still their side of the `|`. Letters and digits here are ASCII only: an
+Arabic-Indic digit is removed like any other character. The signature covers the identifying half only, deliberately:
 name, phone and `meta` are decoration, and covering them would mean a merchant
 renaming themselves in the dashboard silently stops being identified at all.
 

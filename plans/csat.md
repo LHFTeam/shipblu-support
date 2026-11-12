@@ -43,7 +43,7 @@ surveys not going out, and the code says why before the data does:
 3. **The link names a host that does not serve this app.** `publicBaseUrl()`
    returns `support.shipblu.com`, which still answers from Freshdesk
    (`docs/PROJECT-STATE.md` §5). The one survey ever sent carried a dead link.
-   _(True when written. Since 2026-11-12 that name serves this app, and the
+   _(True when written. Read 2026-11-12, that name serves this app, and the
    web service publishes the Render host; the worker's `KB_PUBLIC_HOST`, which
    builds this link, is unverified — §5.1.)_
 4. **On Facebook and Instagram it is a text link that mostly cannot send.** Half

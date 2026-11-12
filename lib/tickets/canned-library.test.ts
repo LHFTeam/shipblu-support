@@ -60,9 +60,11 @@ describe('the canned-response library', () => {
     expect(text).not.toMatch(/[[\]{}<>]|_{2,}|\bX{2,}\b|\.{3}|…/);
   });
 
-  // `support.shipblu.com` still serves the Freshdesk help centre, so a link
-  // written into the library would point at the old one — and a link that
-  // moves cannot be fixed by editing a row nobody knows is stale. Agents add
+  // The address the help centre publishes has not settled:
+  // `support.shipblu.com` served Freshdesk until November 2026, and published
+  // URLs name the Render host until `KB_PUBLIC_HOST` names that one. A link
+  // written into the library would point at an address that moves — and a link
+  // that moves cannot be fixed by editing a row nobody knows is stale. Agents add
   // links through the knowledge panel, which builds them from the live host.
   // The customer is already talking to support, so no address or number either.
   it.each(bodies)('$key ($locale) carries no link, address or phone number', ({ text }) => {
