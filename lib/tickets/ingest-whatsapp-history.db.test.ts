@@ -19,6 +19,7 @@ import type {
   NormalisedHistoryMessage,
   NormalisedInboundMessage,
 } from '@/lib/whatsapp/types';
+import { UNNAMED_SUBJECT } from './customer-text';
 import { ingestWhatsAppMessage } from './ingest-whatsapp';
 import {
   applyWhatsAppContactSync,
@@ -230,6 +231,35 @@ describe('ingestWhatsAppHistoryChunk', () => {
     expect(again).toEqual({ skipped: null, threads: 2, created: 0, inserted: 0, duplicates: 4 });
     expect(await imported()).toHaveLength(2);
     expect(await db.select({ id: messages.id }).from(messages)).toHaveLength(4);
+  });
+
+  it('names a thread after what was said in it, never a reaction', async () => {
+    await coexistenceChannel();
+    const reacted = (wamid: string, customer: string, sentAt: string) =>
+      message(wamid, customer, 'inbound', sentAt, { type: 'reaction', text: '[reacted 👍]' });
+
+    await ingestWhatsAppHistoryChunk(
+      chunk([
+        // The business wrote first, the customer reacted, and then spoke.
+        message('wamid.p1', PABLO, 'outbound', '2025-02-10T23:40:00Z', {
+          text: 'Your parcel is on its way',
+        }),
+        reacted('wamid.p2', PABLO, '2025-02-10T23:41:00Z'),
+        message('wamid.p3', PABLO, 'inbound', '2025-02-10T23:42:00Z', { text: 'When exactly?' }),
+        // A thread holding nothing but a reaction is named as any wordless one is.
+        reacted('wamid.r1', ROSA, '2025-02-10T23:41:00Z'),
+      ]),
+      RECEIVED,
+    );
+
+    const [rosa, pablo] = await imported(); // by external id: Rosa's number sorts first
+    expect(pablo!.subject).toBe('When exactly?');
+    expect(rosa!.subject).toBe(UNNAMED_SUBJECT.whatsapp);
+
+    // The reaction is still kept, tagged as one, for the timeline to pair.
+    const rows = await messagesOf(pablo!.id);
+    expect(rows.map((row) => row.channelMessageId)).toEqual(['wamid.p1', 'wamid.p2', 'wamid.p3']);
+    expect(rows[1]!.meta).toMatchObject({ whatsappType: 'reaction' });
   });
 
   it('gathers a thread spread over phases into one conversation, whatever order they arrive in', async () => {

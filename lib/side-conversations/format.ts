@@ -1,4 +1,5 @@
 import { stripSubjectPrefixes } from '@/lib/email/threading';
+import { isReaction } from '@/lib/whatsapp/reaction';
 
 /**
  * The words a side conversation puts in front of a hub.
@@ -52,6 +53,27 @@ export function sideConversationFooter(conversationNumber: number): string {
     'Reply to this email and your answer reaches the ShipBlu support team on',
     `ticket #${conversationNumber}. The customer cannot see this thread.`,
   ].join(' ');
+}
+
+/**
+ * Whether a message may be quoted to a hub as what the customer wrote.
+ *
+ * Something the customer said: inbound, a `reply`, and not a reaction. Each
+ * half closes a way the quote lies about who said what. An outbound reply is
+ * ours, and `quoteAnchor` would head it "The customer wrote" because an agent's
+ * row has no contact. An inbound `system` row is the notice we write when a
+ * form's file could not be stored, inbound only because it sits on the
+ * customer's side of the thread. A note is ours, and a reaction is `[reacted
+ * 🙏]`. The composer picks its anchor with this and the action asks it again,
+ * because the id arrives in a form field and a hand-made POST can name any row
+ * on the ticket.
+ */
+export function isQuotableAnchor(message: {
+  direction: string;
+  kind: string;
+  meta: unknown;
+}): boolean {
+  return message.direction === 'inbound' && message.kind === 'reply' && !isReaction(message.meta);
 }
 
 /**

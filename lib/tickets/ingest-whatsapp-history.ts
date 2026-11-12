@@ -145,7 +145,13 @@ async function importThread(input: {
 
   return db.transaction(async (tx) => {
     const statusId = await requireResolvedStatusId(tx);
-    const opening = fresh.find((message) => message.direction === 'inbound') ?? fresh[0]!;
+    // The thread is named after the first thing said in it, the customer's
+    // where there is one. Never a reaction: Meta's history carries them like
+    // any other message, and a thread whose customer reacted 👍 to the
+    // business's opener before writing anything would be titled `[reacted 👍]`.
+    // The live path files reactions apart before a subject is ever chosen.
+    const said = fresh.filter((message) => message.type !== 'reaction');
+    const opening = said.find((message) => message.direction === 'inbound') ?? said[0];
 
     const [inserted] = await tx
       .insert(conversations)
@@ -153,7 +159,7 @@ async function importThread(input: {
         channel: 'whatsapp',
         channelId: channel.id,
         statusId,
-        subject: subjectFrom(opening.text),
+        subject: subjectFrom(opening?.text ?? ''),
         requesterContactId: contactId,
         groupId: channel.defaultGroupId,
         lastMessageAt: newest,
