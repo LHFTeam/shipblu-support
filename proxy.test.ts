@@ -1,5 +1,13 @@
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
+import { normalizeMetadataRoute } from 'next/dist/lib/metadata/get-metadata-route';
+import {
+  DEFAULT_METADATA_ROUTE_EXTENSIONS,
+  isMetadataRouteFile,
+} from 'next/dist/lib/metadata/is-metadata-route';
+import { normalizeAppPath } from 'next/dist/shared/lib/router/utils/app-paths';
 import { LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
@@ -95,6 +103,97 @@ describe('every other hostname', () => {
     // missing marker would say anything was wrong.
     expect(visit('http://127.0.0.1:10000/probe').status).not.toBe(307);
     expect(rewrittenTo(visit('http://127.0.0.1:10000/probe'))).toBeNull();
+  });
+});
+
+/**
+ * The favicon, and every other file a page's `<head>` names from the root.
+ *
+ * `/icon.svg` answered 307 to /login on both hosts until 2026-11-12, so no
+ * signed-out reader of the help centre saw the icon. Once `KB_PUBLIC_HOST`
+ * names the domain, the help-centre host would have rewritten it to
+ * `/help/icon.svg`, which 404s. The routes are named by Next's own functions,
+ * from the files `app/` holds, so a new icon is checked the day it is added,
+ * under the name Next serves it at.
+ */
+describe("the files a page's head names", () => {
+  const DRAWN_BY_CODE = new RegExp(`\\.(?:${DEFAULT_METADATA_ROUTE_EXTENSIONS.join('|')})$`);
+
+  /** Where Next serves an `app/` file. A file drawn by code loses its extension. */
+  const routeOf = (file: string) =>
+    normalizeAppPath(normalizeMetadataRoute(file.replace(DRAWN_BY_CODE, '')));
+
+  /**
+   * The files directly in `app/` and in its route groups, which add no segment.
+   * A file deeper down is served under its segment (`/inbox/icon.png`), which
+   * is that segment's to make public or not. `robots` and `sitemap` are the
+   * help centre's, and are rewritten to it on every host (above).
+   */
+  function headFiles(dir: string, segment = ''): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const file = `${segment}/${entry.name}`;
+      if (entry.isDirectory()) {
+        return /^\(.+\)$/.test(entry.name) ? headFiles(`${dir}/${entry.name}`, file) : [];
+      }
+      const isHeadFile =
+        isMetadataRouteFile(file, DEFAULT_METADATA_ROUTE_EXTENSIONS, true) &&
+        !/^(?:robots|sitemap)\./.test(entry.name);
+      return isHeadFile ? [file] : [];
+    });
+  }
+
+  const present = headFiles(fileURLToPath(new URL('./app', import.meta.url)));
+
+  // The shapes the pattern claims beyond what `app/` holds today: a numbered
+  // variant, a file in a route group, an image drawn by code, and the rest of
+  // Next's head files.
+  const possible = [
+    '/apple-icon.png',
+    '/icon1.png',
+    '/(auth)/icon.png',
+    '/icon.tsx',
+    '/opengraph-image.tsx',
+    '/twitter-image.jpg',
+    '/favicon.ico',
+    '/manifest.ts',
+    '/manifest.json',
+  ];
+
+  it('include the icon every page links, so the checks below cannot pass on nothing', () => {
+    expect(present).toContain('/icon.svg');
+    expect(routeOf('/icon.svg')).toBe('/icon.svg');
+  });
+
+  it('are what Next calls a metadata file, each of them', () => {
+    for (const file of possible) {
+      expect(isMetadataRouteFile(file, DEFAULT_METADATA_ROUTE_EXTENSIONS, true), file).toBe(true);
+    }
+  });
+
+  it.each([
+    ['the Render host, before KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', undefined],
+    ['the domain, before KB_PUBLIC_HOST is set', KB_HOST, undefined],
+    ['the Render host, once KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', KB_HOST],
+    ['the help-centre host', KB_HOST, KB_HOST],
+  ])('are served as themselves to a signed-out visitor on %s', (_, host, kbHost) => {
+    setTestEnv({ KB_PUBLIC_HOST: kbHost });
+    for (const file of [...present, ...possible]) {
+      const route = routeOf(file);
+      // Neither redirected to /login nor rewritten under /help.
+      expect(visit(`https://${host}${route}`).headers.get('x-middleware-next'), route).toBe('1');
+    }
+  });
+
+  it('are the files themselves, at the root, and nothing that starts like one', () => {
+    for (const path of [
+      '/inbox/icon.svg',
+      '/icon.svg/x',
+      '/icons',
+      '/iconography',
+      '/icon.svg.map',
+    ]) {
+      expect(visit(`https://shipblu-support.onrender.com${path}`).status, path).toBe(307);
+    }
   });
 });
 
