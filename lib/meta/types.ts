@@ -49,6 +49,12 @@ export type MetaMessagingEvent = {
     attachments?: MetaRawAttachment[];
     reply_to?: { mid?: string; story?: unknown };
     is_echo?: boolean;
+    /**
+     * On an echo, the app that sent the message — a JSON number on every
+     * Messenger echo production has stored (`263902037430900`), and absent on
+     * every Instagram one. Read through `echoAppId`, never compared raw.
+     */
+    app_id?: number | string;
     is_deleted?: boolean;
     is_unsupported?: boolean;
     /** Set when the customer tapped one of our quick replies: its `payload`, and the title as `text`. */
@@ -160,6 +166,42 @@ export type NormalisedDirectMessage = {
    */
   standby: boolean;
   senderName: string | null;
+  sentAt: Date;
+  text: string;
+  attachments: MetaAttachment[];
+  replyToMid: string | null;
+  raw: Record<string, unknown>;
+};
+
+/**
+ * A message the Page or the Instagram account sent, as Meta echoes it back:
+ * ours, typed in Meta Business Suite, or sent by any other app on the account.
+ *
+ * Normalised for every echo the parser can read, whoever sent it, because who
+ * sent it is the question and the parser cannot answer it: our own app id is
+ * configuration (`META_APP_ID`), and the parser reads nothing but the payload.
+ * `echoDisposition` (`lib/meta/echo.ts`) decides which are filed.
+ */
+export type NormalisedEcho = {
+  platform: MetaPlatform;
+  connection: MetaConnection | null;
+  /** Meta's message id: the idempotency key, as a customer's message's is. */
+  mid: string;
+  /**
+   * The sending app's id as a string, or null where the echo names none —
+   * every Instagram echo stored to 2026-11-12. No Instagram echo is filed,
+   * named or not (`echoDisposition`).
+   */
+  appId: string | null;
+  /** The customer the message went to: the echo's recipient. */
+  to: string;
+  /** The Page or account that sent it: the echo's sender. */
+  accountId: string | null;
+  /**
+   * Arrived in `standby`: another app held the thread on this connection when
+   * the message was sent. In `messaging`, this app did.
+   */
+  standby: boolean;
   sentAt: Date;
   text: string;
   attachments: MetaAttachment[];
@@ -318,8 +360,12 @@ export type NormalisedMetaWebhook = {
   interactions: NormalisedInteraction[];
   feedbacks: NormalisedFeedback[];
   appRoles: NormalisedAppRole[];
-  /** Echoes of our own outbound messages, counted but never ingested. */
-  echoes: number;
+  /**
+   * Every echo of a message the Page or the account sent, ours included, that
+   * could be filed: one with an id, a customer and something to show (a
+   * message unsent is left out). `echoDisposition` says which of them are.
+   */
+  echoes: NormalisedEcho[];
   /**
    * Messages that were nothing but a `template` card with nothing in it —
    * Instagram's phone-number card — counted but never ingested.

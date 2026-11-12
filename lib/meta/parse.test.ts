@@ -137,7 +137,7 @@ describe('parseMetaWebhook', () => {
     ]);
   });
 
-  it('ignores echoes of our own outbound messages', () => {
+  it('never reads an echo as a message', () => {
     // The bug this prevents: filing our own agent reply as if the customer had
     // written it, and then replying to ourselves forever.
     const parsed = parse(
@@ -145,7 +145,7 @@ describe('parseMetaWebhook', () => {
     );
 
     expect(parsed.messages).toHaveLength(0);
-    expect(parsed.echoes).toBe(1);
+    expect(parsed.echoes.map((echo) => echo.mid)).toEqual(['m_echo']);
   });
 
   it('drops a message with no id, which could not be deduplicated', () => {
@@ -847,7 +847,169 @@ describe('satisfaction survey answers', () => {
     );
     expect(parsed.feedbacks).toEqual([]);
     expect(parsed.messages).toEqual([]);
-    expect(parsed.echoes).toBe(1);
+    expect(parsed.echoes).toHaveLength(1);
+  });
+});
+
+describe('echoes', () => {
+  /**
+   * An echo as production stores one (2026-11-11): the Page is the sender, the
+   * customer the recipient, and `app_id` a JSON number naming who sent it —
+   * here Meta Business Suite's Page Inbox.
+   */
+  function echoPayload(
+    message: Record<string, unknown> = {},
+    {
+      array = 'messaging',
+      object = 'page',
+    }: { array?: 'messaging' | 'standby'; object?: string } = {},
+  ) {
+    return {
+      object,
+      entry: [
+        {
+          id: '111222333',
+          time: 1_794_400_239_000,
+          [array]: [
+            {
+              sender: { id: '111222333' },
+              recipient: { id: 'psid-1' },
+              timestamp: 1_794_400_239_521,
+              message: {
+                mid: 'm_suite',
+                app_id: 263902037430900,
+                is_echo: true,
+                text: 'هيتم التواصل خلال اليوم',
+                ...message,
+              },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('reads who sent it, to whom, and when', () => {
+    const parsed = parse(echoPayload());
+
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.echoes).toHaveLength(1);
+    expect(parsed.echoes[0]).toMatchObject({
+      platform: 'facebook',
+      connection: 'facebook_page',
+      mid: 'm_suite',
+      // A number in the payload, a string here: an id compared as a number
+      // would be one more place for `263902037430900 !== '263902037430900'`.
+      appId: '263902037430900',
+      to: 'psid-1',
+      accountId: '111222333',
+      standby: false,
+      text: 'هيتم التواصل خلال اليوم',
+      attachments: [],
+      replyToMid: null,
+    });
+    expect(parsed.echoes[0]!.sentAt.toISOString()).toBe('2026-11-11T12:30:39.521Z');
+  });
+
+  it('takes an app id written as a string, and names no app for anything else', () => {
+    const ids = ['1009187740467732', undefined, null, '', 'page inbox', -5, 1.5, { id: 1 }].map(
+      (appId) => parse(echoPayload({ app_id: appId })).echoes[0]?.appId,
+    );
+
+    expect(ids).toEqual(['1009187740467732', null, null, null, null, null, null, null]);
+  });
+
+  it('keeps whether this app held the thread', () => {
+    const parsed = parse(echoPayload({}, { array: 'standby' }));
+    expect(parsed.echoes.map((echo) => echo.standby)).toEqual([true]);
+  });
+
+  it('reads an Instagram echo, which names no app', () => {
+    const parsed = parse(echoPayload({ app_id: undefined }, { object: 'instagram' }));
+    expect(parsed.echoes[0]).toMatchObject({ platform: 'instagram', appId: null });
+  });
+
+  it('says what a file sent without words was, as a customer message does', () => {
+    const parsed = parse(
+      echoPayload({
+        text: undefined,
+        attachments: [{ type: 'image', payload: { url: 'https://cdn.example/x.jpg' } }],
+      }),
+    );
+
+    expect(parsed.echoes[0]).toMatchObject({
+      text: '[image]',
+      attachments: [{ type: 'image', url: 'https://cdn.example/x.jpg' }],
+    });
+  });
+
+  it('keeps a card that carries something', () => {
+    // Production's own, 2026-11-11: a Business Suite card with one titled element.
+    const parsed = parse(
+      echoPayload({
+        text: undefined,
+        attachments: [
+          {
+            type: 'template',
+            payload: { template_type: 'generic', elements: [{ title: 'InstaPay' }] },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.echoes).toHaveLength(1);
+    expect(parsed.echoes[0]!.text).toBe('[template]');
+  });
+
+  it('leaves out an echo with nothing in it, without counting it as a card', () => {
+    const parsed = parse(
+      echoPayload({
+        text: undefined,
+        attachments: [{ type: 'template', payload: { generic: { elements: [] } } }],
+      }),
+    );
+
+    expect(parsed.echoes).toEqual([]);
+    // The count watches for Instagram's phone-number card from a customer.
+    expect(parsed.emptyCards).toBe(0);
+  });
+
+  it('reads text that is not a string as none, rather than losing the batch', () => {
+    const parsed = parse(
+      echoPayload({
+        text: 123,
+        attachments: [{ type: 'image', payload: { url: 'https://cdn.example/x.jpg' } }],
+      }),
+    );
+    expect(parsed.echoes.map((echo) => echo.text)).toEqual(['[image]']);
+
+    // The customer's side reads it the same way: as a message with no words.
+    const customer = parse(messengerPayload({ message: { mid: 'm_odd', text: { a: 1 } } }));
+    expect(customer.messages.map((message) => message.text)).toEqual(['']);
+  });
+
+  it('leaves out a message the team unsent, and one with no id or no customer', () => {
+    const unsent = parse(echoPayload({ is_deleted: true }));
+    const noId = parse(echoPayload({ mid: undefined }));
+    const noCustomer = parse({
+      ...echoPayload(),
+      entry: [
+        {
+          id: '111222333',
+          messaging: [
+            {
+              sender: { id: '111222333' },
+              timestamp: 1_794_400_239_521,
+              message: { mid: 'm_x', is_echo: true, text: 'هيتم التواصل خلال اليوم' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect([unsent, noId, noCustomer].map((parsed) => parsed.echoes)).toEqual([[], [], []]);
+    expect([unsent, noId, noCustomer].map((parsed) => parsed.messages)).toEqual([[], [], []]);
+    expect([unsent, noId, noCustomer].map((parsed) => parsed.emptyCards)).toEqual([0, 0, 0]);
   });
 });
 

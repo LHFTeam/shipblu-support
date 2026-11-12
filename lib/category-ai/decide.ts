@@ -21,8 +21,9 @@ import { UNKNOWN_CATEGORY_KEY } from '@/lib/categories/registry';
  *    out of order — so an earlier message answered late takes the settle over
  *    from a later one, and the ticket carries what its opening said.
  * 3. **A cap per ticket**: five classified messages, and none once somebody
- *    has answered. `first_responded_at` moves for an agent and for a
- *    Business-app echo and never for an automated message, so an out-of-hours
+ *    has answered. `first_responded_at` moves for an agent and for an echo
+ *    filed as the team's reply (the WhatsApp Business app, Meta Business
+ *    Suite) and never for an automated message, so an out-of-hours
  *    acknowledgement does not end classification before the informative second
  *    message, and a ticket that has not settled by the first human reply is a
  *    person's call.

@@ -1,17 +1,26 @@
 import { recordMetaFeedback } from '@/lib/csat/meta-feedback';
 import { recordAppRole } from '@/lib/meta/app-roles';
 import { isMetaConnection, type MetaConnection } from '@/lib/meta/connection';
+import { echoDisposition, type EchoDisposition } from '@/lib/meta/echo';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import {
   applyMetaInteraction,
   applyMetaReceipt,
   ingestMetaComment,
+  ingestMetaEcho,
   ingestMetaMessage,
 } from '@/lib/tickets/ingest-meta';
+import { env } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 
 const log = logger('meta');
+
+/**
+ * The run of a delivery on which an echo that found no ticket is given up:
+ * every run before it fails the delivery so the queue tries again.
+ */
+const ECHO_TICKET_ATTEMPTS = 4;
 
 /**
  * Turns a stored Facebook or Instagram payload into conversations.
@@ -29,7 +38,10 @@ const log = logger('meta');
  * every item type does nothing the second time:
  *
  * - a message and a comment are found by their mid or comment id, before
- *   anything is written (`ingestMetaMessage`, `ingestMetaComment`);
+ *   anything is written (`ingestMetaMessage`, `ingestMetaComment`), and so is
+ *   an echo filed as the team's reply (`ingestMetaEcho`), which moves the
+ *   ticket's "last" columns forward only and stops a clock only for what came
+ *   before it (`onAgentReply`);
  * - an interaction by its instant on the ticket (`applyMetaInteraction`);
  * - a survey answer by `recordAnswer`'s first-answer-wins, and only a first
  *   answer is thanked (`recordMetaFeedback`);
@@ -53,6 +65,8 @@ export async function processMetaWebhook(event: {
   id: string;
   payload: unknown;
   connection: string | null;
+  /** Which run of the delivery this is, from 1 (`webhook_events.attempts`). */
+  attempt: number;
 }): Promise<void> {
   const parsed = parseMetaWebhook(event.payload, readConnection(event.connection));
 
@@ -63,10 +77,18 @@ export async function processMetaWebhook(event: {
   let interactions = 0;
   let answers = 0;
   let appRoles = 0;
-  // Interactions that found no live ticket, or had already been recorded, and
+  let echoesFiled = 0;
+  const echoesIgnored: Record<Exclude<EchoDisposition, 'file'>, number> = {
+    own: 0,
+    standby: 0,
+    instagram: 0,
+    unattributed: 0,
+  };
+  // Interactions that found no live ticket, or had already been recorded,
   // survey answers that recorded nothing — a second copy, an unknown survey,
-  // somebody other than the requester. For the log line only; on a retry it
-  // includes what an earlier attempt recorded.
+  // somebody other than the requester — and echoes already filed or with no
+  // ticket to file on. For the log line only; on a retry it includes what an
+  // earlier attempt recorded.
   let skipped = 0;
 
   for (const message of parsed.messages) {
@@ -79,6 +101,45 @@ export async function processMetaWebhook(event: {
       );
     } catch (error) {
       failures.push(`${message.mid}: ${errorMessage(error)}`);
+    }
+  }
+
+  // After the messages, so a customer's message and the reply to it in one
+  // batch land in that order. Only another app's reply on a thread this app
+  // holds is filed (`echoDisposition`); the rest are counted by why, for the
+  // log line.
+  const ownAppId = env().META_APP_ID || null;
+  for (const echo of parsed.echoes) {
+    const disposition = echoDisposition(echo, ownAppId);
+    if (disposition !== 'file') {
+      echoesIgnored[disposition] += 1;
+      continue;
+    }
+    try {
+      const result = await ingestMetaEcho(echo);
+      // The customer's message may still be on its way: Meta sends each event
+      // in a delivery of its own, and the one opening the ticket can be
+      // waiting on its retry, or running beside this one, when the reply is
+      // processed. So an echo with no ticket fails the delivery while it is
+      // young enough for that to be the reason — its first three runs, 10 s
+      // and 50 s after the first — and is given up on the fourth, at 140 s,
+      // never reaching the fifth that sends a job `dead`.
+      if (result.notFiled === 'no_ticket' && event.attempt < ECHO_TICKET_ATTEMPTS) {
+        failures.push(`echo ${echo.mid}: no live ticket for its customer yet`);
+        continue;
+      }
+      if (result.filed && !result.duplicate) echoesFiled += 1;
+      else skipped += 1;
+      log.info(
+        `${echo.platform} echo ${echo.mid} from app ${echo.appId} → ` +
+          (result.filed
+            ? `#${result.conversationNumber} (${result.duplicate ? 'duplicate' : "filed as the team's reply"})`
+            : result.notFiled === 'predates_ticket'
+              ? "not filed: older than every customer message on the customer's ticket"
+              : 'not filed: no live ticket for its customer'),
+      );
+    } catch (error) {
+      failures.push(`echo ${echo.mid}: ${errorMessage(error)}`);
     }
   }
 
@@ -152,7 +213,8 @@ export async function processMetaWebhook(event: {
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
       `${interactions} interaction(s), ${answers} survey answer(s) (${skipped} skipped), ` +
       `${appRoles} app role(s), ` +
-      `${parsed.echoes} echo(es) ignored, ` +
+      `${echoesFiled} echo(es) filed, ` +
+      `${ignoredEchoCount(echoesIgnored)} echo(es) ignored, ` +
       `${parsed.emptyCards} empty card(s) ignored` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );
@@ -168,6 +230,17 @@ export async function processMetaWebhook(event: {
       failures.join(' | ');
     throw new Error(message.slice(0, 2000));
   }
+}
+
+/**
+ * `3 (own 2, standby 1)` — the total first, where the line has always carried
+ * it, and the reasons beside it once there are any.
+ */
+function ignoredEchoCount(ignored: Record<string, number>): string {
+  const reasons = Object.entries(ignored).filter(([, count]) => count > 0);
+  const total = reasons.reduce((sum, [, count]) => sum + count, 0);
+  if (reasons.length === 0) return '0';
+  return `${total} (${reasons.map(([reason, count]) => `${reason} ${count}`).join(', ')})`;
 }
 
 /** The stored connection, or null for anything that is not one we know. */

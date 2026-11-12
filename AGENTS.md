@@ -1040,6 +1040,27 @@ routing. Nor does a coexistence number route by category, whatever its row
 says: moving its tickets between groups changes nothing about who types the
 replies (`routingModeOf`, **Routing by category**).
 
+**A Messenger reply typed in Meta Business Suite is filed from its echo, the
+same way.** Meta echoes everything the Page sends, and `echoDisposition`
+(`lib/meta/echo.ts`) files an echo only when its `app_id` is named, is not
+`META_APP_ID`, and arrived in `messaging`, on a thread this app held.
+`ingestMetaEcho` then stores it as the team's reply, outbound and with no
+author, labelled by `teamEchoLabel`, on the customer's live direct-message
+ticket only. It moves `last_agent_message_at` forward, then `onAgentReply`
+runs. Our own echo is told apart by its app id, never by finding its mid:
+`send_meta` writes the mid after Graph answers, and the echo can race that
+write. A `standby` echo is not filed: another app held that thread, and it is
+that tool's until Messenger's swap. Nor is an Instagram echo, which names no
+app and includes an automated welcome sent seconds after the customer; with
+`META_APP_ID` unset nothing is filed. Meta sends each Messenger event in a
+delivery of its own, so a reply can be processed before the customer's message
+it answers: an echo that finds no ticket fails its delivery on its first three
+runs, and one older than every customer message on the ticket is not filed
+there. Anything that asks whether a person on
+the team answered treats a team echo as one (`teamEchoLabel`; the canned
+suggestion's `authorOf`), never as `automatic_message`
+(`docs/PROJECT-STATE.md` §6.117).
+
 **A Business-app number connected in Meta's own interface is adopted, not
 signed in.** WhatsApp Manager and Business Suite can put a phone's number on
 Cloud API without Meta's window, so no code is exchanged and nothing is stored.

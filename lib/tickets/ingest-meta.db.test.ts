@@ -26,14 +26,21 @@ import { classifyMessagePriority } from '@/lib/priority-ai/run';
 import { settleRouting } from '@/lib/routing/apply';
 import { handToRouteGroup } from '@/lib/routing/hand-to';
 import { stubFetch } from '@/lib/testing/fetch';
+import { PAGE_INBOX_APP_ID } from '@/lib/meta/echo';
 import type {
   NormalisedComment,
   NormalisedDirectMessage,
+  NormalisedEcho,
   NormalisedInteraction,
 } from '@/lib/meta/types';
 import { subcategoriseFromMessage } from '@/lib/subcategorise/apply';
 import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
-import { applyMetaInteraction, ingestMetaComment, ingestMetaMessage } from './ingest-meta';
+import {
+  applyMetaInteraction,
+  ingestMetaComment,
+  ingestMetaEcho,
+  ingestMetaMessage,
+} from './ingest-meta';
 
 /**
  * What the two Meta ingest paths write today, quirks included, so the shared
@@ -1615,5 +1622,249 @@ describe('a reply-first comment thread, through Jev and the router', () => {
         .from(aiCategoryRuns)
         .where(eq(aiCategoryRuns.messageId, root.messageId)),
     ).toEqual([{ outcome: 'below_threshold' }]);
+  });
+});
+
+describe('ingestMetaEcho', () => {
+  // Production's own shape (2026-11-11): Business Suite's reply to a customer
+  // whose Messenger thread Meta handed this app.
+  const OPENED = new Date('2026-11-11T11:06:04Z');
+  const REPLIED = new Date('2026-11-11T12:29:35Z');
+  const HOUR = 3_600_000;
+
+  function echo(overrides: Partial<NormalisedEcho> = {}): NormalisedEcho {
+    return {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      mid: 'm_suite',
+      appId: PAGE_INBOX_APP_ID,
+      to: PSID,
+      accountId: 'page-1',
+      standby: false,
+      sentAt: REPLIED,
+      text: 'هيتم التواصل خلال اليوم',
+      attachments: [],
+      replyToMid: null,
+      raw: { mid: 'm_suite' },
+      ...overrides,
+    };
+  }
+
+  /** The default policy, so the customer's message gives the ticket its clocks. */
+  async function hourlyPolicy() {
+    const target = { firstResponseMins: 60, nextResponseMins: 60, resolutionMins: 1440 };
+    await db.insert(slaPolicies).values({
+      name: 'every hour',
+      hoursSource: 'round_the_clock',
+      isDefault: true,
+      targets: { low: target, medium: target, high: target, urgent: target },
+    });
+  }
+
+  async function clocks(conversationId: string) {
+    const [row] = await db
+      .select({
+        lastMessageAt: conversations.lastMessageAt,
+        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+        lastAgentMessageAt: conversations.lastAgentMessageAt,
+        firstRespondedAt: conversations.firstRespondedAt,
+        nextResponseDueAt: conversations.nextResponseDueAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!;
+  }
+
+  it('files the reply on the customer’s ticket as the team’s, with no author', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+
+    const result = await ingestMetaEcho(echo());
+
+    expect(result).toMatchObject({
+      filed: true,
+      duplicate: false,
+      conversationId: opened.conversationId,
+      conversationNumber: opened.conversationNumber,
+    });
+    const rows = await messagesOf(opened.conversationId);
+    expect(rows.map((row) => [row.direction, row.channelMessageId])).toEqual([
+      ['inbound', 'm_first'],
+      ['outbound', 'm_suite'],
+    ]);
+    expect(rows[1]).toMatchObject({
+      id: result.messageId,
+      kind: 'reply',
+      // Nobody here wrote it, which is also what keeps HUMAN_AGENT off it.
+      authorAgentId: null,
+      authorContactId: null,
+      bodyText: 'هيتم التواصل خلال اليوم',
+      fromAddress: 'page-1',
+      toAddresses: [PSID],
+      deliveryStatus: 'sent',
+      createdAt: REPLIED,
+      meta: {
+        metaKind: 'direct_message',
+        platform: 'facebook',
+        accountId: 'page-1',
+        connection: 'facebook_page',
+        echo: true,
+        echoSource: 'meta_business_suite',
+        echoAppId: PAGE_INBOX_APP_ID,
+        attachments: [],
+      },
+    });
+    // Answered: the team's column moves, the customer's (and Meta's window) not.
+    expect(await clocks(opened.conversationId)).toMatchObject({
+      lastMessageAt: REPLIED,
+      lastCustomerMessageAt: OPENED,
+      lastAgentMessageAt: REPLIED,
+      firstRespondedAt: REPLIED,
+    });
+    expect(await conversation(opened.conversationId)).toMatchObject({ status: 'Open' });
+  });
+
+  it('stops the reply clock for what it answers, and not for a newer message', async () => {
+    await hourlyPolicy();
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    await ingestMetaEcho(echo());
+    const newer = new Date(REPLIED.getTime() + 10 * 60_000);
+    await ingestMetaMessage(dm({ mid: 'm_newer', sentAt: newer, text: 'Hello?' }));
+    const owed = new Date(newer.getTime() + HOUR);
+    expect((await clocks(opened.conversationId)).nextResponseDueAt).toEqual(owed);
+
+    // Sent before the customer's newer message, processed after it: it
+    // answered what came before, so the newer message is still owed a reply.
+    const between = new Date(REPLIED.getTime() + 5 * 60_000);
+    await ingestMetaEcho(echo({ mid: 'm_between', sentAt: between, text: 'تحت امرك' }));
+
+    expect(await clocks(opened.conversationId)).toEqual({
+      lastMessageAt: newer,
+      lastCustomerMessageAt: newer,
+      lastAgentMessageAt: between,
+      firstRespondedAt: REPLIED,
+      nextResponseDueAt: owed,
+    });
+
+    const answered = new Date(newer.getTime() + 2 * 60_000);
+    await ingestMetaEcho(echo({ mid: 'm_answer', sentAt: answered, text: 'هيتم التواصل' }));
+
+    expect(await clocks(opened.conversationId)).toEqual({
+      lastMessageAt: answered,
+      lastCustomerMessageAt: newer,
+      lastAgentMessageAt: answered,
+      firstRespondedAt: REPLIED,
+      nextResponseDueAt: null,
+    });
+  });
+
+  it('moves the ticket only forward when an older echo lands after a newer one', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    const later = new Date(REPLIED.getTime() + 30 * 60_000);
+
+    await ingestMetaEcho(echo({ mid: 'm_later', sentAt: later }));
+    await ingestMetaEcho(echo());
+
+    expect(await clocks(opened.conversationId)).toMatchObject({
+      lastMessageAt: later,
+      lastAgentMessageAt: later,
+      // The earliest reply is the first response, whichever was stored first.
+      firstRespondedAt: REPLIED,
+    });
+  });
+
+  it('leaves a resolved ticket resolved', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    await resolveAsAgent(opened.conversationId);
+    const before = await eventsOf(opened.conversationId);
+
+    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: true });
+
+    expect(await conversation(opened.conversationId)).toMatchObject({
+      status: 'Resolved',
+      reopenCount: 0,
+    });
+    expect(await eventsOf(opened.conversationId)).toEqual(before);
+  });
+
+  it('writes nothing the second time a mid arrives', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    const first = await ingestMetaEcho(echo());
+
+    const again = await ingestMetaEcho(echo({ sentAt: new Date(REPLIED.getTime() + HOUR) }));
+
+    expect(again).toEqual({ ...first, duplicate: true });
+    expect((await messagesOf(opened.conversationId)).map((row) => row.channelMessageId)).toEqual([
+      'm_first',
+      'm_suite',
+    ]);
+    expect(await clocks(opened.conversationId)).toMatchObject({ lastAgentMessageAt: REPLIED });
+  });
+
+  it('files nothing, and makes nobody a contact, without a live ticket', async () => {
+    expect(await ingestMetaEcho(echo({ to: 'psid-stranger' }))).toMatchObject({
+      filed: false,
+      notFiled: 'no_ticket',
+    });
+    expect(
+      await db
+        .select()
+        .from(contactIdentities)
+        .where(eq(contactIdentities.identifier, 'psid-stranger')),
+    ).toEqual([]);
+
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    await setStatus(opened.conversationId, 'Closed');
+    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: false, notFiled: 'no_ticket' });
+    expect(await db.select().from(messages).where(eq(messages.direction, 'outbound'))).toEqual([]);
+  });
+
+  it('files nothing onto a ticket opened after it was sent', async () => {
+    // A follow-up typed in Business Suite to a customer whose ticket was
+    // closed, processed after the customer's answer opened a new one: it
+    // answered the closed conversation, not this one.
+    const old = await ingestMetaMessage(dm({ mid: 'm_old', sentAt: OPENED }));
+    await setStatus(old.conversationId, 'Closed');
+    const answer = new Date(REPLIED.getTime() + 2 * 60_000);
+    const opened = await ingestMetaMessage(dm({ mid: 'm_answer', sentAt: answer, text: 'نعم' }));
+    expect(opened.conversationId).not.toBe(old.conversationId);
+
+    expect(await ingestMetaEcho(echo())).toMatchObject({
+      filed: false,
+      notFiled: 'predates_ticket',
+    });
+    expect(await clocks(opened.conversationId)).toMatchObject({
+      lastAgentMessageAt: null,
+      firstRespondedAt: null,
+    });
+  });
+
+  it('never files a direct message onto the customer’s public comment thread', async () => {
+    // The commenter is the same Facebook user the reply went to privately.
+    await ingestMetaComment(comment({ from: PSID }));
+    expect(await ingestMetaEcho(echo())).toMatchObject({ filed: false });
+  });
+
+  it('queues a download for a file the team sent, with the row', async () => {
+    const opened = await ingestMetaMessage(dm({ sentAt: OPENED }));
+    const attachments = [
+      { type: 'image' as const, url: 'https://cdn.example/label.jpg', title: null },
+    ];
+
+    const result = await ingestMetaEcho(echo({ text: '[image]', attachments }));
+
+    expect(result.conversationId).toBe(opened.conversationId);
+    expect((await queued()).filter((job) => job.type === 'download_media')).toEqual([
+      {
+        type: 'download_media',
+        payload: {
+          messageId: result.messageId,
+          url: 'https://cdn.example/label.jpg',
+          index: 0,
+          source: 'meta',
+        },
+        priority: 5,
+        dedupeKey: `download_media:${result.messageId}:0`,
+      },
+    ]);
   });
 });

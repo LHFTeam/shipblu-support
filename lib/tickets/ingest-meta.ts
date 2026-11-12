@@ -1,10 +1,12 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
+import { echoSourceOf } from '@/lib/meta/echo';
 import type {
   MetaPlatform,
   NormalisedComment,
   NormalisedDirectMessage,
+  NormalisedEcho,
   NormalisedInteraction,
   NormalisedReceipt,
 } from '@/lib/meta/types';
@@ -15,7 +17,7 @@ import {
   metaPlatformOf,
   type MetaChannel,
 } from './channel-policy';
-import { onCustomerReply } from '@/lib/sla';
+import { onAgentReply, onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { UNNAMED_SUBJECT } from './customer-text';
 import { latest } from './latest';
@@ -374,6 +376,205 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   });
 
   return { ...result, duplicate: false };
+}
+
+// --- Echoes -----------------------------------------------------------------
+
+export type MetaEchoResult = {
+  filed: boolean;
+  /**
+   * Why an echo was not filed. `no_ticket`: the customer has no contact or no
+   * live direct-message ticket here — yet, possibly, which is why the job
+   * retries it a while (`process-meta-webhook.ts`). `predates_ticket`: every
+   * customer message on their live ticket is newer than the echo, so it
+   * answered an earlier, closed conversation.
+   */
+  notFiled?: 'no_ticket' | 'predates_ticket';
+  duplicate: boolean;
+  conversationId: string | null;
+  conversationNumber: number;
+  messageId: string | null;
+};
+
+function notFiled(reason: NonNullable<MetaEchoResult['notFiled']>): MetaEchoResult {
+  return {
+    filed: false,
+    notFiled: reason,
+    duplicate: false,
+    conversationId: null,
+    conversationNumber: 0,
+    messageId: null,
+  };
+}
+
+/**
+ * The team's reply typed somewhere other than this console — Meta Business
+ * Suite, on a Messenger thread this app holds — filed from its echo as the
+ * team's reply, the way a coexistence number's phone reply is
+ * (`ingestWhatsAppEcho`). Only an echo `echoDisposition` files reaches here:
+ * our own sends stay dropped, since `send_meta` wrote their rows, and so does
+ * Instagram, which names no app (`lib/meta/echo.ts`).
+ *
+ * Measured before it was written: from 09:50 UTC on 2026-11-11 Meta hands every
+ * new Messenger thread to this app, and the team answers them in Business
+ * Suite. By 15:15 the next day 19 such replies had come back as echoes, on 8
+ * tickets, and every one was dropped — so each ticket read as unanswered, its
+ * clocks running, and one answered at 12:29 on the 11th recorded its first
+ * response at 14:39 on the 12th (`docs/PROJECT-STATE.md` §6.117).
+ *
+ * What it writes, and why each half is the shape it is:
+ *
+ * - **An outbound reply with no author.** No agent here wrote it, so
+ *   `author_agent_id` stays null — which is also what keeps `HUMAN_AGENT` off
+ *   anything derived from it: `send_meta` reads the author of the row it is
+ *   sending, and this row is never sent (`deliveryStatus` 'sent', no job).
+ *   `meta.echoSource` names where it was typed, which the thread labels
+ *   (`teamEchoLabel`), and `meta.echoAppId` the app Meta named.
+ * - **`last_agent_message_at` forward only, never `last_customer_message_at`.**
+ *   `latest()`, because a Meta batch is retried whole and the echo can land
+ *   after a newer sibling; and the customer's column opens the messaging
+ *   window, which only the customer can do. A resolved ticket stays resolved:
+ *   the team's own message never makes a ticket need attention.
+ * - **`onAgentReply` after the commit**, which stops the next-response clock
+ *   only for what came before the reply and keeps the earliest first response,
+ *   so the SLA does not depend on the order deliveries are processed in.
+ *
+ * It files onto the customer's live direct-message ticket and never opens one.
+ * A ticket opened by the team's message would sit in the queue asking nothing
+ * (WhatsApp files those resolved; here, where an inbound message does not lock
+ * its thread, a ticket opened beside the customer's own would be two). One of
+ * the 19 above had no contact here at all. Finding no ticket is not final,
+ * though: Meta sends every Messenger event in a delivery of its own (838 of 838
+ * Page deliveries to 2026-11-12), and Business Suite answered one thread 4.9 s
+ * after its first message, so the customer's message can still be waiting on
+ * its own retry, or running beside this one after a deploy, when the reply is
+ * processed. So `no_ticket` is answered, and the job retries the delivery for
+ * its first three attempts — about 50 seconds — before giving it up.
+ *
+ * And it files only onto a ticket the reply can have answered: one with a
+ * customer message no newer than the echo. A follow-up sent in Business Suite
+ * to a customer whose ticket was closed, processed after the customer's answer
+ * opened a new one, would otherwise land on that new ticket as its first
+ * response, before the question it is supposed to answer.
+ *
+ * Nor does it end a routing hold or assign anybody: the reply was not made in
+ * this console, and the window's end still routes the ticket. Facebook's row
+ * routes by `default_group` (2026-11-12); a channel moved to `category` should
+ * decide first whether a reply typed elsewhere ends the hold, as an agent's
+ * reply does (`storeAgentReply`).
+ *
+ * Idempotent by its mid, as a message is; two copies racing past the lookup
+ * meet the unique index on `channel_message_id`, which fails the batch for its
+ * retry to find the row.
+ */
+export async function ingestMetaEcho(echo: NormalisedEcho): Promise<MetaEchoResult> {
+  const stored = await findByChannelMessageId(echo.mid);
+  if (stored) {
+    // Again, for a run that committed the row and stopped before the clocks —
+    // a deploy's shutdown — which every later run would otherwise answer
+    // "duplicate" and leave owing a reply it was given. The same instant
+    // changes nothing the second time (`earliest`, and the next-response
+    // clock decided against the row as it is).
+    await onAgentReply(stored.conversationId, echo.sentAt);
+    return {
+      filed: true,
+      duplicate: true,
+      conversationId: stored.conversationId,
+      conversationNumber: stored.conversationNumber,
+      messageId: stored.messageId,
+    };
+  }
+
+  // Looked up rather than resolved, as an interaction is: the team writing to
+  // somebody this app has never heard from is no reason to make them a contact.
+  const contactId = await findContactByIdentity(echo.platform, echo.to);
+  if (!contactId) return notFiled('no_ticket');
+
+  const live = await findLiveConversation(contactId, { channel: echo.platform });
+  if (!live) return notFiled('no_ticket');
+
+  // Both instants are Meta's own (`sentAt`), so the comparison is on one clock.
+  const [answerable] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, live.id),
+        eq(messages.direction, 'inbound'),
+        lte(messages.createdAt, echo.sentAt),
+      ),
+    )
+    .limit(1);
+  if (!answerable) return notFiled('predates_ticket');
+
+  const messageId = await db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(messages)
+      .values({
+        conversationId: live.id,
+        direction: 'outbound',
+        kind: 'reply',
+        bodyText: echo.text,
+        bodyHtml: null,
+        rawBody: JSON.stringify(echo.raw),
+        channelMessageId: echo.mid,
+        inReplyTo: echo.replyToMid,
+        // As WhatsApp's echo is written: from the Page, to the customer.
+        fromAddress: echo.accountId,
+        toAddresses: [echo.to],
+        // Meta echoes only what it accepted; a delivery receipt naming the mid
+        // moves it on from here (`applyMetaReceipt`).
+        deliveryStatus: 'sent',
+        meta: {
+          metaKind: 'direct_message',
+          platform: echo.platform,
+          accountId: echo.accountId,
+          connection: echo.connection,
+          echo: true,
+          echoSource: echoSourceOf(echo.appId),
+          echoAppId: echo.appId,
+          attachments: echo.attachments,
+        },
+        createdAt: echo.sentAt,
+      })
+      .returning({ id: messages.id });
+
+    // With the row, for the reason `ingestMetaMessage` gives: once it has
+    // committed, a retry finds it by its mid and stops.
+    await queueAttachments(tx, inserted!.id, echo.attachments);
+
+    await tx
+      .update(conversations)
+      .set({
+        lastMessageAt: latest(conversations.lastMessageAt, echo.sentAt),
+        lastAgentMessageAt: latest(conversations.lastAgentMessageAt, echo.sentAt),
+      })
+      .where(eq(conversations.id, live.id));
+
+    return inserted!.id;
+  });
+
+  // After the commit, as `ingestWhatsAppEcho` and `storeAgentReply` do, so a
+  // failure here is a logged SLA write and never a lost reply.
+  await onAgentReply(live.id, echo.sentAt);
+
+  // A tracking number typed in Business Suite links its shipment, as the bot's
+  // and the phone's do; nothing else in it runs for an outbound reply.
+  await afterMessageStored({
+    conversationId: live.id,
+    messageId,
+    bodyText: echo.text,
+    kind: 'reply',
+    direction: 'outbound',
+  });
+
+  return {
+    filed: true,
+    duplicate: false,
+    conversationId: live.id,
+    conversationNumber: live.number,
+    messageId,
+  };
 }
 
 // --- Interactions -----------------------------------------------------------

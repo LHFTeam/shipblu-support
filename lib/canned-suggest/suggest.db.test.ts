@@ -194,6 +194,27 @@ describe('readHistory', () => {
     expect(history.hasInbound).toBe(true);
   });
 
+  it('calls a reply the team typed outside the console a person’s, and the bot a machine', async () => {
+    const id = await ticket();
+    await say(id, 'فين الشحنة');
+    await say(id, 'هيتم التواصل خلال اليوم', {
+      direction: 'outbound',
+      meta: { echo: true, echoSource: 'meta_business_suite', metaKind: 'direct_message' },
+    });
+    await say(id, 'On its way', {
+      direction: 'outbound',
+      meta: { echo: true, echoSource: 'business_app' },
+    });
+    await say(id, 'Choose 1 to track', { direction: 'outbound', meta: { echo: true } });
+
+    expect((await readHistory(id)).messages.map((m) => m.from)).toEqual([
+      'customer',
+      'support_agent',
+      'support_agent',
+      'automatic_message',
+    ]);
+  });
+
   it('reads the newest ten when there are more', async () => {
     const id = await ticket();
     for (let i = 0; i < 13; i++) await say(id, `m${i}`);

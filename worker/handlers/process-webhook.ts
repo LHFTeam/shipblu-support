@@ -72,6 +72,8 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
         id: event.id,
         payload: event.payload,
         connection: event.connection,
+        // This run's number: `attempts` was read before the increment above.
+        attempt: event.attempts + 1,
       });
       // A Meta batch fails whole on any failed item, so success means every
       // item went in, and an error an earlier attempt left would read as one
