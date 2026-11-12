@@ -573,8 +573,10 @@ export function legacyArticleIds(html: string): string[] {
  * Published articles only. A draft or an archived article answers no reader on
  * the help centre, so a link pointed at one is a dead link that no longer
  * looks like Freshdesk's, and the refusal in `./freshdesk-refs.ts` cannot see
- * it. Left as Freshdesk's address, it still works today, a Save is refused for
- * adding it, and the formatting pass leaves it alone. Every imported article
+ * it. Left as Freshdesk's address, a Save is refused for adding it and the
+ * formatting pass leaves it alone; on the portal's hostname, which has
+ * answered from this app since 2026-11-11, it reaches `app/help/legacy`,
+ * which answers only an article some reader may open. Every imported article
  * is published (measured 2026-11-09), so this changes no link stored today.
  */
 export function legacyArticleIndex(

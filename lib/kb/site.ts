@@ -10,8 +10,9 @@ export function publicBaseUrl(): string {
   const host = process.env.KB_PUBLIC_HOST;
   if (host) return `https://${host.replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
 
-  // Local development and any deployment where the custom domain is not set up
-  // yet. Falling back keeps the pages working; only the absolute URLs are off.
+  // Local development and any deployment whose KB_PUBLIC_HOST is unset — a
+  // fact about the variable, not about whether a custom domain answers here.
+  // Falling back keeps the pages working; only the absolute URLs are off.
   return (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 }
 

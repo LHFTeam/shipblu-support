@@ -205,7 +205,9 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // opened before `rehost_kb_images` ran posts Freshdesk's address, and a
   // paste from the old portal carries its links (`pointedHere`). What has no
   // home here is refused, unless the stored row already carries it — Freshdesk
-  // is being disconnected, and an address of its added today breaks with it.
+  // is being disconnected, and an address of its added today breaks with it,
+  // or broke already if it is on the portal's hostname, which moved here on
+  // 2026-11-11.
   //
   // After every other refusal, since it can read the pool twice and a save the
   // folder checks turn away would have spent those reads for nothing.

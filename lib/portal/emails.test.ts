@@ -19,7 +19,7 @@ describe('verificationEmail', () => {
     expect(email.htmlBody).toContain('https://support.shipblu.com/ar/account/verify/tok-123');
   });
 
-  it('falls back to APP_URL before the custom domain exists', () => {
+  it('falls back to APP_URL while KB_PUBLIC_HOST is unset', () => {
     setTestEnv({ KB_PUBLIC_HOST: undefined, APP_URL: 'https://shipblu-support.onrender.com' });
 
     expect(verificationEmail('en', 'tok').textBody).toContain(

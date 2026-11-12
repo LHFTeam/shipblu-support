@@ -20,8 +20,9 @@ import { GET as robotsTxt } from '@/app/help/robots.txt/route';
 import proxy from './proxy';
 
 /**
- * Host routing, which has no other way of being checked before the custom
- * domain is live.
+ * Host routing, which nothing else checks before `KB_PUBLIC_HOST` names the
+ * host it routes on. The domain answering here is not enough:
+ * support.shipblu.com did from 2026-11-11 while the variable did not name it.
  *
  * The failure this is here to prevent is a quiet one: a path that should be
  * served as itself gets rewritten under /help instead, 404s, and does so only

@@ -26,7 +26,8 @@ describe('isFreshdeskAddress', () => {
     ],
     ['a portal path with no host', '/en/support/solutions/articles/154000189336'],
     ['a portal path with no scheme', '//support.shipblu.com/support/home'],
-    // Served from the portal's own host, so no Freshworks domain is named.
+    // Served from the portal's own host while Freshdesk held it, so no
+    // Freshworks domain is named.
     ['an attachment on the portal', 'https://support.shipblu.com/helpdesk/attachments/48012345'],
     ['the portal forums', 'https://support.shipblu.com/en/support/discussions/topics/154000001'],
     ["Freshdesk's bucket, path-style", BUCKET_IMAGE],
@@ -40,7 +41,10 @@ describe('isFreshdeskAddress', () => {
   });
 
   it.each([
-    ['an article here, on the portal host once it is ours', 'https://support.shipblu.com/en/a/x'],
+    [
+      'an article here, on the portal host, ours since 2026-11-11',
+      'https://support.shipblu.com/en/a/x',
+    ],
     ['an article here, relative', '/ar/a/شحنتي-فين؟'],
     ['a picture we hold', '/api/kb/images/0b5f8c1e-2a4b-4c3d-9e8f-1a2b3c4d5e6f'],
     ['a fragment', '#step-2'],

@@ -22,8 +22,9 @@ describe('requestBaseUrl', () => {
   });
 
   it('does not follow the published host when they disagree', () => {
-    // The whole point: KB_PUBLIC_HOST can name a domain that does not serve
-    // this app yet, and an agent clicking a link needs the one that does.
+    // The whole point: nothing checks that the domain KB_PUBLIC_HOST names
+    // answers from this app (in August 2026 it was Freshdesk's), and an agent
+    // clicking a link needs a host that does.
     setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
 
     expect(requestBaseUrl(headers({ host: 'shipblu-support.onrender.com' }))).toBe(

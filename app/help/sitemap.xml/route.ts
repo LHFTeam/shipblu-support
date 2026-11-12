@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 /**
  * Hand-written rather than Next's `sitemap.ts` convention, because the file
  * lives under a rewritten path: the convention would emit URLs containing
- * `/kb`, which is an internal detail no customer or crawler ever sees.
+ * `/help`, which is an internal detail no customer or crawler ever sees.
  */
 export async function GET() {
   const base = publicBaseUrl();

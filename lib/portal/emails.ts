@@ -12,8 +12,10 @@ import { publicBaseUrl } from '@/lib/kb/site';
  *
  * Links are built against the help-centre hostname, not APP_URL: a customer
  * clicking through to the Render service URL would land on a hostname that is
- * not the one they trust and, once the custom domain is live, not the one the
- * session cookie was set on.
+ * not the one they trust and, for a customer who signed in on the custom
+ * domain, not the one the session cookie was set on. Both hold while
+ * `KB_PUBLIC_HOST` does not name the domain, as on 2026-11-12, the day after
+ * `support.shipblu.com` moved here.
  */
 
 /**

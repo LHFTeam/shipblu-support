@@ -79,9 +79,10 @@ const schema = z.object({
 
   /**
    * Comma-separated origins permitted to embed the chat widget, e.g.
-   * "https://support.shipblu.com,https://app.shipblu.com". Our own origin is
-   * always allowed. Everything outside this list is refused by
-   * `frame-ancestors`.
+   * "https://app.shipblu.com,https://merchant.shipblu.com". Our own origin is
+   * always allowed, and the help centre never needs listing on any host: the
+   * snippet frames the host that served it (`next.config.ts`). Everything
+   * outside this list is refused by `frame-ancestors`.
    */
   WIDGET_ALLOWED_ORIGINS: z.string().optional(),
 

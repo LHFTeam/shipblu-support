@@ -249,8 +249,10 @@ export default function proxy(request: NextRequest) {
   }
 
   // A locale-prefixed path is a help centre URL wherever it arrives. Without
-  // this the public site would only work once the custom domain is live, which
-  // makes it unreviewable on the Render URL and unbrowsable in development.
+  // this the public site would work only on the host `KB_PUBLIC_HOST` names,
+  // which makes it unreviewable on the Render URL and unbrowsable in
+  // development, and leaves a domain pointed here before the variable names it
+  // (support.shipblu.com on 2026-11-12) with no help centre at all.
   // `/en` and `/ar` are not console routes, so nothing collides.
   if (LOCALE_PREFIX.test(pathname)) {
     const url = request.nextUrl.clone();
