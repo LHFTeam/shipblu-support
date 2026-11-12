@@ -790,8 +790,10 @@ describe('setNumberOwner', () => {
     expect(await records()).toHaveLength(1);
   });
 
-  // "Nobody — team number" submits an empty value, which is a choice, not a
-  // malformed id.
+  // "Nobody" submits an empty value, which is a choice, not a malformed id.
+  // The number is a coexistence one, so it is nobody's queue but the
+  // supervisors' from then on, and the ticket leaves a holder who can no
+  // longer see it (`lib/tickets/owner-only.ts`).
   it('clears the owner when nobody is chosen', async () => {
     const nayera = await agent('Nayera Mohamed');
     const id = await number('Nayera Mohamed', 'whatsapp', nayera);
@@ -806,13 +808,12 @@ describe('setNumberOwner', () => {
     expect(done).toMatchObject({
       error: null,
       notice:
-        '+20 12 78707918 is a team number from now: its 1 open or pending ticket counts against ' +
-        'whoever holds it.',
+        '+20 12 78707918 has no owner from now: 1 open or pending ticket was unassigned, and ' +
+        'only supervisors and admins can see its tickets until it has one.',
     });
     expect(revalidated).toEqual(['/admin/channels']);
     expect(await ownerOf(id)).toBeNull();
-    // The work stays where it was; only the breach stops being hers.
-    expect(await holders(open)).toEqual({ accountable: null, assignee: nayera });
+    expect(await holders(open)).toEqual({ accountable: null, assignee: null });
     expect(await records()).toEqual([
       expect.objectContaining({ toAgentId: null, changedByAgentId: signedIn.id, ticketsMoved: 1 }),
     ]);

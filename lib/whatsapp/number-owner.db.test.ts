@@ -795,6 +795,20 @@ describe('alignAccountable', () => {
     ]);
     expect(await align(orphanSeen, null)).toEqual({ changed: true, reassigned: false });
     expect(await holders(orphanSeen)).toEqual({ accountable: null, assignee: sara });
+
+    // The number in the same hands, and the ticket in a colleague's: only the
+    // work moves, so nothing says the breach did.
+    const sameOwner = await ticket(number, 'Open', {
+      accountableAgentId: ali,
+      assigneeAgentId: bob,
+    });
+    expect(await align(sameOwner, ali)).toEqual({ changed: false, reassigned: true });
+    expect(await holders(sameOwner)).toEqual({ accountable: ali, assignee: ali });
+    expect((await eventsOf(sameOwner)).map((e) => e.type)).toEqual(['assigned']);
+    // And nothing at all for one a supervisor holds, or its owner.
+    const kept = await ticket(number, 'Open', { accountableAgentId: ali, assigneeAgentId: sara });
+    expect(await align(kept, ali)).toEqual({ changed: false, reassigned: false });
+    expect(await eventsOf(kept)).toEqual([]);
   });
 
   // Its locked read can wait on another writer, and its `assigned` line is
@@ -949,7 +963,7 @@ describe('numberOwnership', () => {
     const nayera = await agent('Nayera Mohamed');
     const ali = await agent('Ali Nasser');
     const number = await phone('Nayera Mohamed');
-    const team = await phone('WhatsApp Support');
+    const team = await teamPhone('WhatsApp Support');
     await ticket(number, 'Open');
     await ticket(number, 'Pending');
     await ticket(number, 'Resolved');
@@ -965,6 +979,7 @@ describe('numberOwnership', () => {
       {
         channelId: number,
         owner: { id: ali, label: 'Ali Nasser', active: false },
+        ownerOnly: true,
         movableTickets: 2,
         current: expect.objectContaining({
           fromLabel: 'Nayera Mohamed',
@@ -976,7 +991,14 @@ describe('numberOwnership', () => {
         }),
         earlier: [expect.objectContaining({ fromLabel: null, toLabel: 'Nayera Mohamed' })],
       },
-      { channelId: team, owner: null, movableTickets: 1, current: null, earlier: [] },
+      {
+        channelId: team,
+        owner: null,
+        ownerOnly: false,
+        movableTickets: 1,
+        current: null,
+        earlier: [],
+      },
     ]);
   });
 

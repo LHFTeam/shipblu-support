@@ -213,6 +213,47 @@ describe('the rota', () => {
     expect(await assignConversation(id)).toMatchObject({ assignedTo: null, reason: 'owner_only' });
   });
 
+  // A ticket that arrived while its number's owner was deactivated is
+  // accountable to nobody, and nothing realigns an open ticket when they are
+  // reactivated. On a plain number the rota took it; here it may not, so the
+  // ticket is made the owner's instead of waiting unassigned for good.
+  it('gives one accountable to nobody to the number’s active owner, and makes it theirs', async () => {
+    const nayera = await agent('Nayera Mohamed', { presence: 'offline' });
+    const channelId = await phone(nayera);
+    const id = await ticket(channelId, { groupId: care });
+
+    expect(await assignConversation(id)).toEqual({
+      assignedTo: nayera,
+      reason: null,
+      movedGroup: false,
+    });
+    const [row] = await db
+      .select({
+        assignee: conversations.assigneeAgentId,
+        accountable: conversations.accountableAgentId,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(row).toEqual({ assignee: nayera, accountable: nayera });
+    const events = await db
+      .select({ type: conversationEvents.type, data: conversationEvents.data })
+      .from(conversationEvents)
+      .where(eq(conversationEvents.conversationId, id));
+    expect(events.map((e) => [e.type, e.data.reason]).sort()).toEqual([
+      ['accountable_changed', 'owner_returned'],
+      ['assigned', 'number_owner'],
+    ]);
+
+    // Not a ticket nobody may work: resolved, it is left as it is.
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Resolved'));
+    const done = await ticket(channelId, { groupId: care, statusId: resolved!.id });
+    expect(await assignConversation(done)).toMatchObject({ assignedTo: null });
+    expect(await assigneeOf(done)).toBeNull();
+  });
+
   it('still hands one back to an active owner', async () => {
     const nayera = await agent('Nayera Mohamed', { presence: 'offline' });
     const id = await ticket(await phone(nayera), { groupId: care, accountableAgentId: nayera });

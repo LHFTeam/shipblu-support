@@ -451,3 +451,15 @@ describe('describeEvent', () => {
     expect(describeEvent('something_new_happened', { anything: 1 })).toBe('something new happened');
   });
 });
+
+// Nobody clicked anything, so the line has to say why a ticket somebody held
+// is back in the queue.
+describe('an unassignment nobody made', () => {
+  it('says the number has no owner, and who can still open its tickets', () => {
+    expect(describeEvent('unassigned', { to: null, reason: 'owner_only' })).toBe(
+      'unassigned the ticket: its WhatsApp number has no owner now, and only the number’s ' +
+        'owner, a supervisor or an admin can open its tickets',
+    );
+    expect(describeEvent('unassigned', { to: null })).toBe('unassigned the ticket');
+  });
+});

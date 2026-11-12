@@ -37,7 +37,9 @@ import { can, type AgentRole } from '@/lib/auth/permissions';
 export function isCoexistenceNumber(): SQL {
   return and(
     eq(channels.type, 'whatsapp'),
-    sql`jsonb_typeof(${channels.config} -> 'coexistence') = 'object'`,
+    // `is not distinct from`, so a row with no such key answers false and
+    // not null: a caller selects this as a flag as well as filtering on it.
+    sql`jsonb_typeof(${channels.config} -> 'coexistence') is not distinct from 'object'`,
   )!;
 }
 

@@ -1859,11 +1859,12 @@ describe('a number that belongs to a team member', () => {
 
   it('reopens a ticket as it was when the number has not changed hands', async () => {
     const nayera = await person('Nayera Mohamed');
-    const bob = await person('Bob Supervisor');
+    // He sees every ticket, so one on her phone may stay with him.
+    const bob = await person('Bob Supervisor', { role: 'supervisor' });
     await ownedPhone(nayera);
 
     const first = await ingestWhatsAppMessage(toOwned());
-    // A supervisor gave it to somebody else before it was resolved.
+    // Given to somebody else before it was resolved.
     await setStatus(first.conversationId, 'Resolved', { assigneeAgentId: bob });
 
     await ingestWhatsAppMessage(toOwned({ wamid: 'wamid.second', sentAt: LATER }));
@@ -1874,6 +1875,33 @@ describe('a number that belongs to a team member', () => {
       assignee: bob,
     });
     expect((await ownership(first.conversationId)).map((e) => e.type)).toEqual(['assigned']);
+  });
+
+  // The phone is a coexistence number, whose tickets nobody but its owner and
+  // the agents who see every ticket can open: reopened in a colleague's name,
+  // the ticket would be in no list of theirs and read as taken to her.
+  it('reopens a ticket to the owner when its holder cannot see it', async () => {
+    const nayera = await person('Nayera Mohamed');
+    const carl = await person('Carl Agent');
+    const channelId = await ownedPhone(nayera);
+
+    const first = await ingestWhatsAppMessage(toOwned());
+    await setStatus(first.conversationId, 'Resolved', { assigneeAgentId: carl });
+
+    await ingestWhatsAppMessage(toOwned({ wamid: 'wamid.second', sentAt: LATER }));
+
+    expect(await conversation(first.conversationId)).toMatchObject({ status: 'Open' });
+    expect(await holders(first.conversationId)).toMatchObject({
+      accountable: nayera,
+      assignee: nayera,
+    });
+    // The work moved and the breach did not: no `accountable_changed`.
+    expect(
+      (await ownership(first.conversationId)).map((e) => [e.type, e.data.reason, e.data.channelId]),
+    ).toEqual([
+      ['assigned', 'number_owner', channelId],
+      ['assigned', 'number_owner', channelId],
+    ]);
   });
 
   // Read before the transaction, the owner was the one the handover was about

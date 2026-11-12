@@ -493,7 +493,7 @@ BEGIN
         OLD.priority IS DISTINCT FROM NEW.priority OR
         OLD.requester_contact_id IS DISTINCT FROM NEW.requester_contact_id OR
         OLD.assignee_agent_id IS DISTINCT FROM NEW.assignee_agent_id OR
-        -- Who answers for the ticket decides who may see it (`answerableBy`),
+        -- Who answers for the ticket decides who may see it (`heldByOrInGroupsOf`),
         -- so a handover that moves only this must refresh the queues as a
         -- reassignment does: the new owner's list gains the ticket.
         OLD.accountable_agent_id IS DISTINCT FROM NEW.accountable_agent_id OR

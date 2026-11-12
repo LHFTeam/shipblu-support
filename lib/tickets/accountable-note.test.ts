@@ -49,4 +49,14 @@ describe('accountableNote', () => {
   it('says a team number is a team number when the ticket still names a former owner', () => {
     expect(accountableNote(ali, { owner: null })).toBe('Nobody owns this number now.');
   });
+
+  // A coexistence number is never a team number: nobody there may be given
+  // its tickets, so the sentence says who can see them instead.
+  it('says who sees a coexistence number whose owner is deactivated', () => {
+    const left = { id: 'nayera', name: 'Nayera Mohamed', active: false };
+    expect(accountableNote(null, { owner: left }, true)).toBe(
+      'Nayera Mohamed owns this number but is deactivated, so only supervisors and admins can ' +
+        'see its tickets.',
+    );
+  });
 });
