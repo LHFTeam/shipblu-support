@@ -32,8 +32,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * `webchatChannel` is for the widget's page: its callers are route handlers,
  * one read per request.
  *
- * `GET /config` reads it for `tickets.canCreate` (stage 3), and the plan's
- * stage 4 ticket path files under it.
+ * `GET /config` reads it for `tickets.canCreate`, and `createApiTicket`
+ * (`lib/api/tickets.ts`) files every new ticket from the app under it.
  */
 export async function apiChannel() {
   const rows = await db

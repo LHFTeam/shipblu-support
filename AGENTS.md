@@ -1424,6 +1424,53 @@ phone, an `externalUserId` or a body.** A route's failure goes through
 a failed query with its parameters, and Postgres puts the offending values in
 `detail`.
 
+**Every `/api/v1` read and write of a ticket is scoped by the identity that
+opened it, the session's contact and `channel = 'api'`, in the same `WHERE` as
+the id.** `ownedTicket(caller)` in `lib/api/scope.ts` is that predicate, the one
+copy: the ownership row (`api_tickets`, written in the transaction that creates
+the ticket and never updated) by the session's identity, `requester_contact_id`
+the session's contact, the channel, and not deleted, spam or merged. Every
+function in `lib/api/tickets.ts` takes the caller as its first argument, so a
+new read cannot leave it out and still compile; not yours, not found, deleted,
+merged and not-`api` are one `404` from one query, and an id that is not a UUID
+is that `404` before any; one that is, in either case, is lower-cased first
+(`canonicalUuid`), since which ticket a key was spent on is compared in code.
+The identity is what a contact cannot give — a merge
+re-points identities and two can land on one contact — so a second identity on
+the same contact reads none of the first's tickets, and `revokeSessions` deletes
+an identity's ownership rows on `account_deleted` and `number_released`, which
+takes its tickets out of the app and leaves them on the contact. The portal
+excludes `api` from its list, its ticket page and its reply through one list
+(`notOnThePortal`), since a ticket's number is guessable. **`kind = 'reply'` is
+in the query, never a filter over rows already read**, with `notReaction()`, so
+a note, a system row or a forward is never in the payload; only `body_text` is
+read for a message's words, and `text` is `""` for the stand-in written for
+files alone, as the widget answers it. A ticket and a message are named field
+lists built fresh, as `publicTracking()` builds its answer. **No credential in a
+URL, and no stream: a cursor to poll.** The cursor is base64url of Postgres's
+own timestamp text, the row id and an HMAC of the two under `APP_SECRET`
+(`lib/api/cursor.ts`), refused before any query when this server did not sign
+it: judged by its spelling alone, a cursor built by hand read the thread from
+wherever it named. A change of `APP_SECRET` therefore refuses every cursor an
+app holds, once; the app drops each and reads the newest page, as
+`invalid_cursor` tells it to. `after` re-reads a few seconds before
+its cursor, because `created_at` is not commit order, and never lets that
+re-read fill a page, or a full page whose cursor did not move would send the
+client round for the same rows forever. `createApiTicket` is an ingest path, not
+a parameter on `createTicket`: the pool's reads, one `now`, one transaction
+holding the routing window in its insert and `startRouting` on `tx`, then the
+ingest lifecycle. It takes the account's lock first (`holdAccount`), as a mint
+and a revoke do, and re-reads the key and counts the open tickets under it.
+Both writes file under the contact read through the identity inside their
+transaction and held `FOR KEY SHARE` (`holdRequester`), never the gate's: a
+contact merge committed between the two left a create on the folded contact,
+`201` and then `404` for good. The
+`Idempotency-Key` is stored as `messages.channel_message_id =
+'api:<identityId>:<key>'`, pre-checked on the pool with the unique index as the
+backstop, and every message the user wrote returns it as `clientId` on every
+read. The API changes by addition, and what `docs/myblu-api.md` says a field
+means is fixed once an app build depends on it.
+
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST
 (`/api/widget/message`, multipart where the text-only body stays JSON), never
@@ -1817,7 +1864,8 @@ README says why it is a setting and not a rule. The rules:
   the row's lock. `routingLock()` asks `routingModeOf` which rows those are, so
   the form, the action and the panel give one reason.
 - **Only a ticket an inbound ingest path inserts routes** — email, WhatsApp, a
-  Meta direct message or comment, the widget — and only while the classifier is
+  Meta direct message or comment, the widget, and the customer API
+  (`createApiTicket`) — and only while the classifier is
   in `apply` (`routingStartFor`): off or in shadow it files nothing, and a hold
   would wait out every window for nothing. Never a `createTicket` ticket, which
   brings its own group, a continuation, a reopen, imported history or a
@@ -1994,9 +2042,10 @@ README says why it is a setting and not a rule. The rules:
   ticket, so a resolve handed over never ran its rules, and nothing races that
   pass, since the router assigns nobody a ticket nobody may work. A group move
   still drops the kept pick there (`endHold`), for a ticket reopened before the
-  router's claim. And a customer's message, on each of the five paths that
+  router's claim. And a customer's message, on each of the six paths that
   continue a ticket — email, WhatsApp, a Meta direct message or comment, the
-  widget and the portal's reply — runs its own (`afterInboundMessage`) beside
+  widget, the portal's reply and the customer API's — runs its own
+  (`afterInboundMessage`) beside
   the router's. It is no decision about where the ticket goes, its pass races
   the rota as it does on every ticket once anybody holds one, and deferring it
   would reach into the transaction each of those paths stores its message in.

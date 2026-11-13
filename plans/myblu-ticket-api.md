@@ -642,7 +642,11 @@ never retried — is right for both.
   id, the inbox's form (`lib/tickets/inbox-filters.ts`): a JS `Date` holds
   milliseconds where `timestamptz` holds microseconds, and a round trip skips
   or repeats a row. A cursor this server did not mint is `400 invalid_cursor`,
-  never a first page.
+  never a first page, and "did not mint" is checked rather than approximated:
+  the cursor also carries an HMAC of its text under `APP_SECRET`, with a
+  purpose of its own, so one in this server's spelling that it never signed is
+  refused too. A change of the secret refuses every cursor an app holds, once,
+  and the app drops it and reads the newest page.
 - **`created_at` is not commit order,** so `after` re-reads a few seconds
   before its cursor and a page may repeat rows the client holds. The one rule
   an SDK needs is "merge by `id`".
@@ -824,8 +828,9 @@ tapped (rule 10 under _What every SDK does_).
   retries can never succeed. The session's `name` and `client.appVersion`
   publish a `pattern` that refuses it (`storable` in `lib/api/schemas.ts`);
   `ExternalUserId` and `Phone` already name their alphabets. The text the
-  user writes reaches a column from stage 4, which decides the same for
-  `text` and the survey's comment before either is served.
+  user writes reaches a column from stage 4, which decided the same for
+  `text` and the survey's comment before either is served: both publish that
+  `pattern` and refuse U+0000 as `400 invalid_request` naming the field.
 - **A file is admitted on its label and stored by its bytes.** `declaredKind`
   refuses a `Content-Type` outside the list whatever the bytes are, and admits
   a part with no type, or `application/octet-stream`, only by its filename's
@@ -878,6 +883,12 @@ it, and the launch's number decides whether the map grows.
 The per-user minting bucket bounds an honest app's loop and nothing else,
 since the caller chooses its key; the server plane's own bucket is what caps
 minting.
+
+The new-ticket bucket counts tickets opened, so it is spent only once the pool
+has found the request's `Idempotency-Key` unspent, never by a replay: spent by
+every `POST /tickets`, one ticket's eleventh retry within the hour was refused
+`429`, and the user's next real ticket with it. A retry still spends the send
+bucket, which turns over in a minute.
 
 The bad-bearer bucket is spent only by a bearer that is refused, and only
 turns that refusal's `401` into a `429`: a live session, or the backend's
@@ -1485,7 +1496,11 @@ Then on production, by the owner, with the token set and a test phone no
 WhatsApp contact holds: mint, create, see "myBlu app" and the header line in
 the inbox, answer from the console, read the answer back, then purge the
 ticket and the contact. The pull request says plainly that this writes to
-production and what removes it. **The SDK's 0.1 is cut from here.**
+production and what removes it. **The SDK's 0.1 is cut from here.** Way back:
+switch the `api` row off, or unset the token. Not a revert once an `api`
+ticket exists, since the build before this stage shows those tickets on the
+portal, which is what the portal's exclusion above prevents; a revert of the
+rest keeps that exclusion.
 
 **5. History and unread.** No schema. The list with its filter, in place of
 stage 4's `404` on `GET /tickets`; the read marker; hours on `GET /config`.

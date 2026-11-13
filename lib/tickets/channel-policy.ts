@@ -22,9 +22,9 @@ export type ConversationChannel = (typeof conversations.$inferSelect)['channel']
 /**
  * Every channel a conversation row can carry.
  *
- * This is deliberately broader than `FILTERABLE_CHANNELS`: portal and API
- * tickets belong in the default working queue even though the filter does not
- * offer them as standalone choices yet. Realtime subscriptions need the full
+ * This is deliberately broader than `FILTERABLE_CHANNELS`: portal tickets
+ * belong in the default working queue even though the filter does not offer
+ * them as a standalone choice yet. Realtime subscriptions need the full
  * set or those tickets stop updating while the ordinary `all` query still
  * returns them.
  *
@@ -67,12 +67,16 @@ void allChannelsAreListed;
  * `plans/ticket-category-routing.md`): offered before, their views were empty
  * while every comment ticket sat under Facebook or Instagram. Since Stage 1.3 a
  * CHECK keeps every comment ticket on its comment channel, so these views hold
- * all of them.
+ * all of them. `api`, the myBlu app, joined the same way, with the stage that
+ * writes the first such ticket (`plans/myblu-ticket-api.md`, stage 4): a view
+ * is a stored link, and one naming a channel a revert takes away would reset
+ * itself to every channel.
  */
 export const FILTERABLE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
+  'api',
   'facebook',
   'facebook_comment',
   'instagram',

@@ -36,13 +36,22 @@ export function invalidRequest(requestId: string, message: string, field?: strin
  * the body itself is the wrong shape. zod's own sentence says what was wrong
  * and never what was sent — it does not repeat the input unless asked to — so
  * a refused phone is not written into the app's log.
+ *
+ * `whole` names what was refused when no one field is to blame: the body, or
+ * for a query string read with a schema (`pageAsked`) the query, since
+ * "The body" on a `GET`'s refusal sent its reader to look for a body it never
+ * sent.
  */
-export function invalidBody(requestId: string, error: z.ZodError): Response {
+export function invalidBody(
+  requestId: string,
+  error: z.ZodError,
+  whole: 'The body' | 'The query' = 'The body',
+): Response {
   const issue = error.issues[0];
   const field = issue && issue.path.length > 0 ? issue.path.join('.') : undefined;
   const message = issue
-    ? `${field ?? 'The body'}: ${issue.message}`
-    : 'The body does not match the request schema.';
+    ? `${field ?? whole}: ${issue.message}`
+    : `${whole} does not match the request schema.`;
   return invalidRequest(requestId, message, field);
 }
 

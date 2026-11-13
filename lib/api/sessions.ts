@@ -1,6 +1,12 @@
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { apiSessions, contactIdentities, contacts, type ApiSessionEndReason } from '@/db/schema';
+import {
+  apiSessions,
+  apiTickets,
+  contactIdentities,
+  contacts,
+  type ApiSessionEndReason,
+} from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { findIdentity, pendingApiContact, resolveApiContactIn } from '@/lib/tickets/contacts';
 
@@ -66,6 +72,13 @@ export type Caller = {
   externalUserId: string;
   /** The presented token's hash, so `DELETE /session` ends this one and nothing else. */
   tokenHash: string;
+  /**
+   * The app the session was minted for, as its backend passed it on: labels
+   * for an agent to read, which `opened_from_app` falls back on when the
+   * request's `ShipBlu-Client` does not name them. Never a credential.
+   */
+  platform: string;
+  appVersion: string;
 };
 
 export type MintInput = {
@@ -183,6 +196,8 @@ export async function lookupSession(token: string, now: Date): Promise<SessionLo
       identityId: apiSessions.identityId,
       expiresAt: apiSessions.expiresAt,
       revokedAt: apiSessions.revokedAt,
+      platform: apiSessions.platform,
+      appVersion: apiSessions.appVersion,
       identifier: contactIdentities.identifier,
       contactId: contacts.id,
       isBlocked: contacts.isBlocked,
@@ -207,8 +222,108 @@ export async function lookupSession(token: string, now: Date): Promise<SessionLo
       contactId: row.contactId,
       externalUserId: row.identifier.slice(IDENTIFIER_PREFIX.length),
       tokenHash,
+      platform: row.platform,
+      appVersion: row.appVersion,
     },
   };
+}
+
+/**
+ * The caller's account lock, for the rest of the transaction, and the caller as
+ * it stands under it: null when the session the request presented is no longer
+ * live — revoked or expired, read on the transaction — and otherwise the caller
+ * with its contact read again and held (`holdRequester`).
+ *
+ * Taken first by the transaction that opens a ticket (`createApiTicket`), so a
+ * create and a revoke for one account are ordered as a mint and a revoke are.
+ * Without it, a revoke with `account_deleted` deletes the account's ownership
+ * rows while a create is between its gate and its commit, and the create's row,
+ * not yet committed, is neither seen nor waited for: the deleted account's
+ * newest ticket stays in the app. With it, a create that comes first commits
+ * before the revoke reads, and its row goes with the rest; a create that comes
+ * after finds its session revoked here and writes nothing. It also serialises
+ * one account's creates, which is what lets the ten-open count hold.
+ */
+export async function holdAccount(tx: Tx, caller: Caller, now: Date): Promise<Caller | null> {
+  await lockAccount(tx, mybluIdentifier(caller.externalUserId));
+  const [live] = await tx
+    .select({ one: sql`1` })
+    .from(apiSessions)
+    .where(
+      and(
+        eq(apiSessions.tokenHash, caller.tokenHash),
+        isNull(apiSessions.revokedAt),
+        gt(apiSessions.expiresAt, now),
+      ),
+    )
+    .limit(1);
+  return live ? holdRequester(tx, caller) : null;
+}
+
+/**
+ * How many times `holdRequester` follows its identity to another contact. A
+ * merge re-points every identity past the contact it folds, so one hop is a
+ * merge and a second is a merge of the survivor landing in the same moment.
+ */
+const REQUESTER_HOPS = 3;
+
+/**
+ * The caller with the contact its identity names now, read on the transaction
+ * and locked `FOR KEY SHARE` until it ends — the contact a write in that
+ * transaction files under and authors as — or null when the identity is gone
+ * (purged with its contact) or names a contact deleted with no survivor.
+ *
+ * The gate read the contact before the transaction began. A contact merge
+ * committed since re-points the identity to the survivor, moves the folded
+ * contact's tickets and messages, and stamps it deleted, but leaves the row,
+ * so a foreign key still accepts it: a ticket written under the id the gate
+ * read lands on the tombstone after the merge has moved everything else, and
+ * from the next request on `ownedTicket` reads the survivor and never finds it
+ * — answered `201` and then `404` for good. Read here, a merge already
+ * committed is followed; and the lock makes one that has not begun wait, since
+ * its `FOR UPDATE` conflicts with this share, so it commits after this
+ * transaction and moves what it wrote. It is the mint's rule (`mintSession`
+ * reads the contact through the identity in its transaction) for the writes
+ * that come after it.
+ *
+ * Two statements, never a lock through a join: the identity's `contact_id` is
+ * what a merge changes, and a locked read joined through it re-checks the
+ * newest contact row against the identity it read before waiting (AGENTS.md,
+ * _A read that locks a row…_). So the lock names the id just read and asks it
+ * to be neither merged nor deleted: a merge holding the row when this asked
+ * commits first, the re-check finds the row folded and answers nothing, and
+ * the identity, read again in a statement of its own, names the survivor.
+ *
+ * Contact, then ticket — the order a merge and a contact's purge lock in, the
+ * contacts first — so a send holding a ticket's row never waits on a merge
+ * that is waiting for that row.
+ */
+export async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
+  let followed: string | null = null;
+  for (let hop = 0; hop < REQUESTER_HOPS; hop++) {
+    const [identity] = await tx
+      .select({ contactId: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(eq(contactIdentities.id, caller.identityId))
+      .limit(1);
+    // Gone, or still naming a contact the lock refused: deleted with no survivor.
+    if (!identity || identity.contactId === followed) return null;
+
+    const [held] = await tx
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.id, identity.contactId),
+          isNull(contacts.mergedIntoContactId),
+          isNull(contacts.deletedAt),
+        ),
+      )
+      .for('key share');
+    if (held) return { ...caller, contactId: held.id };
+    followed = identity.contactId;
+  }
+  return null;
 }
 
 /**
@@ -262,27 +377,44 @@ export function revokeStatement(
  * session is stamped with the rest; a mint that comes after waits, and is a
  * session minted after the revoke.
  *
- * The plan also has `account_deleted` and `number_released` delete the
- * identity's ownership rows, so its tickets leave the app for good while they
- * stay on the contact for agents. Those rows (`api_tickets`) arrive with the
- * tickets themselves, in stage 4, and the delete with them, here; until then
- * there is nothing to delete, and the reason is recorded on the rows either way.
+ * With `account_deleted` or `number_released` it also deletes the identity's
+ * ownership rows (`api_tickets`), in the same transaction, so the account's
+ * tickets leave the app for good — every read is scoped by those rows
+ * (`ownedTicket`) — while they stay on the contact for agents: nothing else is
+ * touched. The person behind the account has changed or is gone, and a new
+ * session minted later for the same `externalUserId` must not read what the
+ * last one wrote. The other reasons end sessions and leave the tickets, since
+ * the same person signs in again. A create racing this takes the same lock
+ * (`holdAccount`), so its row is either deleted here or never written.
  */
 export async function revokeSessions(
   externalUserId: string,
   reason: ApiSessionEndReason,
   now: Date,
-): Promise<{ identityId: string | null; revoked: number }> {
+): Promise<{ identityId: string | null; revoked: number; ticketsReleased: number }> {
   const identifier = mybluIdentifier(externalUserId);
   return db.transaction(async (tx) => {
     await lockAccount(tx, identifier);
     const identity = await findIdentity('api', identifier, tx);
-    if (!identity) return { identityId: null, revoked: 0 };
+    if (!identity) return { identityId: null, revoked: 0, ticketsReleased: 0 };
 
     const result = await revokeStatement(tx, identity.identityId, reason, now);
-    return { identityId: identity.identityId, revoked: result.count };
+    const released = RELEASES_TICKETS.has(reason)
+      ? await tx.delete(apiTickets).where(eq(apiTickets.identityId, identity.identityId))
+      : null;
+    return {
+      identityId: identity.identityId,
+      revoked: result.count,
+      ticketsReleased: released?.count ?? 0,
+    };
   });
 }
+
+/** The revoke reasons after which the account's tickets leave the app. */
+const RELEASES_TICKETS: ReadonlySet<ApiSessionEndReason> = new Set([
+  'account_deleted',
+  'number_released',
+]);
 
 /**
  * The nightly sweep (`cleanup`): rows thirty days past their expiry. On the

@@ -145,9 +145,12 @@ export async function requesterLocale(
   // `contacts.locale`, which nothing writes, and an Arabic visitor's photo of
   // the damaged parcel was acknowledged in English (§6.97's trap, from the
   // widget). Only when there are no words: a visitor typing English in the
-  // Arabic panel is answered in English.
-  if (words === null && ticket?.channel === 'webchat') {
-    const panel = await widgetPanelLocale(conversationId);
+  // Arabic panel is answered in English. The myBlu app's tickets the same
+  // way: every message from the app carries the `locale` it was written in
+  // (`lib/api/tickets.ts`), which is what a photo sent alone (stage 7 of
+  // `plans/myblu-ticket-api.md`) is answered in.
+  if (words === null && (ticket?.channel === 'webchat' || ticket?.channel === 'api')) {
+    const panel = await clientLocale(conversationId);
     if (panel) return panel;
   }
 
@@ -155,8 +158,11 @@ export async function requesterLocale(
   return preferredLocale(locale ?? 'en', words);
 }
 
-/** The language of the panel the newest widget message on a ticket was sent from, if it says. */
-async function widgetPanelLocale(conversationId: string): Promise<'ar' | 'en' | null> {
+/**
+ * The language the newest customer message on a ticket says it was written in,
+ * if it says: the widget's panel, or the myBlu app's `locale`.
+ */
+async function clientLocale(conversationId: string): Promise<'ar' | 'en' | null> {
   const [row] = await db
     .select({ locale: sql<string | null>`${messages.meta}->>'locale'` })
     .from(messages)

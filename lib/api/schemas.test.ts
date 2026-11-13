@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { invalidBody } from './errors';
-import { CreateSessionRequest, ErrorBody, ListMessagesQuery } from './schemas';
+import {
+  AnswerSurveyRequest,
+  CreateSessionRequest,
+  CreateTicketRequest,
+  ErrorBody,
+  ListMessagesQuery,
+  SendMessageRequest,
+} from './schemas';
 
 /**
  * What a schema refuses that the document cannot say, or that the database
@@ -62,5 +69,28 @@ describe('CreateSessionRequest', () => {
       CreateSessionRequest.safeParse({ ...mint, client: { platform: 'android', appVersion: '5' } })
         .success,
     ).toBe(true);
+  });
+});
+
+describe('the text the user writes', () => {
+  // The same rule as the session's `name`, decided with the stage that first
+  // stores a message (stage 4): a `text` column refuses U+0000, and the send
+  // answered 500 — which an SDK retries until its entry ages — for a 400.
+  it.each([
+    ['text', CreateTicketRequest, { text: 'Where\u0000 is it?', locale: 'en' }],
+    ['text', SendMessageRequest, { text: '\u0000', locale: 'ar' }],
+    ['comment', AnswerSurveyRequest, { rating: 4, comment: 'Fine\u0000' }],
+  ] as const)('refuses U+0000 in %s, naming the field', async (field, schema, body) => {
+    const parsed = schema.safeParse(body);
+    if (parsed.success) throw new Error('expected a refusal');
+    const error = ErrorBody.parse(await invalidBody('r', parsed.error).json()).error;
+    expect(error).toMatchObject({ code: 'invalid_request', field });
+    expect(error.message).not.toContain('\u0000');
+  });
+
+  it('takes Arabic, emoji and line breaks', () => {
+    for (const text of ['فين شحنتي؟', 'Where is it 🚚', 'line\nbreak']) {
+      expect(SendMessageRequest.safeParse({ text, locale: 'ar' }).success, text).toBe(true);
+    }
   });
 });

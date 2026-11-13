@@ -59,6 +59,7 @@ import {
   WebhookSignatureHeader,
   WebhookTimestampHeader,
 } from '@/lib/api/schemas';
+import { encodeCursor } from '@/lib/api/cursor';
 import { MAX_COMMENT } from '@/lib/csat/limits';
 import {
   MAX_WIDGET_FILES,
@@ -273,12 +274,14 @@ const IDS = {
 const EXTERNAL_ID = 'u_83412';
 
 /**
- * A cursor as the server mints one: base64url of Postgres's timestamp text and
- * the row id. Shown so the examples look like what arrives; opaque to a client,
- * which never reads one.
+ * A cursor as the server mints one (`encodeCursor`): base64url of Postgres's
+ * timestamp text, the row id and their signature. Shown so the examples look
+ * like what arrives; opaque to a client, which never reads one. Signed under a
+ * key no server holds, since the document is built without the environment, so
+ * the example is refused like any cursor this server did not mint.
  */
 function cursor(timestamp: string, rowId: string): string {
-  return Buffer.from(`${timestamp}|${rowId}`).toString('base64url');
+  return encodeCursor({ time: timestamp, id: rowId }, 'the published example, signed by no server');
 }
 
 const OPENING: z.input<typeof Message> = {

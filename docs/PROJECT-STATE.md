@@ -2269,10 +2269,38 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   first that writes a ticket. Way back: unset the token, which stops both
   planes; where sessions were minted that should not have been, revoke every
   live one, which costs every app one silent refresh:
-  `update api_sessions set revoked_at = now() where revoked_at is null`. A
-  revoke records `account_deleted` and `number_released` like any reason:
-  deleting that user's ownership rows, so the tickets leave the app, needs
-  `api_tickets`, which stage 4 brings.
+  `update api_sessions set revoked_at = now() where revoked_at is null`.
+- **The myBlu app's tickets arrive with stage 4 of `plans/myblu-ticket-api.md`,
+  inert until `MYBLU_API_TOKEN` is set and an active `api` row exists** (§2 and
+  the row above). It adds `api_tickets` (`0063_api_tickets`, a new table with a
+  foreign key onto `conversations` and one onto `contact_identities`, both
+  cascading, nothing rewritten): which app identity opened a ticket, and the
+  tracking number it was opened with. Four routes on the client plane:
+  `POST /tickets`, `GET /tickets/{id}`, and `GET` and `POST
+/tickets/{id}/messages`; `GET /tickets` answers `404` with no body until
+  stage 5 brings the list. A ticket opened from the app is on the `api`
+  channel, filed under the oldest active `api` row's group and routed by its
+  mode as every ingest path's is, with an `opened_from_app` event the ticket's
+  header reads as "myBlu · phone vouched for by the app · iOS 5.4.1". "myBlu
+  app" is now an inbox filter and a channel the rule, SLA-policy and
+  out-of-hours editors offer. The portal no longer lists, opens or takes a reply
+  on an `api` ticket. A revoke with `account_deleted` or `number_released` now
+  deletes that identity's `api_tickets` rows, so its tickets leave the app and
+  stay on the contact. A message's text holding U+0000 is refused `400` (the
+  changelog's 2026-11-13 line). After the release is on `main`, by the owner,
+  with the token set and a test phone no WhatsApp contact holds: mint, create,
+  see "myBlu app" and the header line in the inbox, answer from the console,
+  read the answer back, then purge the ticket and the contact — this writes to
+  production, and the purge is what removes it. **The SDK's 0.1 is cut from
+  here.** Way back: switch the `api` row off, which stops new tickets while the
+  app's reads and replies go on; or unset the token, which stops the whole API.
+  Not a revert, once one `api` ticket exists: the build before this one scopes
+  the help centre's portal by contact with only the read-only channels left
+  out, so it would list, open and take a reply on every app ticket for whoever
+  signs in as that contact — a previous holder of the phone writing into the
+  new holder's myBlu ticket, which the portal's exclusion is there to prevent.
+  A revert of anything else in this stage keeps `notOnThePortal()` in
+  `lib/portal/tickets.ts`; `api_tickets` itself is additive and can stay.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and

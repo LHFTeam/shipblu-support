@@ -2044,7 +2044,7 @@
                         }
                       ],
                       "olderCursor": null,
-                      "newerCursor": "MjAyNi0xMS0xMiAwOTo0MTowNy4wMDQyMTMrMDB8NmYxYzJkM2UtNGE1Yi00YzZkLThlN2YtOWEwYjFjMmQzZTRm",
+                      "newerCursor": "MjAyNi0xMS0xMiAwOTo0MTowNy4wMDQyMTMrMDB8NmYxYzJkM2UtNGE1Yi00YzZkLThlN2YtOWEwYjFjMmQzZTRmfDdFeXhJYW4wRUtTRDRERUF3M2Z3M2NmYTZEMWx0TmY1LWxYRUpfVTVFalk",
                       "ticket": {
                         "id": "8a1f4c2e-6b3d-4f9a-a7e5-1c2d3e4f5a6b",
                         "number": 4812,
@@ -4996,7 +4996,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5014,7 +5015,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5041,7 +5043,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5056,7 +5059,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5098,7 +5102,8 @@
           "comment": {
             "type": "string",
             "maxLength": 2000,
-            "description": "A comment, sent as a second `POST` carrying the same rating. Over the limit is `400 invalid_request`, never cut short. At most 2000 UTF-16 code units, as JavaScript's `length` counts and `survey.commentMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "A comment, sent as a second `POST` carrying the same rating. Over the limit is `400 invalid_request`, never cut short. At most 2000 UTF-16 code units, as JavaScript's `length` counts and `survey.commentMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           }
         },
         "required": ["rating"],

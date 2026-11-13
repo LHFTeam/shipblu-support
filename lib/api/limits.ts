@@ -10,9 +10,9 @@ import { admit, clientIp, type Admission } from '@/lib/http/rate-limit';
  * one address (`lib/auth/throttle.ts`), so an address bucket is a ceiling on a
  * script, not a measure of a person, and it is generous for that reason.
  *
- * The buckets here are `plans/myblu-ticket-api.md`'s first five. Sends, new
- * tickets and uploaded megabytes arrive with the routes that spend them
- * (stages 4 and 7), each on the session's identity.
+ * The buckets here are `plans/myblu-ticket-api.md`'s first seven. Uploaded
+ * megabytes arrive with the route that spends them (stage 7), on the session's
+ * identity.
  */
 
 const MINUTE_MS = 60_000;
@@ -74,6 +74,32 @@ const READ_LIMIT = 240;
 
 export function admitRead(identityId: string): Admission {
   return admit(`api-v1:read:${identityId}`, READ_LIMIT, MINUTE_MS);
+}
+
+/**
+ * Messages written, on the session's identity: both requests that write one,
+ * `POST /tickets` and `POST /tickets/{id}/messages`, spend it. A retry under
+ * the same `Idempotency-Key` spends it too, as every refused request does: it
+ * is a request, and a client retrying in a loop is what the bucket is for.
+ */
+const SEND_LIMIT = 20;
+
+export function admitSend(identityId: string): Admission {
+  return admit(`api-v1:send:${identityId}`, SEND_LIMIT, MINUTE_MS);
+}
+
+/**
+ * Tickets opened, on the session's identity: ten an hour, beside the ten open
+ * at once below. Spent by `createApiTicket` once the pool has found its
+ * `Idempotency-Key` unspent, and never by a replay: a retry of a ticket that
+ * exists opens nothing, and spending on it let one ticket's retries refuse it
+ * `429`, and the user's next ticket with it, for the rest of the hour.
+ */
+const NEW_TICKET_LIMIT = 10;
+const HOUR_MS = 60 * MINUTE_MS;
+
+export function admitNewTicket(identityId: string): Admission {
+  return admit(`api-v1:new-ticket:${identityId}`, NEW_TICKET_LIMIT, HOUR_MS);
 }
 
 /**

@@ -17,7 +17,7 @@ import type { Caller } from './sessions';
  * _Reading without a stream_). Each at least 1, as the contract requires of
  * every wait it answers.
  */
-const POLL_THREAD_SECONDS = 5;
+export const POLL_THREAD_SECONDS = 5;
 const POLL_LIST_SECONDS = 30;
 
 /**
