@@ -32,9 +32,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * `webchatChannel` is for the widget's page: its callers are route handlers,
  * one read per request.
  *
- * Nothing but its test reads it until the plan's stage 3, whose `GET /config`
- * does, and stage 4's ticket path after it. The `dead-exports` rule counts a
- * test's import as an import, so the export is not reported meanwhile.
+ * `GET /config` reads it for `tickets.canCreate` (stage 3), and the plan's
+ * stage 4 ticket path files under it.
  */
 export async function apiChannel() {
   const rows = await db

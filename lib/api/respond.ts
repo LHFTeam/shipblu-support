@@ -42,7 +42,6 @@ type AnswerInit = {
 
 function headersFor(init: AnswerInit): Headers {
   const headers = new Headers(init.headers);
-  headers.set('Content-Type', JSON_TYPE);
   headers.set('Cache-Control', 'no-store');
   headers.set('ShipBlu-Request-Id', init.requestId);
   return headers;
@@ -60,7 +59,17 @@ export function apiJson(body: unknown, init: AnswerInit): Response {
  * both, so a body sent as text cannot leave without the two headers.
  */
 export function apiJsonText(json: string, init: AnswerInit): Response {
-  return new Response(json, { status: init.status ?? 200, headers: headersFor(init) });
+  const headers = headersFor(init);
+  headers.set('Content-Type', JSON_TYPE);
+  return new Response(json, { status: init.status ?? 200, headers });
+}
+
+/**
+ * `204 No Content`: the two headers, and no body and no `Content-Type`, since
+ * there is nothing for one to describe.
+ */
+export function apiNoContent(init: Omit<AnswerInit, 'status'>): Response {
+  return new Response(null, { status: 204, headers: headersFor(init) });
 }
 
 type ErrorExtras = {

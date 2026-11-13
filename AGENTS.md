@@ -1380,6 +1380,50 @@ active row may go off. That is what the switch is for. With no row on, the app
 opens no new ticket (`503 not_configured`), while customers keep reading and
 replying on the tickets they have (`plans/myblu-ticket-api.md`, _Tickets_).
 
+**A request to `/api/v1` is somebody only through its bearer.** Two planes
+(`lib/api/auth.ts`): the server plane is myBlu's backend holding
+`MYBLU_API_TOKEN`, which mints and ends sessions and does nothing else, and the
+client plane is the app holding a session token for one user. A request body
+naming a phone, a contact or a ticket's owner is a claim. Only the session says
+who is asking, and only the server plane says who a session is: a route takes
+its caller from `clientPlane()`, never from a field, and the phone on
+`POST /sessions` decides nothing but which contact a new account joins.
+`pendingApiContact` and `resolveApiContactIn` in `lib/tickets/contacts.ts`
+decide that, the reads before the transaction and the writes in it: the
+number's WhatsApp contact, joined under its row lock and its identities re-read
+in the next statement, while no other account hangs off it and, under the
+number's advisory lock, no other account's contact holds the number; otherwise
+a contact of the account's own, with `primary_phone` only for a number nobody
+holds, decided under the same lock, so two accounts on one phone are never
+offered to an agent as a merge. No `whatsapp` identity is ever written from a
+session, and no contact's name is overwritten. A mint and a revoke for one
+account each take the account's advisory lock first (`lockAccount` in
+`lib/api/sessions.ts`), so a revoke ends a session a mint wrote while it ran
+rather than missing an uncommitted row, and a mint reads the contact through
+the identity in its transaction, so a merge landing meanwhile is followed
+rather than answered `403 blocked`. `api_sessions` holds a
+SHA-256 of the `sbu_…` token, as `sessions` and `contact_sessions` do, so a
+dump authenticates nobody. Its life is twenty-four hours, fixed, so a request
+writes nothing, and the contact is read through the identity on every request
+and never cached: a merge moves a live session, and a block or a revoke is the
+next request's answer — but for `DELETE /session`, whose gate (`endingPlane`)
+ends a blocked contact's session rather than refusing it, since a `403` there
+left a token the app had wiped live until the block was lifted. A text field
+the server stores refuses U+0000 in its schema (`storable` in
+`lib/api/schemas.ts`), because Postgres's `text` refuses it as a `500`.
+`/api/v1` never reads a cookie — a console cookie with
+no bearer is `401` — and takes no credential in a URL. While `MYBLU_API_TOKEN`
+is unset or under 32 characters both planes answer `503 not_configured`, the
+client plane before it reads a session. That is how the routes deploy before
+myBlu holds a value, and unsetting it is the way back. `ShipBlu-Client` is
+required on the client plane, and a `426` is decided on it from
+`MINIMUM_VERSIONS` beside the gate, empty until a build is to be refused. **An
+`/api/v1` log line carries the identity's uuid and the route, never a token, a
+phone, an `externalUserId` or a body.** A route's failure goes through
+`answering()` (`lib/api/errors.ts`), which logs a scrubbed copy: drizzle words
+a failed query with its parameters, and Postgres puts the offending values in
+`detail`.
+
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST
 (`/api/widget/message`, multipart where the text-only body stays JSON), never
@@ -3091,8 +3135,15 @@ deleting it, and drop the sections that genuinely do not apply.
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.
   The bucket is private; mint short-lived signed URLs.
-- Public endpoints (KB feedback and views, the widget) are rate limited in
-  memory — do not add a row per rejected request.
+- Public endpoints (KB feedback and views, the widget, the myBlu API) are rate
+  limited in memory — do not add a row per rejected request. The myBlu API's
+  buckets are keyed on the session's identity wherever a request has one, and
+  on the address only before it does (`lib/api/limits.ts`). The address is the
+  first `X-Forwarded-For` value, which a caller writes, so no address bucket
+  stands between a good bearer and its answer except the generous one before
+  auth: refused bearers are counted only to turn the next refusal's `401` into
+  a `429`. A row that records who asked keeps the whole chain
+  (`forwardedChain`), never that first value.
 - **A host page telling the widget who its visitor is makes a claim, not a
   statement of fact.** It arrives from a browser. An unsigned identity may only
   decorate the contact the visitor's token already resolved to — it never adopts

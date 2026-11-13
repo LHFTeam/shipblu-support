@@ -197,8 +197,8 @@ def mint_support_session(user, platform: str, app_version: str) -> dict:
         "client": {"platform": platform, "appVersion": app_version},  # "ios" or "android"
     }
     name = user.get_full_name()
-    # At most 200 UTF-16 code units, which len() does not count; a longer one is refused.
-    if name and len(name.encode("utf-16-le")) // 2 <= 200:
+    # At most 200 UTF-16 code units, which len() does not count, and no NUL; else refused.
+    if name and "\0" not in name and len(name.encode("utf-16-le")) // 2 <= 200:
         body["name"] = name
     response = requests.post(
         f"{SUPPORT_API}/sessions",
@@ -269,8 +269,8 @@ export async function mintSupportSession(user, { platform, appVersion }) {
   const session = await serverPlane('/sessions', {
     externalUserId: user.supportId, // stable, never reused, never the phone
     phone: toE164(user.phone),
-    // At most 200 UTF-16 code units, which `length` counts; a longer one is refused.
-    ...(user.name && user.name.length <= 200 && { name: user.name }),
+    // At most 200 UTF-16 code units, which `length` counts, and no NUL; else refused.
+    ...(user.name && !user.name.includes('\0') && user.name.length <= 200 && { name: user.name }),
     client: { platform, appVersion },
   });
   // Hand these to the app and keep nothing: never log, cache or store the token.
@@ -290,7 +290,9 @@ own clock from the moment its provider answered (rule 2), so hand it to the app
 as it came. `name` is at most 200 UTF-16 code units, which JavaScript's
 `length` counts and Python's `len` does not: a longer one is
 `400 invalid_request`, so a `502` to the app, which reads it as not signed in.
-Leave such a name out.
+Leave such a name out, and one holding U+0000 (NUL), which the database cannot
+store and which is refused the same way, as is a `client.appVersion` holding
+one.
 
 `POST /sessions/revoke` answers `204` whether or not the user is known. Its
 refusals are the backend's to act on, and none is relayed: there is no app
@@ -440,7 +442,7 @@ survey's.
 | none   | `GET /openapi.json`                |                                                                      | `200`, the contract                                                                 |
 | Server | `POST /sessions`                   | `{ externalUserId, phone, name?, client: { platform, appVersion } }` | `201 { token, expiresAt, expiresInSeconds }`                                        |
 | Server | `POST /sessions/revoke`            | `{ externalUserId, reason }`                                         | `204`, whether or not the user is known                                             |
-| Client | `DELETE /session`                  |                                                                      | `204`                                                                               |
+| Client | `DELETE /session`                  |                                                                      | `204`, a blocked user's too                                                         |
 | Client | `GET /config`                      |                                                                      | `200`, below                                                                        |
 | Client | `POST /tickets`                    | `{ text, locale, trackingNumber? }`; multipart from stage 7          | `201 { ticket, message }`; `200` to a replay                                        |
 | Client | `GET /tickets/{id}`                |                                                                      | `200 { ticket }`                                                                    |
@@ -705,7 +707,9 @@ window turns.
 The first bucket is live with `GET /openapi.json`; the rest arrive with the
 routes they guard. The minting bucket bounds an honest app's loop and nothing
 more, since the caller chooses its key; the server plane's own bucket is what
-caps minting.
+caps minting. The bad-bearer bucket counts bearers that were refused and only
+changes how the next refusal is answered, `429` rather than `401`: a live
+session token, or `MYBLU_API_TOKEN`, is never refused for it.
 
 ## The webhook
 

@@ -342,8 +342,12 @@ follows the document would get a 401.
   test holds that a valid console cookie with no bearer is a 401.
 - **What a row holds, and for how long.** `token_hash` (primary key),
   `identity_id` (cascade), the phone vouched for at this mint as digits,
-  `platform`, `app_version`, the minting request's address, `created_at`,
-  `expires_at`, `revoked_at`, `revoke_reason`. `contact_identities` has no
+  `platform`, `app_version`, the minting request's `X-Forwarded-For` chain
+  (`forwarded_for`, its last hops as they arrived), `created_at`,
+  `expires_at`, `revoked_at`, `revoke_reason`. The chain rather than one
+  address from it, because its first hop is whatever the caller wrote:
+  somebody minting with a leaked `MYBLU_API_TOKEN` can write the backend's own
+  address there, and the hops the platform's proxies append come after it. `contact_identities` has no
   column for a phone, so this row is where the one the backend vouched for is
   kept. `platform` and `app_version` are the mint's `client`, which only the
   app knows, so the app sends `{ platform, appVersion }` to its own backend
@@ -368,13 +372,24 @@ follows the document would get a 401.
   `account_deleted`, `number_released`, `other`, recorded on the rows. With
   `account_deleted` or `number_released` it also deletes that identity's
   ownership rows (below), so the tickets stay on the contact for agents and
-  leave the app for good.
+  leave the app for good. A mint and a revoke for one account each take the
+  account's advisory lock first, so a revoke ends a session a mint wrote while
+  it ran: without it, the revoke's `UPDATE` neither sees nor waits for a row
+  not yet committed, and that session outlives a "sign out everywhere" by a
+  day. A mint that comes after the revoke waits for it, and is a session
+  minted after it.
 - **A blocked or deleted contact is refused on every request,** as
   `getSessionCustomer` refuses one, and a blocked one at the mint too:
   `POST /sessions` answers `403 blocked` and writes no row. A session no call
   could use is a row for nothing, and the mint's answer is the one the backend
   sees, so it relays the `403` to the app, whose SDK stops there rather than
-  asking again on every foreground (rule 2 under _What every SDK does_).
+  asking again on every foreground (rule 2 under _What every SDK does_). The
+  one exception is ending a session: `DELETE /session` ends a blocked
+  contact's session as it ends any other, and answers `204`
+  (`endingPlane` in `lib/api/auth.ts`). Ending takes nothing from anybody,
+  and the SDK's `reset()` wipes the device whatever it is answered, so a
+  `403` there left alive, for the rest of its day, a token the app had let
+  go of — and lifting the block within that day made it usable again.
 - **The server plane's bearer** is compared with `safeEqual` against the
   current value and `_PREVIOUS`. A value under 32 characters counts as unset,
   checked at first use and never in `lib/env.ts`, where a format rule turns
@@ -413,12 +428,25 @@ follows the document would get a 401.
   `resolveContactIn` do. In order: the existing `api` identity, whose contact
   it keeps even when the phone has changed (an agent merges if the new
   number's contact is the same person); else the contact owning
-  `('whatsapp', <digits>)`, when no other `api` identity already hangs off it;
+  `('whatsapp', <digits>)`, when no other `api` identity already hangs off it
+  and no other account's contact holds the number as its `primary_phone`;
   else a new contact.
 - **That join is decided under the contact's row lock,** taken first in the
   transaction, with its `api` identities re-read in the next statement — a
   lock and then a read, never a join under the lock — so two sessions minted
-  at once for one phone under two ids cannot both find it free.
+  at once for one phone under two ids cannot both find it free. Then, under
+  the number's advisory lock, which a new contact takes before it writes
+  `primary_phone`, whether another account's contact holds the number: an
+  account first on a number nobody held writes it there, a WhatsApp contact
+  the number then writes from has it too and is rightly suggested against it,
+  and a second account joining that WhatsApp contact would make the
+  suggestion one between two accounts. The row lock is only ever taken before
+  the number's.
+- **The mint reads the contact through the identity,** in its transaction,
+  never by the id read before it: a merge committed between the two re-points
+  the identity to the survivor and stamps the old contact deleted, and the
+  account would be answered `403 blocked`, which its SDK holds until the app
+  restarts.
 - **A second `externalUserId` on a number gets a contact of its own, with no
   `primary_phone`.** The two are known to be different accounts.
   `mergeCandidates` matches a phone by equality, so writing it there would
@@ -790,6 +818,14 @@ tapped (rule 10 under _What every SDK does_).
   two on what the app's user writes — a message and the survey's comment — are
   published where a client reads them. The session's `name` has a limit too,
   which only the backend meets, so its description says the unit instead.
+- **No stored text holds U+0000.** A Postgres `text` column refuses that
+  character outright (SQLSTATE 22021), so a field allowing it is a `500` for
+  what the contract says is a `400` naming the field — and a `500` the backend
+  retries can never succeed. The session's `name` and `client.appVersion`
+  publish a `pattern` that refuses it (`storable` in `lib/api/schemas.ts`);
+  `ExternalUserId` and `Phone` already name their alphabets. The text the
+  user writes reaches a column from stage 4, which decides the same for
+  `text` and the survey's comment before either is served.
 - **A file is admitted on its label and stored by its bytes.** `declaredKind`
   refuses a `Content-Type` outside the list whatever the bytes are, and admits
   a part with no type, or `application/octet-stream`, only by its filename's
@@ -843,6 +879,16 @@ The per-user minting bucket bounds an honest app's loop and nothing else,
 since the caller chooses its key; the server plane's own bucket is what caps
 minting.
 
+The bad-bearer bucket is spent only by a bearer that is refused, and only
+turns that refusal's `401` into a `429`: a live session, or the backend's
+token, is never refused for it, on either plane. The address is the first
+`X-Forwarded-For` value, which a caller writes, so a budget asked before the
+bearer was read would let anybody refuse every app behind one carrier's
+egress for a hundred and twenty forged requests a minute, while a script
+writing a fresh address each time was never slowed by it. A 256-bit token
+needs no gate in front of its index; the address bucket is the ceiling before
+auth.
+
 ## The API
 
 Base: `https://support.shipblu.com/api/v1`, kept in the app's configuration.
@@ -885,7 +931,7 @@ operation is fixed from the release that ships it. A breaking change is
 | none   | `GET /openapi.json`                |                                                                      | the contract; no credential, behind the address bucket                          | 0b    |
 | Server | `POST /sessions`                   | `{ externalUserId, phone, name?, client: { platform, appVersion } }` | `201 { token, expiresAt, expiresInSeconds }`                                    | 3     |
 | Server | `POST /sessions/revoke`            | `{ externalUserId, reason }`                                         | `204`, whether or not the user is known                                         | 3     |
-| Client | `DELETE /session`                  |                                                                      | `204`                                                                           | 3     |
+| Client | `DELETE /session`                  |                                                                      | `204`, a blocked user's too                                                     | 3     |
 | Client | `GET /config`                      |                                                                      | below                                                                           | 3     |
 | Client | `POST /tickets`                    | `{ text, locale, trackingNumber? }`; multipart from stage 7          | `201 { ticket, message }`                                                       | 4     |
 | Client | `GET /tickets/{id}`                |                                                                      | `{ ticket }`                                                                    | 4     |
@@ -1394,10 +1440,15 @@ resolver in `lib/tickets/contacts.ts`; the four routes, each behind `admit()`; t
 minting snippet in the guide. Verified by a `*.db.test.ts`: a new contact for
 an unheld number gets `primary_phone`; a phone with a WhatsApp contact joins
 it; a second `externalUserId` on that phone gets a contact of its own with no
-`primary_phone`; two mints racing on one phone under two ids end on two
-contacts; a blocked contact, an expired token, a revoked one and a
-`contact_sessions` token are each refused; a national-format phone is a 400;
-a short `MYBLU_API_TOKEN` counts as unset. On production after it ships, with
+`primary_phone`, and so does one arriving after the first account's contact
+took the number and a WhatsApp contact followed; two mints racing on one
+phone under two ids end on two contacts; a revoke racing a mint ends the
+mint's session; a merge landing during a mint mints on the survivor; a
+blocked contact, an expired token, a revoked one and a
+`contact_sessions` token are each refused, though `DELETE /session` ends a
+blocked contact's session, which lifting the block does not bring back; a
+national-format phone is a 400, and so is a `name` or an app version holding
+U+0000; a short `MYBLU_API_TOKEN` counts as unset. On production after it ships, with
 the token unset: `POST /api/v1/sessions` and `GET /api/v1/config` both answer
 `503`, asked on `shipblu-support.onrender.com` as well, where a redirect to
 `/login` would show a missing prefix. Way back: unset the token, which stops
@@ -1409,21 +1460,25 @@ costs every app one silent refresh.
 `lib/api/tickets.ts`, the four routes, the cursor, `opened_from_app` with its
 label and the header line, the `api` arm in `requesterLocale`, the portal's
 exclusion of `api` from its list, its ticket page and its reply, and `api` in
-the three lists under _The console_. A route file serving one method of a
-path whose other method ships later exports that method too, answering `404`
-with no body until its stage replaces it; `GET /tickets`, stage 5's on the path
-`POST /tickets` serves, is the one such case, so `app/api/v1/tickets/route.ts`
-exports both. Exporting `POST` alone, it would answer `GET` with Next's `405`,
-which the SDK reads as its own bug rather than as a route not served yet
-(_The API_), and the app's list would fail as a broken request instead of
-waiting for its stage. Verified by a route test that `GET /tickets` answers
-`404` with no body, and by `tickets.db.test.ts`: one key
+the three lists under _The console_. The deletion of the identity's ownership
+rows that `revokeSessions` (`lib/api/sessions.ts`) owes `account_deleted` and
+`number_released`, which stage 3 could only record, since the rows arrive
+here. A route file serving one method of a path whose other method ships later
+exports that method too, answering `404` with no body until its stage replaces
+it; `GET /tickets`, stage 5's on the path `POST /tickets` serves, is the one
+such case, so `app/api/v1/tickets/route.ts` exports both. Exporting `POST`
+alone, it would answer `GET` with Next's `405`, which the SDK reads as its own
+bug rather than as a route not served yet (_The API_), and the app's list would
+fail as a broken request instead of waiting for its stage. Verified by a route
+test that `GET /tickets` answers `404` with no body, and by
+`tickets.db.test.ts`: one key
 twice is one ticket; two creates racing on a key answer the same ids; another
 identity's ticket, **a second identity's on the same contact**, the same
 contact's WhatsApp ticket and a merged one are each 404; a note is never
 returned; a files-only message answers `text: ""` and `subject: null`;
 `after` returns a row stamped earlier and committed later; a reply reopens
-`resolved` and is refused on `closed`; a row in `category` mode gets its
+`resolved` and is refused on `closed`; a revoke with `account_deleted` takes
+the user's tickets out of the app and leaves them on the contact; a row in `category` mode gets its
 window, its `routing_decisions` row and one `settle_routing` job; no bare
 `Date` survives in `toSQL().params`; and a case each in the portal's tests.
 Then on production, by the owner, with the token set and a test phone no
