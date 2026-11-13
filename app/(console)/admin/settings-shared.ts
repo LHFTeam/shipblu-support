@@ -69,6 +69,13 @@ export type AdminState = ActionState & {
  */
 export type WebchatSwitchState = AdminState & { stateKey?: string };
 
+/**
+ * A myBlu app row's switch, for the same reason: `stateKey` is the `api` rows
+ * as the action left them (`apiStateKey`), so an answer naming the row the app
+ * uses, or saying none is on, is shown only while it is still so.
+ */
+export type ApiSwitchState = AdminState & { stateKey?: string };
+
 export function refresh(path: string) {
   revalidatePath(path);
 }

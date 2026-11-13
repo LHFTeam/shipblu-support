@@ -7,6 +7,7 @@ import {
   channels,
   contacts,
   conversations,
+  groups,
   kbCategories,
   kbFolders,
   ticketStatuses,
@@ -69,6 +70,7 @@ const {
   connectBusinessAppNumber,
   deleteWhatsAppAccount,
   saveChannel,
+  setApiChannelActive,
   setNumberOwner,
   setWebchatActive,
 } = await import('./actions');
@@ -286,6 +288,91 @@ describe('saveChannel for a comments row', () => {
   it('still refuses a type nobody may create', async () => {
     const result = await saveChannel(INITIAL, form({ type: 'portal', name: 'Forged' }));
     expect(result.error).toBe('Unknown channel type');
+  });
+});
+
+// The myBlu app's row: a name, a default group and a mode, and no config —
+// the app is addressed by a session, not by anything the row could hold.
+describe('saveChannel for a myBlu app row', () => {
+  async function group(name: string) {
+    const [row] = await db.insert(groups).values({ name }).returning({ id: groups.id });
+    return row!.id;
+  }
+
+  async function rowNamed(name: string) {
+    const [row] = await db
+      .select({
+        id: channels.id,
+        type: channels.type,
+        config: channels.config,
+        defaultGroupId: channels.defaultGroupId,
+        routingMode: channels.routingMode,
+        isActive: channels.isActive,
+      })
+      .from(channels)
+      .where(eq(channels.name, name));
+    return row!;
+  }
+
+  // An address posted beside it — a forged field, or the add form's box from
+  // a type chosen before — is ignored rather than stored as `{ address }`,
+  // which the email catch-all below the api arm would write.
+  it('creates an api row with its group and mode and an empty config', async () => {
+    const recipients = await group('Recipients');
+    const result = await saveChannel(
+      INITIAL,
+      form({
+        type: 'api',
+        name: 'myBlu app',
+        defaultGroupId: recipients,
+        routingMode: 'category_shadow',
+        address: 'nobody@example.com',
+        phoneNumberId: '106540352242922',
+      }),
+    );
+    expect(result.error).toBeNull();
+    expect(revalidated).toEqual(['/admin/channels']);
+
+    expect(await rowNamed('myBlu app')).toMatchObject({
+      type: 'api',
+      config: {},
+      defaultGroupId: recipients,
+      routingMode: 'category_shadow',
+      isActive: true,
+    });
+  });
+
+  // Edited by the row editor like any other, which posts no `isActive`: the
+  // switch is the only thing that turns it off.
+  it('edits its name, group and mode, keeping it empty and leaving it on', async () => {
+    const before = await group('Recipients');
+    const after = await group('Merchants');
+    const [row] = await db
+      .insert(channels)
+      .values({ type: 'api', name: 'myBlu app', defaultGroupId: before, config: {} })
+      .returning({ id: channels.id });
+
+    const result = await saveChannel(
+      INITIAL,
+      form({
+        id: row!.id,
+        // The stored type decides, whatever the form names.
+        type: 'email',
+        name: 'myBlu',
+        defaultGroupId: after,
+        routingMode: 'category',
+        address: 'forged@example.com',
+      }),
+    );
+    expect(result.error).toBeNull();
+    expect(await rowNamed('myBlu')).toMatchObject({
+      id: row!.id,
+      type: 'api',
+      config: {},
+      defaultGroupId: after,
+      routingMode: 'category',
+      isActive: true,
+    });
   });
 });
 
@@ -1012,5 +1099,111 @@ describe('web chat rows', () => {
     await expect(setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).rejects.toThrow(
       /forbidden: admin\.channels/,
     );
+  });
+});
+
+// The myBlu app's switch. Unlike the widget's it lets the last active row go
+// off, which is how new tickets from the app are stopped.
+describe('myBlu app rows', () => {
+  async function apiRow(name: string, second: number, isActive = true) {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'api',
+        name,
+        isActive,
+        config: {},
+        createdAt: new Date(Date.UTC(2026, 10, 13, 9, 0, second)),
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  async function activeOf(id: string) {
+    const [row] = await db
+      .select({ isActive: channels.isActive })
+      .from(channels)
+      .where(eq(channels.id, id));
+    return row!.isActive;
+  }
+
+  it('switches the last active row off, says what that stops, and switches it on again', async () => {
+    const only = await apiRow('myBlu app', 0);
+
+    // Upper-cased, which a uuid check accepts: the switch compares ids in code
+    // against the lower-case ones Postgres returns, so the action canonicalises.
+    const off = await setApiChannelActive(INITIAL, form({ id: only.toUpperCase(), active: 'off' }));
+    expect(off.error).toBeNull();
+    expect(off.notice).toContain('no myBlu app row is on');
+    expect(off.stateKey).toBe(`${only}:off`);
+    expect(await activeOf(only)).toBe(false);
+    expect(revalidated).toEqual(['/admin/channels']);
+
+    const on = await setApiChannelActive(INITIAL, form({ id: only, active: 'on' }));
+    expect(on.error).toBeNull();
+    expect(on.notice).toBe(
+      '“myBlu app” is on, and the app opens its new tickets under it, as the oldest active myBlu app row.',
+    );
+    expect(on.stateKey).toBe(`${only}:on`);
+    expect(await activeOf(only)).toBe(true);
+  });
+
+  it('says where the app went when its row goes off and another is on', async () => {
+    const first = await apiRow('myBlu app', 0);
+    const second = await apiRow('myBlu app (spare)', 1);
+
+    const state = await setApiChannelActive(INITIAL, form({ id: first, active: 'off' }));
+    expect(state.notice).toContain('the app now opens its tickets under “myBlu app (spare)”');
+    expect(state.stateKey).toBe([`${first}:off`, `${second}:on`].sort().join(','));
+  });
+
+  it('refuses a row of another type, decided by the stored type, writing nothing', async () => {
+    const [chat] = await db
+      .insert(channels)
+      .values({ type: 'webchat', name: 'Web chat', config: { faqFolders: {} } })
+      .returning({ id: channels.id });
+    await db.insert(channels).values({ type: 'webchat', name: 'Spare chat', config: {} });
+
+    // About no row of the app's, so it carries none and redraws nothing.
+    expect(await setApiChannelActive(INITIAL, form({ id: chat!.id, active: 'off' }))).toEqual({
+      error: 'Only a myBlu app channel is switched on and off here',
+    });
+    expect(await activeOf(chat!.id)).toBe(true);
+    expect(revalidated).toEqual([]);
+  });
+
+  it('refuses an id no row has, and a form it cannot read, writing nothing', async () => {
+    const only = await apiRow('myBlu app', 0);
+
+    expect(
+      (await setApiChannelActive(INITIAL, form({ id: 'not-a-uuid', active: 'off' }))).error,
+    ).toBe(GONE);
+    expect(await setApiChannelActive(INITIAL, form({ id: only, active: 'maybe' }))).toEqual({
+      error: 'That form is out of date — reload the page and try again',
+    });
+    expect(revalidated).toEqual([]);
+
+    // A row removed under an open page: drawn again, with the rows as they are.
+    expect(
+      await setApiChannelActive(
+        INITIAL,
+        form({ id: '00000000-0000-4000-8000-000000000000', active: 'off' }),
+      ),
+    ).toEqual({
+      error: 'That channel no longer exists — reload the page',
+      stateKey: `${only}:on`,
+    });
+    expect(revalidated).toEqual(['/admin/channels']);
+    expect(await activeOf(only)).toBe(true);
+  });
+
+  it('is refused without admin.channels', async () => {
+    const only = await apiRow('myBlu app', 0);
+    signedIn.permissions = { 'admin.channels': false };
+
+    await expect(setApiChannelActive(INITIAL, form({ id: only, active: 'off' }))).rejects.toThrow(
+      /forbidden: admin\.channels/,
+    );
+    expect(await activeOf(only)).toBe(true);
   });
 });

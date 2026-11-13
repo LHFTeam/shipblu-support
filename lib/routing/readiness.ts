@@ -204,10 +204,10 @@ type RuleInput = {
 
 /**
  * Oldest first, ties by id — the order every ingest path picks "the row of
- * this type" by (`defaultEmailChannel`, `channelFor`, `webchatChannel`), so
- * "is this the row tickets are filed under?" is answered the way they answer
- * it. The owner by a join rather than through `numberOwnership`, which reads
- * every number's history beside it.
+ * this type" by (`defaultEmailChannel`, `channelFor`, `webchatChannel`, and
+ * `apiChannel` for the myBlu app's), so "is this the row tickets are filed
+ * under?" is answered the way they answer it. The owner by a join rather than
+ * through `numberOwnership`, which reads every number's history beside it.
  */
 function readChannels(): Promise<ChannelInput[]> {
   return db
