@@ -8,7 +8,7 @@ import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
-import { carrierFor } from '@/lib/tickets/outbound';
+import { carrierFor, rowIsDelivery } from '@/lib/tickets/outbound';
 
 /** The row an agent's reply is stored as, less what every reply shares. */
 export type AgentReplyMessage = Omit<
@@ -84,9 +84,10 @@ export async function storeAgentReply(
     });
   }
 
-  // Web chat has no outbound provider: writing the row *is* delivery, because
-  // the visitor's open stream reads the same table.
-  if (channel !== 'webchat') {
+  // Web chat and the myBlu app have no outbound provider: writing the row *is*
+  // delivery, because the customer's client — the widget's open stream, the
+  // app's poll — reads the same table (`rowIsDelivery`).
+  if (!rowIsDelivery(channel)) {
     await enqueue(
       carrierFor(channel),
       { messageId },

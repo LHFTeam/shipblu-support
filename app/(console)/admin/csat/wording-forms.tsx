@@ -31,6 +31,7 @@ import {
   type WordingPair,
 } from '@/lib/csat/wording';
 import type { ActionState } from '@/lib/http/action-state';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
 import { SurveyCard } from '../../../widget/survey-card';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWordingRule, saveWordingRule, sendTestSurvey } from './actions';
@@ -48,7 +49,7 @@ const CHANNELS: { value: string; label: string }[] = [
   { value: 'facebook', label: 'Facebook' },
   { value: 'instagram', label: 'Instagram' },
   { value: 'portal', label: 'Customer portal' },
-  { value: 'api', label: 'API' },
+  { value: 'api', label: CHANNEL_LABELS.api },
 ];
 
 function channelLabel(value: string | null): string {

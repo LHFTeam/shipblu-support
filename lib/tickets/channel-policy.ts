@@ -319,11 +319,12 @@ export function readOnlyChannels(): ConversationChannel[] {
  * fallback — beside the latest message it would put the first message and the
  * last on one card.
  *
- * A named list rather than `sendsByEmail()`, which asks how a reply travels and
- * answers yes for `api`, whose tickets nothing writes yet and so have no subject
- * to vouch for. It would also answer yes for the next channel answered by
- * email, which would then default to "has a written subject" and bring the
- * duplicate back without anything failing.
+ * A named list rather than `sendsByEmail()`, which asks how a reply travels,
+ * not who wrote the subject. It answered yes for `api` until the myBlu app's
+ * replies stopped being email (`rowIsDelivery`), and an app ticket's subject is
+ * its opening words, as a chat's is. It would also answer yes for the next
+ * channel answered by email, which would then default to "has a written
+ * subject" and bring the duplicate back without anything failing.
  */
 const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allow, fits } from './rate-limit';
+import { admit, allow, fits } from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -28,6 +28,36 @@ describe('allow', () => {
     const k = key();
     expect(allow(k, 1, -1)).toBe(true);
     expect(allow(k, 1, HOUR)).toBe(true);
+  });
+});
+
+describe('admit', () => {
+  it('answers as allow does, sharing its buckets', () => {
+    const k = key();
+    expect(admit(k, 2, HOUR).allowed).toBe(true);
+    expect(allow(k, 2, HOUR)).toBe(true);
+    expect(admit(k, 2, HOUR).allowed).toBe(false);
+  });
+
+  it('says how long until the window turns, in whole seconds', () => {
+    const k = key();
+    expect(admit(k, 1, 60_000).resetInSeconds).toBe(60);
+    // Refused, and told the same window rather than a fresh one: a refusal is
+    // spent but does not move the end of the window.
+    const refused = admit(k, 1, 60_000);
+    expect(refused.allowed).toBe(false);
+    expect(refused.resetInSeconds).toBeGreaterThan(0);
+    expect(refused.resetInSeconds).toBeLessThanOrEqual(60);
+  });
+
+  it('never says zero, which a client would read as "ask again now"', () => {
+    expect(admit(key(), 1, 10).resetInSeconds).toBe(1);
+  });
+
+  it('starts a window again once it has passed', () => {
+    const k = key();
+    expect(admit(k, 1, -1).allowed).toBe(true);
+    expect(admit(k, 1, HOUR)).toEqual({ allowed: true, resetInSeconds: 3600 });
   });
 });
 
