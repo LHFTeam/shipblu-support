@@ -1082,9 +1082,14 @@ declared all seven services as one flat list.
 
 `shipblu-support` answers on one custom domain, **`support.shipblu.com`**,
 beside its `onrender.com` host. It was added in the dashboard on 2026-11-11,
-when the CNAME moved here from Freshdesk (`plans/freshdesk-disconnection.md`),
-and `render.yaml` lists it under `domains:` since 2026-11-12. Request logs
-for the 30 days to 2026-11-12 name no other host. Staging has none.
+when the CNAME moved here from Freshdesk (`plans/freshdesk-disconnection.md`).
+On 2026-11-13 the dashboard listed it alone, verified, with its certificate
+issued, and the Render subdomain enabled; request logs for the 30 days to
+2026-11-12 name no other host. `render.yaml` states both, `domains:` and
+`renderSubdomainPolicy: enabled`. The `onrender.com` host has to stay on: it
+is where the console is served once `KB_PUBLIC_HOST` names the domain, and
+every request to `/api/webhooks/*` in the logs since 2026-11-12 reached it.
+Staging has no custom domain.
 
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to

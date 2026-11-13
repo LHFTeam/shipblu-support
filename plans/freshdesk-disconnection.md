@@ -1214,9 +1214,13 @@ Order matters. The check beside each item is what proves it, not the merge.
       `docs/PROJECT-STATE.md` saying so. `render.yaml` reaches production by
       the merge into `main`, and a Blueprint sync applies what it says.
       Render's spec does not say whether a sync removes a custom domain the
-      file leaves out, so the list was checked against the hosts the request
-      logs name: in the 30 days to 2026-11-12, only this one and the
-      `onrender.com` host.
+      file leaves out, so the list was checked against what the service
+      holds: the request logs for the 30 days to 2026-11-12 name only this
+      host and the `onrender.com` one, and on 2026-11-13 the dashboard listed
+      this domain alone, verified, with its certificate issued. The file also
+      states `renderSubdomainPolicy: enabled`, as the dashboard has it, since
+      the console stays on the `onrender.com` host once `KB_PUBLIC_HOST` names
+      the domain.
 
 **After the disconnection**
 

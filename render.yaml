@@ -308,16 +308,20 @@ projects:
             healthCheckPath: /api/health
             # The help centre's public host. It was added in the dashboard on
             # 2026-11-11, when the CNAME moved here from Freshdesk, and is
-            # written down so the file describes the running service. On
-            # 2026-11-12 it was the only custom domain any request had reached
-            # in 30 days, beside the onrender.com host. Not an apex and not
-            # www., so Render adds no redirect beside it. The onrender.com host
-            # stays on (renderSubdomainPolicy is left out, which keeps the
-            # current value): the console is served there once KB_PUBLIC_HOST
-            # names this domain, which proxy.ts then serves only as the help
-            # centre.
+            # written down so the file describes the running service: on
+            # 2026-11-13 the dashboard listed it as the only custom domain,
+            # verified, with its certificate issued. Not an apex and not www.,
+            # so Render adds no redirect beside it.
             domains:
               - support.shipblu.com
+            # The onrender.com host stays on, as the dashboard has it. The
+            # console is served there once KB_PUBLIC_HOST names the domain
+            # above, which proxy.ts then serves only as the help centre, and
+            # every webhook (/api/webhooks/*) is delivered to it. Stated
+            # rather than left out, though an omitted value keeps the current
+            # one: a sync then puts it back if the dashboard switch is ever
+            # turned off by mistake.
+            renderSubdomainPolicy: enabled
             scaling:
               minInstances: 1
               maxInstances: 3
