@@ -42,11 +42,8 @@ to `/api/v1/config`, and a client should never rely on following it.
 stage 0b of the plan so the app and the SDK could be written against it; the
 routes land stage by stage after it. Until an operation's stage ships, it
 answers `404` without this API's error body, and an SDK changes nothing on one
-(_Errors_). That is the framework's own page, but for `GET /tickets` from
-stage 4 until stage 5: the route serving `POST /tickets` answers its `GET`
-with an empty `404` of its own, never a `405`, so an SDK reads it as it reads
-every operation not served yet. The document marks each operation with the
-stage that serves it (`x-shipblu-stage`):
+(_Errors_). The document marks each operation with the stage that serves it
+(`x-shipblu-stage`):
 
 | Stage | Serves                                                                                                   |
 | ----- | -------------------------------------------------------------------------------------------------------- |
@@ -502,15 +499,15 @@ Only replies are returned: never an agent's note, an event or a forward.
 
 ### `GET /config`
 
-| Field               | Meaning                                                                                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.         |
-| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                         |
-| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                |
-| `tickets.maxOpen`   | Open or pending tickets one user may have at once.                                                                                                                                                  |
-| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_). |
-| `support`           | `{ online, opensAt, timezone }`, the team's hours. Absent until stage 5; `opensAt` and `timezone` are null when no hours are set.                                                                   |
-| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                       |
+| Field               | Meaning                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.                                                                                                                                                       |
+| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                                                                                                                                                                       |
+| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                                                                                                                                                              |
+| `tickets.maxOpen`   | Open or pending tickets one user may have at once.                                                                                                                                                                                                                                                                                                |
+| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_).                                                                                                                                               |
+| `support`           | `{ online, opensAt, timezone }`, the hours of the team that answers the app, in its own zone. From stage 5; absent before, which a client draws as nothing. `online` is false when no hours are set, and `timezone` null then means draw no line at all. With a `timezone`, `opensAt` is null while closed only when nothing opens within a year. |
+| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                                                                                                                                                                     |
 
 ### The survey
 
@@ -554,9 +551,8 @@ codes are added.
 An answer without this API's error body — a proxy's page, or the framework's
 `404` for a route this server does not serve — is classified by its status as
 well, with one exception. Such a `404` says nothing about the ticket: an
-operation answers it before its stage ships — `GET /tickets` included, while
-`POST /tickets` on the same path is already served — and again if that stage
-is reverted. So the SDK fails the call and changes nothing in its store or its
+operation answers it before its stage ships, and again if that stage is
+reverted. So the SDK fails the call and changes nothing in its store or its
 outbox; only `not_found` in the body drops a ticket.
 
 | HTTP | `code`                               | Also in `error`                                                                           | What the SDK does                                                                                               |
@@ -628,15 +624,19 @@ a screen is open and is woken by a push while it is not.
 - `after` re-reads a few seconds before its cursor, because a row stamped
   earlier can be committed later. **A page may repeat rows the client holds:
   merge by `id`.**
-- `GET /tickets` is newest first by `(lastMessageAt, id)` and pages back with
-  `before`. It has no `after`: a ticket that gets a message moves to the top, so
-  the list is polled by re-reading its first page and merging by `id`.
-  `?trackingNumber=` finds the tickets opened with a parcel's number, so a
-  shipment screen finds its ticket after a reinstall.
+- `GET /tickets` is newest first by `(lastMessageAt, id)`, every status, and
+  pages back with `before`. It has no `after`: a ticket that gets a message
+  moves to the top, so the list is polled by re-reading its first page and
+  merging by `id`. `?trackingNumber=` finds the tickets opened with a parcel's
+  number, exactly as it was sent, so a shipment screen finds its ticket after a
+  reinstall; `unreadTotal` still counts every ticket, whatever the filter or the
+  page. A user with no tickets gets an empty list, never a `404`.
 - A cursor is opaque. Send it back as it came; one this server did not mint is
   `400 invalid_cursor`, never a first page. A cursor is signed, so one built by
   hand is refused, and so is every cursor held across a change of the server's
-  secret, which is rare: either way, drop it and load the newest page.
+  secret, which is rare: either way, drop it and load the newest page. A
+  thread's cursor and the list's are not interchangeable: each is
+  `400 invalid_cursor` where the other is read.
 - **Every poll's answer carries `pollAfterSeconds`, and the SDK obeys it.** A
   whole number of seconds, never less than 1. Five seconds on an open thread to
   start, thirty on the list, nothing in the background. It is how load is shed
@@ -649,7 +649,11 @@ a screen is open and is woken by a push while it is not.
 team's messages read up to it. The agent sees "Read" on them. `upTo` is any
 message this API returned on this ticket, the user's own included; one that is
 not a reply on the ticket is `400 invalid_request` and marks nothing. Marking
-twice, or backwards, changes nothing.
+twice, or backwards, changes nothing. A body that is not `{ upTo }` is
+`400 invalid_request`: it names `upTo` when the body is an object whose `upTo`
+is missing or not a UUID, and names no field when the body is not a JSON object.
+A ticket that is not the user's is `404` whatever `upTo` names. It needs no
+`Idempotency-Key`, and it counts against the reads bucket, never the sends one.
 
 `unreadCount` on a ticket and `unreadTotal` across them are the team's messages
 not yet marked read. They are kept on the server, so two devices and a reinstall
@@ -697,16 +701,16 @@ deploy. A refusal is `429 rate_limited` with `Retry-After`, and a refused reques
 still counts, so a client that polls through a refusal stays refused until the
 window turns.
 
-| Bucket                    | Key              | Limit                                      |
-| ------------------------- | ---------------- | ------------------------------------------ |
-| Client plane, before auth | address          | 1,200 a minute                             |
-| Bad bearer                | address          | 120 a minute                               |
-| Server plane, all calls   | the plane        | 600 a minute                               |
-| Minting                   | `externalUserId` | 10 in ten minutes                          |
-| Reads                     | identity         | 240 a minute                               |
-| Sends                     | identity         | 20 a minute                                |
-| New tickets               | identity         | 10 an hour, and 10 open or pending at once |
-| Uploaded megabytes        | identity         | 100 an hour                                |
+| Bucket                    | Key              | Limit                                       |
+| ------------------------- | ---------------- | ------------------------------------------- |
+| Client plane, before auth | address          | 1,200 a minute                              |
+| Bad bearer                | address          | 120 a minute                                |
+| Server plane, all calls   | the plane        | 600 a minute                                |
+| Minting                   | `externalUserId` | 10 in ten minutes                           |
+| Reads                     | identity         | 240 a minute: every `GET`, and marking read |
+| Sends                     | identity         | 20 a minute                                 |
+| New tickets               | identity         | 10 an hour, and 10 open or pending at once  |
+| Uploaded megabytes        | identity         | 100 an hour                                 |
 
 The first bucket is live with `GET /openapi.json`; the rest arrive with the
 routes they guard. The minting bucket bounds an honest app's loop and nothing

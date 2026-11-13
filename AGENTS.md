@@ -1468,8 +1468,23 @@ contact merge committed between the two left a create on the folded contact,
 `Idempotency-Key` is stored as `messages.channel_message_id =
 'api:<identityId>:<key>'`, pre-checked on the pool with the unique index as the
 backstop, and every message the user wrote returns it as `clientId` on every
-read. The API changes by addition, and what `docs/myblu-api.md` says a field
-means is fixed once an app build depends on it.
+read. The list (`GET /tickets`) is scoped by the identity on its joined
+ownership row as well as by `ownedTicket`, so it drives from
+`api_tickets_identity_idx`; it is ordered by `(last_message_at, id)` with the
+cursor compared the same way, filters on the tracking number stored on that
+row and never on `conversation_shipments`, and reads no channel row. Its
+cursor is the thread's format signed under a purpose of its own (`CursorKind`,
+a required argument on both sides), so a thread's cursor is `invalid_cursor` on
+the list and the list's on a thread, rather than a bound on the wrong column.
+Unread is `unreadReply()` in `lib/api/tickets.ts`, the one predicate
+`unreadCount` and `unreadTotal` count and `POST /tickets/{id}/read` clears;
+that route is the only writer of `messages.read_at` on `api`, scoped by
+`ownedTicket` in its own `UPDATE`, guarded by `read_at is null` so it never
+moves or unsets one, and it sets `read` only from `sent` or `delivered`, so a
+failure keeps its receipt. Its transaction holds the requester first
+(`holdRequester`), as the sends do. The API changes by addition, and what
+`docs/myblu-api.md` says a field means is fixed once an app build depends on
+it.
 
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST
@@ -3075,6 +3090,18 @@ answered `op ANY/ALL (array) requires array on right side` (42809). The two read
 identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
 list of values (§6.46).
+
+**A column in a one-table select's field list is written unqualified.** drizzle
+qualifies columns in a `WHERE` always, and in the select list only once the
+query joins something. So a correlated subquery written as a `sql` field of
+`db.select({…}).from(conversations)` —
+`(select … from ${messages} where ${messages.conversationId} = ${conversations.id})`
+— reaches Postgres as `"conversation_id" = "id"`, both of which resolve to
+`messages`, and compares the message with itself. Nothing refuses it: it plans,
+it runs, and it answers null. The read marker met it (stage 5 of
+`plans/myblu-ticket-api.md`) and joins instead; a select with a join, as
+`ownedTicketRow` has, writes every column with its table. Read `toSQL()` back
+for any such field.
 
 There is no browser test suite. Playwright was declared — a dependency and a
 `test:e2e` script — with no config and not one spec, and was removed rather than

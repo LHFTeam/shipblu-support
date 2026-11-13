@@ -517,10 +517,13 @@ POST   /api/v1/sessions          server plane: mint a session for one user   (st
 POST   /api/v1/sessions/revoke   server plane: end every session of a user   (stage 3)
 DELETE /api/v1/session           client plane: end this session             (stage 3)
 GET    /api/v1/config            client plane: who is signed in, the limits  (stage 3)
+                                 ... and the team's hours                    (stage 5)
 POST   /api/v1/tickets           client plane: open a ticket                 (stage 4)
+GET    /api/v1/tickets           client plane: the user's tickets            (stage 5)
 GET    /api/v1/tickets/{id}      client plane: one ticket                    (stage 4)
 GET    /api/v1/tickets/{id}/messages   a page of a thread, by cursor         (stage 4)
 POST   /api/v1/tickets/{id}/messages   the user's reply                      (stage 4)
+POST   /api/v1/tickets/{id}/read client plane: mark the team's replies read  (stage 5)
 ```
 
 Two planes, and neither takes a cookie. **myBlu's backend** holds `MYBLU_API_TOKEN` and
@@ -540,6 +543,8 @@ about a ticket names that identity, the session's contact and the channel in the
 `WHERE` as the id (`ownedTicket` in `lib/api/scope.ts`), so a contact merge or a shared
 phone changes what an agent sees and never what another app user reads. There is no
 stream: the app polls a cursor and obeys the `pollAfterSeconds` each answer carries.
+Unread is the team's replies with no `read_at`, kept on the server so two devices show one
+badge; marking them read from the app is what the console then draws as Read.
 
 ## Deployment
 

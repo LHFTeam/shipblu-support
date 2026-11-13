@@ -658,10 +658,28 @@ never retried — is right for both.
   and every lifetime the API answers (`expiresInSeconds`): a client that
   obeys a 0 polls in a tight loop, or asks at once for another token or link,
   so the floor is in the contract rather than in every build's guard.
-- A poll is the session lookup and one statement over
-  `messages_conversation_idx`, with no write and no session connection at any
-  number of users. Its plan is read with `EXPLAIN ANALYZE` in stage 5; the
+- A poll is the session lookup and two statements: the ticket with the badge
+  (`ownedTicketRow`), then the page over `messages_conversation_idx`. The list
+  is the session lookup and one statement — `api_tickets_identity_idx`
+  driving, the preview and the unread count as subqueries over the page's
+  rows only, the badge computed once beside them — and a second, the badge on
+  its own, only for a page with no ticket on it. No write and no session
+  connection at any number of users. Their plans are read with
+  `EXPLAIN ANALYZE` on production after the release that carries stage 5; the
   load is first seen in the pilot.
+- **One cursor format, a purpose per page** (decided in stage 5). The
+  thread's cursor and the list's are one codec (`lib/api/cursor.ts`), and
+  each is signed under a purpose of its own — `myblu-messages-cursor`,
+  stage 4's, unchanged, and `myblu-tickets-cursor` — so a thread's cursor sent
+  to the list, or the list's sent to a thread, is `400 invalid_cursor` like
+  any cursor this server did not mint. Both carry a timestamp and a uuid, and
+  read as the other one would bound a ticket's `last_message_at` with a
+  message's `created_at`, or the other way round: every statement is scoped by
+  `ownedTicket`, so it would reveal nothing, but a client bug would show as a
+  short or a wrong page rather than as the refusal that names it. The purpose
+  is only in what is signed, so the contract keeps one opaque format, and the
+  kind is a required argument of `encodeCursor` and `decodeCursor`, so no page
+  mints or reads a cursor without naming which.
 
 ### Read receipts
 
@@ -679,6 +697,45 @@ customer's own included. An id that is not a reply on this ticket is
 `400 invalid_request` and marks nothing. Marking twice, or backwards, changes
 nothing. `unreadTotal` also rides on `GET /tickets/{id}/messages`, so a badge
 is right while a thread is open.
+
+How stage 5 built it, and the questions it settled by its recommended
+default:
+
+- **One predicate, `unreadReply()` in `lib/api/tickets.ts`**: what
+  `unreadCount` and `unreadTotal` count and what the marker clears. It is the
+  sentence above plus `notReaction()`, because a row the thread never returns
+  cannot be in a badge the user clears by reading; on `api`, which has no
+  reactions, the answer is the same.
+- **The marker is the only writer of `read_at` on `api`.** `read_at is null`
+  in its `UPDATE` is the idempotence guard, so it never moves or unsets one,
+  and two markers at once mark each reply once. `delivery_status` becomes
+  `read` only from `sent` or `delivered`: a reply stored `failed`, `bounced` or
+  `pending` gains `read_at` and keeps its status, so the console still draws
+  the failure. None of those can happen on `api` today (`rowIsDelivery` writes
+  `delivered`); the choice is the side that cannot hide one.
+- **Scoped in the statement that acts, and decided in one before it.** One
+  read of the ticket, scoped, joined to `upTo` on it: no row is `404`, which
+  wins over anything `upTo` names, so the `400` tells a stranger nothing; a
+  null join is `400`. Then the `UPDATE`, with the id and `ownedTicket` in its
+  own `WHERE`, so a ticket deleted, merged or marked spam in between marks
+  nothing. Then the answer, read in the same transaction after the write.
+- **It holds the requester first** (`holdRequester`), as the two sends do, so
+  a contact merge committed since the gate is followed and one in flight is
+  waited out: answered `404`, the SDK would drop the user's ticket and fail
+  its outbox. The list and stage 4's poll still read the gate's contact, so a
+  merge landing in that moment answers a poll `404` or a list a ticket short;
+  closing that for every read is stage 4's owner's call (stage 5's open
+  questions), because the obvious fix reads the contact through the identity
+  inside `ownedTicket`, a join on a column a merge changes in a predicate the
+  sends use under their lock.
+- **`created_at` is not commit order**, so a reply stamped before `upTo` and
+  committed after the app's last poll is marked with it, a moment before the
+  app draws it; its next poll merges the reply into place. Accepted as the
+  cost of the thread's order, and nothing is ever unmarked.
+- **Each marked row fires the change notification once**, so the console's
+  open ticket page refreshes (coalesced) and draws Read; a `messages` update
+  is not queue-relevant, so nothing else moves. The first marking of a long
+  unread ticket is one notification per reply. Accepted.
 
 ### An agent's reply
 
@@ -858,16 +915,21 @@ NAT puts a large number of unrelated people behind one address"
 (`lib/auth/throttle.ts`). A refusal is `429` with `Retry-After`. No row per
 refusal.
 
-| Bucket                    | Key              | Limit                                      |
-| ------------------------- | ---------------- | ------------------------------------------ |
-| Client plane, before auth | address          | 1,200 a minute                             |
-| Bad bearer                | address          | 120 a minute                               |
-| Server plane, all calls   | the plane        | 600 a minute                               |
-| Minting                   | `externalUserId` | 10 in ten minutes                          |
-| Reads                     | identity         | 240 a minute                               |
-| Sends                     | identity         | 20 a minute                                |
-| New tickets               | identity         | 10 an hour, and 10 open or pending at once |
-| Uploaded megabytes        | identity         | 100 an hour                                |
+| Bucket                    | Key              | Limit                                        |
+| ------------------------- | ---------------- | -------------------------------------------- |
+| Client plane, before auth | address          | 1,200 a minute                               |
+| Bad bearer                | address          | 120 a minute                                 |
+| Server plane, all calls   | the plane        | 600 a minute                                 |
+| Minting                   | `externalUserId` | 10 in ten minutes                            |
+| Reads                     | identity         | 240 a minute: every GET, and the read marker |
+| Sends                     | identity         | 20 a minute                                  |
+| New tickets               | identity         | 10 an hour, and 10 open or pending at once   |
+| Uploaded megabytes        | identity         | 100 an hour                                  |
+
+The read marker spends the reads bucket (decided in stage 5; no source named
+one): it writes no message, the SDK retries it as it retries a read, and spent
+from the sends bucket's twenty a minute, a user reading through their threads
+would have their next message refused.
 
 Three properties of that module are designed for, not discovered. `allow()`
 answers a boolean and keeps `resetAt` to itself, so `admit()` beside it also
@@ -982,6 +1044,41 @@ before it answers and so what a client handles anyway, and null would be a
 value stage 3 had to invent. `opensAt` and `timezone` are null when the row's
 group has no hours. `polling` is what a screen starts on before its first
 answer, each value at least 1 (_Reading without a stream_).
+
+`support` from stage 5, as built (`supportHoursAt` in `lib/api/config.ts`),
+with the questions it settled by its recommended default:
+
+- **Whose hours.** The oldest active `api` row's default group — that group's
+  own schedule, else the default — each with its own zone and holidays,
+  through `groupHours` and the memoised catalog every other reader uses. With
+  no active row, the default schedule: the app can still say when the team
+  works while `tickets.canCreate` is false. A routed ticket's out-of-hours
+  reply can use another group's hours than the ones the app is told. An
+  hours edit reaches `support` within that catalog's thirty seconds, not at
+  once: the admin's save clears only the console's copy of the memo, and a
+  route handler holds its own (`lib/hours/catalog.ts`), which the
+  end-to-end pass measured at 19 and 27 seconds. Accepted, as the TTL bounds
+  it and every reader outside the console already waits it out.
+- **No hours is `online: false`**, with `opensAt` and `timezone` null: the
+  widget's answer, and "working now, by its own hours" is false when there
+  are none. A null `timezone` is how a client knows to draw no line, as the
+  help centre draws none. A zone luxon cannot read counts as no hours, since
+  `isWithinBusinessHours` already reads it as closed, and is never handed to
+  a client; the admin form refuses one, so it takes a row edited by hand.
+- **`opensAt` looks a year ahead**, as `addBusinessMinutes` scans, not the
+  widget's fourteen days. With a `timezone` set, a null `opensAt` while closed
+  then means only "nothing opens within a year" — a week with no open day —
+  and never a closure of a few weeks, the one null the contract does not
+  name. A real week answers within seven days of scanning.
+- **Always present**, never best-effort: a schedule the catalog cannot read
+  would fail the widget, the help centre and the SLA sweep alike, and a
+  catalog read that fails is a database failure the `api` row's read would
+  have met first. Making `GET /config` answer without `support` when the
+  hours throw, so a broken schedule cannot fail token verification, stays
+  open (stage 5's questions).
+- Computed in the schedule's own zone, at the one `now` the gate used, so
+  Cairo's clock changes and a holiday are read as the widget and the SLA
+  clock read them.
 
 ```json
 {
@@ -1126,7 +1223,8 @@ classifies by its status as `invalid_request`, its own bug, and not as a route
 not served yet. So a route serving one method of a path whose other method
 ships later exports that method too, answering `404` with no body until its
 stage replaces it. `GET /tickets`, stage 5's on the path `POST /tickets` serves
-from stage 4, is the one such case (stage 4, below), and `openapi.test.ts`
+from stage 4, is the one such case (stage 4, below) — stage 5 replaced it
+with the list, and a revert of stage 5 puts it back — and `openapi.test.ts`
 names every path whose methods ship in different stages, so a new one is
 noticed when it is published.
 
@@ -1512,6 +1610,35 @@ and nothing about load. Way back: revert, which puts stage 4's `404` back on
 `GET /tickets`; `read_at` on a reply is drawn by the build before it. **A
 pilot can run from here.**
 
+As built: `listTickets`, `markTicketRead` and `unreadReply` in
+`lib/api/tickets.ts`, `supportHoursAt` in `lib/api/config.ts`, the routes
+`GET /tickets` and `POST /tickets/{id}/read`; no shape changed, so the
+document, the changelog and the SDK's pin are as stage 4 left them. The
+choices it made where the plan left a question are written beside what they
+settle: _Reading without a stream_ (the statements, a cursor's purpose),
+_Read receipts_ (the predicate, the writer, the hold, the corners), _Limits_
+(the marker's bucket), _The API_ (`support`), _Risks_ (the tracking number in
+the URL, a side conversation's answer). Tested beside each: a forced tie on
+`last_message_at` and a microsecond cursor round trip; another identity's,
+another contact's, a merged, deleted or spam and a WhatsApp ticket absent from
+the list and `404` on the marker; the marker refusing a note's id and another
+ticket's message, writing nothing on a second call, and holding the requester
+across a merge; `unreadTotal` agreeing between the list, a thread and the
+marker's answer; hours across both of Cairo's clock changes and a holiday.
+
+The `EXPLAIN` waits for production: it needs `0062` and `0063` applied and an
+`api` ticket to read, the pilot's or the owner's test ticket before it is
+purged. Read-only, with `EXPLAIN (ANALYZE, BUFFERS, VERBOSE)` on the poll's
+two statements, the list with and without `trackingNumber`, and the badge on
+its own; the marker's
+`UPDATE` with a plain `EXPLAIN` only, since `ANALYZE` executes it. What to
+expect, and what to do when the planner prefers `conversations_channel_idx`
+because `'api'` is not yet among `conversations.channel`'s common values, is
+`docs/PROJECT-STATE.md`'s stage 5 entry; an `ANALYZE` by hand writes
+statistics and needs the owner. Locally, on 300 tickets per user beside 5,000
+others, the list ran in 3 ms with the page's subqueries above the sort, run
+`limit + 1` times, and the badge once.
+
 **6. Push.** `MYBLU_WEBHOOK_URL`, `MYBLU_WEBHOOK_SECRET` and
 `MYBLU_WEBHOOK_SECRET_PREVIOUS`, declared as stage 3's are. `notify_myblu` in
 `JobType`, `JOB_PAYLOADS`, its handler and registration, `purge-jobs`, and in
@@ -1624,6 +1751,25 @@ The rules AGENTS.md gains, as they would be written:
   counted, which is why stages 4 and 6 say so and remove what they made.
 - **If a ticket merge is ever built,** an `api` ticket merged into another
   leaves the app. Nothing writes `merged_into_id` today.
+- **The tracking number rides in the list's query string**
+  (`GET /tickets?trackingNumber=`), and a tracking number is the only
+  credential guarding a parcel's recipient on the tracking page, while
+  Render's and a proxy's request logs may keep query strings. This API's own
+  log lines never carry it, and the help centre's `/track?number=`
+  (`app/help/[locale]/track/page.tsx`) is the same exposure already. Kept as
+  published (stage 5): moving the filter into a header is a correction the
+  changelog allows only before the release that serves the operation, and an
+  addition after it.
+- **A side conversation's answer moves an `api` ticket's `lastMessageAt`.**
+  `lib/side-conversations/ingest.ts` bumps `conversations.last_message_at`
+  when a hub answers an agent, on purpose, so the ticket floats up the inbox.
+  On `api` the app then sees the ticket jump to the top of its list with a
+  newer `lastMessageAt` and no message it can read: the timing of the team's
+  internal correspondence, and a field that no longer means "when its newest
+  message was stored". Stage 5 orders the list by the column as the plan
+  says. The fix is to answer and order by the newest reply the app may read,
+  which `previewSql` already finds, and it changes `GET /tickets/{id}` too, so
+  it is decided before the SDK's 0.2 ships the list, or accepted here.
 - **Not determined:** whether the backend holds a stable user id it never
   shows the app (the app holds none, so one is exposed or minted either way);
   the app's minimum OS versions, which are Expo SDK 57's defaults and are read

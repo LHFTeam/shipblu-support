@@ -1,16 +1,56 @@
+import type { z } from 'zod';
 import { clientPlane } from '@/lib/api/auth';
+import { POLL_LIST_SECONDS } from '@/lib/api/config';
 import { answering, rateLimited } from '@/lib/api/errors';
-import { admitSend } from '@/lib/api/limits';
-import { answerSend, idempotencyKey, refuseMultipart, sendBody } from '@/lib/api/requests';
-import { newRequestId } from '@/lib/api/respond';
-import { CreateTicketRequest } from '@/lib/api/schemas';
-import { createApiTicket } from '@/lib/api/tickets';
+import { admitRead, admitSend } from '@/lib/api/limits';
+import {
+  answerSend,
+  idempotencyKey,
+  listAsked,
+  refuseMultipart,
+  sendBody,
+} from '@/lib/api/requests';
+import { apiJson, newRequestId } from '@/lib/api/respond';
+import { CreateTicketRequest, type TicketsPage } from '@/lib/api/schemas';
+import { createApiTicket, listTickets } from '@/lib/api/tickets';
 import { logger } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 
 const log = logger('api');
 const ROUTE = 'POST /tickets';
+const LIST_ROUTE = 'GET /tickets';
+
+/**
+ * The user's tickets, newest first by `(lastMessageAt, id)`, paged back with
+ * `before`, every status, and only those opened with one tracking number when
+ * `trackingNumber` asks (`listTickets`). Polled by re-reading the first page
+ * at `pollAfterSeconds`. A read: one statement after the session — two on a
+ * page with no ticket on it — and no write and no session connection. It never
+ * reads the `api` channel row, so the list goes on while new tickets are
+ * switched off, and it is never `404`: a user with no tickets has an empty one.
+ *
+ * No success line, as the other reads write none: a thirty-second poll per
+ * user would be the log. Nothing here reads the query string into a line, so a
+ * cursor or a tracking number never reaches one.
+ */
+export async function GET(request: Request): Promise<Response> {
+  const requestId = newRequestId();
+  return answering(LIST_ROUTE, requestId, async () => {
+    const gate = await clientPlane(request, { requestId, route: LIST_ROUTE, now: new Date() });
+    if ('refusal' in gate) return gate.refusal;
+
+    const reads = admitRead(gate.caller.identityId);
+    if (!reads.allowed) return rateLimited(requestId, reads, 'Too many reads for this user');
+
+    const asked = listAsked(new URL(request.url), requestId);
+    if ('refusal' in asked) return asked.refusal;
+
+    const page = await listTickets(gate.caller, asked);
+    const body: z.input<typeof TicketsPage> = { ...page, pollAfterSeconds: POLL_LIST_SECONDS };
+    return apiJson(body, { requestId });
+  });
+}
 
 /**
  * Open a ticket from the myBlu app, with its first message: the client plane,
@@ -59,16 +99,4 @@ export async function POST(request: Request): Promise<Response> {
     });
     return answerSend(outcome, requestId);
   });
-}
-
-/**
- * The list is stage 5's (`plans/myblu-ticket-api.md`, stage 4). Until then this
- * path answers `GET` with a `404` and no body, as every operation not served
- * yet answers: Next would answer a method this file did not export with `405`,
- * which an SDK classifies by its status as `invalid_request`, its own bug,
- * rather than as a route not served yet — and the app's list would fail as a
- * broken request instead of waiting for its stage. Stage 5 replaces this.
- */
-export function GET(): Response {
-  return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });
 }

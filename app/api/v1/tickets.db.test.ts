@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -19,27 +19,48 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { decodeCursor, encodeCursor } from '@/lib/api/cursor';
-import { ErrorBody, MessagesPage, SendResult, Session, TicketEnvelope } from '@/lib/api/schemas';
+import {
+  Config,
+  ErrorBody,
+  MessagesPage,
+  ReadResult,
+  SendResult,
+  Session,
+  TicketEnvelope,
+  TicketsPage,
+} from '@/lib/api/schemas';
 import { lookupSession } from '@/lib/api/sessions';
-import { afterStatement, backStatement, customerWrote } from '@/lib/api/tickets';
+import {
+  afterStatement,
+  backStatement,
+  customerWrote,
+  listStatement,
+  markStatement,
+} from '@/lib/api/tickets';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { mergeContacts } from '@/lib/contacts/merge';
 import { resetEnvCache } from '@/lib/env';
+import { isUuid } from '@/lib/http/uuid';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
+import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import { resolveContact } from '@/lib/tickets/contacts';
 import { getConversation } from '@/lib/tickets/conversation';
+import { afterMessageStored } from '@/lib/tickets/lifecycle';
+import { deliveryOf } from '@/lib/tickets/thread';
+import { GET as getConfig } from './config/route';
 import { POST as postRevoke } from './sessions/revoke/route';
 import { POST as postSession } from './sessions/route';
-import { GET as getTicket } from './tickets/[id]/route';
 import { GET as getMessages, POST as postMessage } from './tickets/[id]/messages/route';
-import { POST as postTicket } from './tickets/route';
+import { POST as postRead } from './tickets/[id]/read/route';
+import { GET as getTicket } from './tickets/[id]/route';
+import { GET as getList, POST as postTicket } from './tickets/route';
 
 /**
  * The myBlu app's tickets against Postgres (`plans/myblu-ticket-api.md`,
- * stage 4): opening one, writing on one and reading them back, through the
- * routes as the app calls them, and every way the API refuses a ticket that is
- * not the caller's.
+ * stages 4 and 5): opening one, writing on one, reading them back, listing
+ * them and marking the team's replies read, through the routes as the app
+ * calls them, and every way the API refuses a ticket that is not the caller's.
  *
  * Every best-effort step after a ticket's commit logs instead of throwing, so
  * a failure inside one would read as "nothing happened": a test fails on any
@@ -56,13 +77,14 @@ let seq = 0;
 let user = '';
 
 let errors: MockInstance;
+let infos: MockInstance;
 
 beforeEach(async () => {
   seq += 1;
   user = `u_${seq}`;
   vi.stubEnv('MYBLU_API_TOKEN', TOKEN);
   resetEnvCache();
-  vi.spyOn(console, 'log').mockImplementation(() => {});
+  infos = vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   await classifier('off');
@@ -229,6 +251,79 @@ async function caller(token: string) {
   const session = await lookupSession(token, new Date());
   if (session.kind !== 'live') throw new Error('expected a live session');
   return session.caller;
+}
+
+let agentsMade = 0;
+/** An agent of the test's own. */
+async function agent(name = 'Omar'): Promise<string> {
+  agentsMade += 1;
+  const [row] = await db
+    .insert(agents)
+    .values({ name, email: `agent${agentsMade}.${seq}@shipblu.test` })
+    .returning({ id: agents.id });
+  return row!.id;
+}
+
+/**
+ * A row from the team, written straight to the table: by default a reply as
+ * a console send stores one on `api` — outbound, delivered, nothing queued —
+ * and not moving the ticket's "last" columns, so a test can place it in time.
+ */
+async function teamRow(
+  conversationId: string,
+  values: Partial<typeof messages.$inferInsert> = {},
+): Promise<string> {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      conversationId,
+      direction: 'outbound',
+      kind: 'reply',
+      bodyText: 'We have asked the courier.',
+      deliveryStatus: 'delivered',
+      ...values,
+    })
+    .returning({ id: messages.id });
+  return row!.id;
+}
+
+/** `last_message_at` set from Postgres's own text, microseconds and all. */
+async function stampLast(conversationId: string, text: string): Promise<void> {
+  await db.execute(
+    sql`update conversations set last_message_at = ${text}::timestamptz where id = ${conversationId}`,
+  );
+}
+
+function list(token: string, query = '') {
+  return getList(clientRequest(`/tickets${query}`, token));
+}
+
+async function listed(token: string, query = '') {
+  const response = await list(token, query);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  return TicketsPage.parse(await response.json());
+}
+
+const idsOf = (page: { tickets: { id: string }[] }) => page.tickets.map((t) => t.id);
+
+function markRead(token: string, ticketId: string, upTo: unknown) {
+  return postRead(
+    clientRequest(`/tickets/${ticketId}/read`, token, { method: 'POST', body: { upTo } }),
+    params(ticketId),
+  );
+}
+
+async function marked(token: string, ticketId: string, upTo: string) {
+  const response = await markRead(token, ticketId, upTo);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  return ReadResult.parse(await response.json());
+}
+
+/** Every message, whole, by id: what a test compares before and after a write. */
+async function everyMessage() {
+  return new Map((await db.select().from(messages)).map((row) => [row.id, row]));
 }
 
 async function messagesOf(conversationId: string) {
@@ -627,15 +722,27 @@ describe('POST /tickets', () => {
 // --- Whose ticket it is -----------------------------------------------------
 
 describe('a ticket that is not the caller’s', () => {
-  /** Every route that names a ticket answers it with the same 404. */
+  /**
+   * Every route that names a ticket answers it with the same 404, the read
+   * marker given a reply on that very ticket included; and the list leaves it
+   * out, its reply in no badge, and nobody's reply gains a `read_at`.
+   */
   async function expectNotFound(token: string, ticketId: string) {
+    const upTo = isUuid(ticketId) ? await teamRow(ticketId) : randomUUID();
     for (const response of [
       await ticket(token, ticketId),
       await page(token, ticketId),
       await send(token, ticketId, 'Let me in'),
+      await markRead(token, ticketId, upTo),
     ]) {
       expect(await refusal(response)).toMatchObject({ status: 404, code: 'not_found' });
     }
+    const theirs = await listed(token);
+    expect(idsOf(theirs)).not.toContain(ticketId.toLowerCase());
+    expect(theirs.unreadTotal).toBe(0);
+    expect(
+      await db.select({ id: messages.id }).from(messages).where(isNotNull(messages.readAt)),
+    ).toEqual([]);
   }
 
   it('is 404 for another identity’s ticket, on another contact', async () => {
@@ -643,7 +750,23 @@ describe('a ticket that is not the caller’s', () => {
     const mine = await opened(await minted());
     const stranger = await minted(`${user}_b`, phoneOf(seq + 5000));
     await expectNotFound(stranger, mine.ticket.id);
-    expect(await db.select({ id: messages.id }).from(messages)).toHaveLength(1);
+    // The customer's message and the reply `expectNotFound` put there.
+    expect(await db.select({ id: messages.id }).from(messages)).toHaveLength(2);
+  });
+
+  // A 400 for an `upTo` that is not a reply on the ticket, answered before the
+  // 404, would tell a stranger the ticket is there.
+  it('is 404 on the read marker whatever upTo names, a note of that ticket included', async () => {
+    await appRow();
+    const mine = await opened(await minted());
+    const stranger = await minted(`${user}_b`, phoneOf(seq + 5000));
+    const note = await teamRow(mine.ticket.id, { kind: 'note', authorAgentId: await agent() });
+    for (const upTo of [note, mine.message.id, randomUUID()]) {
+      expect(await refusal(await markRead(stranger, mine.ticket.id, upTo))).toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
+    }
   });
 
   // Two identities on one contact — a merge, or one backend vouching a wrong
@@ -711,14 +834,6 @@ describe('a ticket that is not the caller’s', () => {
 // --- Reading ----------------------------------------------------------------
 
 describe('reading a thread', () => {
-  async function agent(): Promise<string> {
-    const [row] = await db
-      .insert(agents)
-      .values({ name: 'Omar', email: `omar${seq}@shipblu.test` })
-      .returning({ id: agents.id });
-    return row!.id;
-  }
-
   it('returns replies only — never a note, a system row, a forward or a reaction — and counts the team’s unread', async () => {
     await appRow();
     const token = await minted();
@@ -882,7 +997,9 @@ describe('reading a thread', () => {
     expect(moved.messages.map((message) => message.text)).toContain('Any news?');
     expect(moved.newerCursor).not.toBe(first.newerCursor);
     // The text Postgres printed, microseconds kept.
-    expect(decodeCursor(moved.newerCursor)?.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    expect(decodeCursor('messages', moved.newerCursor)?.time).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
+    );
   });
 
   // `created_at` is when a request took its `now`, not when it committed: a
@@ -930,7 +1047,7 @@ describe('reading a thread', () => {
         createdAt: new Date(only!.createdAt.getTime() - n * 100),
       })),
     );
-    const cursor = encodeCursor({
+    const cursor = encodeCursor('messages', {
       time: (
         await db.execute<{ t: string }>(
           sql`select created_at::text as t from messages where id = ${only!.id}`,
@@ -970,6 +1087,23 @@ describe('reading a thread', () => {
         code: 'invalid_cursor',
       });
     }
+
+    // The list's cursors, signed as this server signs them but for the list:
+    // one the list answered, and one naming this ticket's own opening row,
+    // which a thread would read a page from if the purpose did not differ.
+    await opened(token, { text: 'A second parcel', locale: 'en' });
+    const listCursor = (await listed(token, '?limit=1')).olderCursor;
+    expect(listCursor).not.toBeNull();
+    const ownRowAsList = encodeCursor('tickets', { time: opening_!.t, id: opening_!.id });
+    for (const cursor of [listCursor!, ownRowAsList]) {
+      for (const query of [`?after=${cursor}`, `?before=${cursor}`]) {
+        expect(await refusal(await page(token, opening.id, query))).toMatchObject({
+          status: 400,
+          code: 'invalid_cursor',
+        });
+      }
+    }
+
     const both = await refusal(
       await page(token, opening.id, `?after=${first.newerCursor}&before=${first.newerCursor}`),
     );
@@ -991,7 +1125,7 @@ describe('reading a thread', () => {
     const token = await minted();
     const me = await caller(token);
     const cursor = { time: '2026-11-12 09:41:07.004213+00', id: randomUUID() };
-    const text = encodeCursor(cursor);
+    const text = encodeCursor('messages', cursor);
     const statements = [
       backStatement(me, randomUUID(), { kind: 'newest', limit: 30 }).toSQL(),
       backStatement(me, randomUUID(), { kind: 'before', cursor, text, limit: 30 }).toSQL(),
@@ -1001,6 +1135,9 @@ describe('reading a thread', () => {
         .set(customerWrote(new Date()))
         .where(eq(conversations.id, randomUUID()))
         .toSQL(),
+      listStatement(me, { cursor: null, limit: 30, trackingNumber: null }).toSQL(),
+      listStatement(me, { cursor, limit: 30, trackingNumber: 'AB-12' }).toSQL(),
+      markStatement(db, me, randomUUID(), cursor).toSQL(),
     ];
     for (const statement of statements) {
       expect(statement.params.filter((param) => param instanceof Date)).toEqual([]);
@@ -1323,5 +1460,676 @@ describe('a revoke', () => {
       await db.select().from(apiTickets).where(eq(apiTickets.identityId, me.identityId)),
     ).toEqual([]);
     expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
+  });
+});
+
+// --- The list ---------------------------------------------------------------
+
+describe('GET /tickets', () => {
+  it('lists the caller’s tickets and nobody else’s, and counts only their replies', async () => {
+    await appRow();
+    const phone = phoneOf(seq);
+    // The number's WhatsApp history, which the mint joins the account to.
+    const { contactId } = await resolveContact({ channel: 'whatsapp', identifier: phone.slice(1) });
+    const [chat] = await db
+      .insert(conversations)
+      .values({
+        channel: 'whatsapp',
+        statusId: await statusId('Open'),
+        requesterContactId: contactId,
+      })
+      .returning({ id: conversations.id });
+    const token = await minted(user, phone);
+    const me = await caller(token);
+    expect(me.contactId).toBe(contactId);
+
+    const first = await opened(token);
+    const second = await opened(token, { text: 'Another parcel', locale: 'en' });
+    // Three of the caller's own the team took out of the queue.
+    const away = await opened(token, { text: 'Merged away', locale: 'en' });
+    const deleted = await opened(token, { text: 'Deleted', locale: 'en' });
+    const spam = await opened(token, { text: 'Spam', locale: 'en' });
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: second.ticket.id })
+      .where(eq(conversations.id, away.ticket.id));
+    await db
+      .update(conversations)
+      .set({ deletedAt: new Date() })
+      .where(eq(conversations.id, deleted.ticket.id));
+    await db
+      .update(conversations)
+      .set({ isSpam: true })
+      .where(eq(conversations.id, spam.ticket.id));
+
+    // Another identity on another contact.
+    const stranger = await minted(`${user}_b`, phoneOf(seq + 5000));
+    const strangers = await opened(stranger);
+    // A second identity whose contact the team merged into the caller's.
+    const twin = await minted(`${user}_c`, phoneOf(seq + 6000));
+    const twins = await opened(twin);
+    const merged = await mergeContacts({
+      survivorId: me.contactId,
+      loserId: (await caller(twin)).contactId,
+      agentId: null,
+    });
+    expect(merged.ok).toBe(true);
+
+    for (const id of [
+      chat!.id,
+      away.ticket.id,
+      deleted.ticket.id,
+      spam.ticket.id,
+      strangers.ticket.id,
+      twins.ticket.id,
+      first.ticket.id,
+    ]) {
+      await teamRow(id);
+    }
+
+    const answer = await listed(token);
+    expect(idsOf(answer).sort()).toEqual([first.ticket.id, second.ticket.id].sort());
+    expect(answer.unreadTotal).toBe(1);
+    const theirs = await listed(twin);
+    expect(idsOf(theirs)).toEqual([twins.ticket.id]);
+    expect(theirs.unreadTotal).toBe(1);
+  });
+
+  // Three tickets stamped to the microsecond alike, one 500 µs after them:
+  // sub-millisecond, so a cursor rounded through a JS `Date` reads the newer
+  // one's instant as before the three and skips them.
+  it('pages through a tie on lastMessageAt one ticket at a time, each once, by id', async () => {
+    await appRow();
+    const token = await minted();
+    const ids: string[] = [];
+    for (const n of [1, 2, 3, 4]) {
+      ids.push((await opened(token, { text: `Parcel ${n}`, locale: 'en' })).ticket.id);
+    }
+    const [newer, ...tied] = ids;
+    for (const id of tied) await stampLast(id, '2026-11-12 09:41:07.004213+00');
+    await stampLast(newer!, '2026-11-12 09:41:07.004713+00');
+
+    const seen: string[] = [];
+    let before: string | null = null;
+    let pages = 0;
+    do {
+      const query: string = before === null ? '?limit=1' : `?limit=1&before=${before}`;
+      const answer = await listed(token, query);
+      seen.push(...idsOf(answer));
+      before = answer.olderCursor;
+      pages += 1;
+    } while (before !== null && pages < 10);
+
+    // A uuid's lower-case text sorts as Postgres compares its bytes.
+    expect(seen).toEqual([newer, ...[...tied].sort().reverse()]);
+    expect(pages).toBe(4);
+  });
+
+  it('keeps a cursor’s microseconds, so the next page starts one microsecond older', async () => {
+    await appRow();
+    const token = await minted();
+    const older = await opened(token, { text: 'Older', locale: 'en' });
+    const newer = await opened(token, { text: 'Newer', locale: 'en' });
+    await stampLast(older.ticket.id, '2026-11-12 09:41:07.123456+00');
+    await stampLast(newer.ticket.id, '2026-11-12 09:41:07.123457+00');
+
+    const first = await listed(token, '?limit=1');
+    expect(idsOf(first)).toEqual([newer.ticket.id]);
+    expect(decodeCursor('tickets', first.olderCursor!)?.time).toMatch(/:07\.123457/);
+    const next = await listed(token, `?limit=1&before=${first.olderCursor}`);
+    expect(idsOf(next)).toEqual([older.ticket.id]);
+    expect(next.olderCursor).toBeNull();
+  });
+
+  it('puts the ticket with the newest message first, and a note moves nothing and shows nothing', async () => {
+    await appRow();
+    const token = await minted();
+    const a = await opened(token, { text: 'First parcel', locale: 'en' });
+    const b = await opened(token, { text: 'Second parcel', locale: 'en' });
+    expect(idsOf(await listed(token))).toEqual([b.ticket.id, a.ticket.id]);
+
+    // The team answers the older one, through the console's own path.
+    await storeAgentReply(a.ticket.id, 'api', {
+      authorAgentId: await agent(),
+      bodyText: 'We have asked the courier.',
+      deliveryStatus: 'delivered',
+    });
+    const answered = await listed(token);
+    expect(idsOf(answered)).toEqual([a.ticket.id, b.ticket.id]);
+
+    // A note on the ticket now second, as the console writes one.
+    const [note] = await db
+      .insert(messages)
+      .values({
+        conversationId: b.ticket.id,
+        direction: 'outbound',
+        kind: 'note',
+        authorAgentId: await agent('Mona'),
+        bodyText: 'Private: courier blames the address',
+        deliveryStatus: 'delivered',
+      })
+      .returning({ id: messages.id });
+    await afterMessageStored({
+      conversationId: b.ticket.id,
+      messageId: note!.id,
+      bodyText: 'Private: courier blames the address',
+      kind: 'note',
+      direction: 'outbound',
+    });
+    const noted = await listed(token);
+    expect(noted.tickets).toEqual(answered.tickets);
+    expect(JSON.stringify(noted)).not.toContain('Private');
+  });
+
+  // Scoped by the identity, never by the token or the session row.
+  it('lists the same tickets and badge to a fresh session for the same user, and none after account_deleted', async () => {
+    await appRow();
+    const token = await minted();
+    const a = await opened(token);
+    await opened(token, { text: 'Another parcel', locale: 'en' });
+    await teamRow(a.ticket.id);
+    const first = await listed(token);
+    expect(first.unreadTotal).toBe(1);
+
+    const again = await listed(await minted());
+    expect(idsOf(again)).toEqual(idsOf(first));
+    expect(again.unreadTotal).toBe(1);
+
+    await revoke(user, 'signed_out');
+    expect(await refusal(await list(token))).toMatchObject({ status: 401 });
+    const back = await listed(await minted());
+    expect(idsOf(back)).toEqual(idsOf(first));
+    expect(back.unreadTotal).toBe(1);
+
+    await revoke(user, 'account_deleted');
+    expect(await listed(await minted())).toMatchObject({
+      tickets: [],
+      olderCursor: null,
+      unreadTotal: 0,
+    });
+  });
+
+  it('filters on the tracking number the ticket was opened with, exactly, and keeps the badge whole', async () => {
+    await appRow();
+    const token = await minted();
+    const ab1 = await opened(token, { text: 'Late', locale: 'en', trackingNumber: 'AB-12' });
+    const cd = await opened(token, { text: 'Damaged', locale: 'en', trackingNumber: 'CD-34' });
+    const ab2 = await opened(token, { text: 'Still late', locale: 'en', trackingNumber: 'AB-12' });
+    const bare = await opened(token, { text: 'No number', locale: 'en' });
+    await teamRow(cd.ticket.id);
+    // A number only the team linked, in `conversation_shipments`: never the claim.
+    const [parcel] = await db
+      .insert(shipments)
+      .values({ trackingNumber: 'EF-56' })
+      .returning({ id: shipments.id });
+    await db
+      .insert(conversationShipments)
+      .values({ conversationId: bare.ticket.id, shipmentId: parcel!.id, linkSource: 'manual' });
+
+    const filtered = await listed(token, '?trackingNumber=AB-12');
+    expect(idsOf(filtered)).toEqual([ab2.ticket.id, ab1.ticket.id]);
+    // The badge is every ticket's, CD-34's reply included.
+    expect(filtered.unreadTotal).toBe(1);
+
+    const one = await listed(token, '?trackingNumber=AB-12&limit=1');
+    expect(idsOf(one)).toEqual([ab2.ticket.id]);
+    const two = await listed(token, `?trackingNumber=AB-12&limit=1&before=${one.olderCursor}`);
+    expect(idsOf(two)).toEqual([ab1.ticket.id]);
+    expect(two.olderCursor).toBeNull();
+
+    // No row to carry the badge: it is read on its own, still unfiltered.
+    for (const number of ['ZZ-99', 'ab-12', 'EF-56']) {
+      expect(await listed(token, `?trackingNumber=${number}`)).toEqual({
+        tickets: [],
+        olderCursor: null,
+        unreadTotal: 1,
+        pollAfterSeconds: 30,
+      });
+    }
+  });
+
+  it('answers the contract’s page: every status, each ticket as GET /tickets/{id} draws it, a badge its rows add up to', async () => {
+    const row = await appRow();
+    const token = await minted();
+    const open = await opened(token);
+    const resolved = await opened(token, { text: 'Resolved one', locale: 'en' });
+    const closed = await opened(token, { text: 'Closed one', locale: 'en' });
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Resolved'), resolvedAt: new Date() })
+      .where(eq(conversations.id, resolved.ticket.id));
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Closed') })
+      .where(eq(conversations.id, closed.ticket.id));
+    await teamRow(open.ticket.id, { authorAgentId: await agent() });
+    await teamRow(open.ticket.id, { bodyText: 'We are closed until 10:00.' });
+    await teamRow(resolved.ticket.id);
+    // The list reads no channel row: switched off, it goes on.
+    await db.update(channels).set({ isActive: false }).where(eq(channels.id, row));
+
+    const response = await list(token);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      'olderCursor',
+      'pollAfterSeconds',
+      'tickets',
+      'unreadTotal',
+    ]);
+    const answer = TicketsPage.parse(body);
+    const config = Config.parse(await (await getConfig(clientRequest('/config', token))).json());
+    expect(answer.pollAfterSeconds).toBe(30);
+    expect(answer.pollAfterSeconds).toBe(config.polling.listSeconds);
+
+    expect(answer.tickets.map(({ id, status, canReply }) => ({ id, status, canReply }))).toEqual([
+      { id: closed.ticket.id, status: 'closed', canReply: false },
+      { id: resolved.ticket.id, status: 'resolved', canReply: true },
+      { id: open.ticket.id, status: 'open', canReply: true },
+    ]);
+    for (const listedTicket of answer.tickets) {
+      const one = TicketEnvelope.parse(await (await ticket(token, listedTicket.id)).json());
+      expect(listedTicket).toEqual(one.ticket);
+    }
+    expect(answer.tickets.find((t) => t.id === open.ticket.id)).toMatchObject({
+      unreadCount: 2,
+      preview: { from: 'system', text: 'We are closed until 10:00.' },
+    });
+    expect(answer.unreadTotal).toBe(3);
+    expect(answer.tickets.reduce((sum, t) => sum + t.unreadCount, 0)).toBe(answer.unreadTotal);
+    expect(answer.olderCursor).toBeNull();
+  });
+
+  it('refuses a cursor it did not mint, a page size out of range and a tracking number outside the contract', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: older } = await opened(token);
+    const { ticket: newer } = await opened(token, { text: 'A second parcel', locale: 'en' });
+
+    // The newer ticket's own `(last_message_at, id)` in this server's
+    // spelling, which the list would page from to the older one: unsigned,
+    // signed for a thread, and signed for the list under a secret this server
+    // does not hold. And a thread's cursor as a thread answered it.
+    const [row] = await db.execute<{ t: string }>(
+      sql`select last_message_at::text as t from conversations where id = ${newer.id}`,
+    );
+    const own = { time: row!.t, id: newer.id };
+    const thread = MessagesPage.parse(await (await page(token, newer.id)).json()).newerCursor;
+    for (const query of [
+      '?before=bm90LWEtY3Vyc29y',
+      '?before=',
+      '?before=a=b',
+      `?before=${Buffer.from(`${own.time}|${own.id}`).toString('base64url')}`,
+      `?before=${encodeCursor('messages', own)}`,
+      `?before=${encodeCursor('tickets', own, 'x'.repeat(64))}`,
+      `?before=${thread}`,
+    ]) {
+      expect(await refusal(await list(token, query))).toMatchObject({
+        status: 400,
+        code: 'invalid_cursor',
+      });
+    }
+    // Signed for the list, the same row reads the page after it: the refusals
+    // above are the purpose's and the signature's, not the row's.
+    expect(idsOf(await listed(token, `?before=${encodeCursor('tickets', own)}`))).toEqual([
+      older.id,
+    ]);
+
+    const limit = await refusal(await list(token, '?limit=101'));
+    expect(limit).toMatchObject({ status: 400, code: 'invalid_request', field: 'limit' });
+    expect(limit.message).not.toContain('body');
+    expect(await refusal(await list(token, '?trackingNumber=AB%2012'))).toMatchObject({
+      status: 400,
+      code: 'invalid_request',
+      field: 'trackingNumber',
+    });
+  });
+});
+
+// --- The read marker --------------------------------------------------------
+
+describe('POST /tickets/{id}/read', () => {
+  /** A ticket holding one of everything a thread can hold, in order, a second apart. */
+  async function threadOfEverything(token: string) {
+    const { ticket: opening, message } = await opened(token);
+    const me = await caller(token);
+    const omar = await agent();
+    const at = (seconds: number) => new Date(Date.now() + seconds * 1000);
+    const r1 = await teamRow(opening.id, { authorAgentId: omar, createdAt: at(1) });
+    const n1 = await teamRow(opening.id, {
+      kind: 'note',
+      authorAgentId: omar,
+      bodyText: 'Private: courier blames the address',
+      createdAt: at(2),
+    });
+    // The out-of-hours acknowledgement: a reply nobody wrote.
+    const s1 = await teamRow(opening.id, {
+      bodyText: 'We are closed until 10:00.',
+      createdAt: at(3),
+    });
+    const system = await teamRow(opening.id, {
+      kind: 'system',
+      bodyText: 'SLA breached',
+      createdAt: at(4),
+    });
+    const r2 = await teamRow(opening.id, {
+      authorAgentId: omar,
+      bodyText: 'The courier is on the way.',
+      createdAt: at(5),
+    });
+    const c2 = await teamRow(opening.id, {
+      direction: 'inbound',
+      authorContactId: me.contactId,
+      bodyText: 'Thank you',
+      createdAt: at(6),
+    });
+    return { opening, c1: message.id, r1, n1, s1, system, r2, c2 };
+  }
+
+  it('marks the team’s replies up to upTo read, and touches nothing else', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+    const other = await opened(token, { text: 'Another parcel', locale: 'en' });
+    const elsewhere = await teamRow(other.ticket.id);
+    const before = await everyMessage();
+    const [ticketBefore] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, t.opening.id));
+    const eventsBefore = await db.select({ id: conversationEvents.id }).from(conversationEvents);
+
+    const answer = await marked(token, t.opening.id, t.s1);
+
+    const after = await everyMessage();
+    for (const id of [t.r1, t.s1]) {
+      expect(after.get(id)).toMatchObject({ readAt: expect.any(Date), deliveryStatus: 'read' });
+      // Nothing else on the row moved.
+      expect({ ...after.get(id), readAt: null, deliveryStatus: 'delivered' }).toEqual(
+        before.get(id),
+      );
+    }
+    for (const id of [t.c1, t.n1, t.system, t.r2, t.c2, elsewhere]) {
+      expect(after.get(id)).toEqual(before.get(id));
+    }
+    // Nothing on the ticket, and nothing on its timeline: a read is not activity.
+    const [ticketAfter] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, t.opening.id));
+    expect(ticketAfter).toEqual(ticketBefore);
+    expect(await db.select({ id: conversationEvents.id }).from(conversationEvents)).toEqual(
+      eventsBefore,
+    );
+
+    expect(answer.ticket.unreadCount).toBe(1);
+    expect(answer.unreadTotal).toBe(2);
+    // The list and the thread, read straight after, say what the marker said.
+    const listedNow = await listed(token);
+    expect(listedNow.unreadTotal).toBe(answer.unreadTotal);
+    expect(listedNow.tickets.find((x) => x.id === t.opening.id)).toEqual(answer.ticket);
+    const thread = MessagesPage.parse(await (await page(token, t.opening.id)).json());
+    expect(thread.unreadTotal).toBe(answer.unreadTotal);
+    expect(thread.ticket).toEqual(answer.ticket);
+  });
+
+  it('changes nothing marking twice or backwards, and two markers at once mark each reply once', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+
+    const first = await marked(token, t.opening.id, t.r2);
+    expect(first.ticket.unreadCount).toBe(0);
+    const once = await everyMessage();
+    for (const upTo of [t.r2, t.c1, t.r1]) {
+      const again = await marked(token, t.opening.id, upTo);
+      expect(again.ticket.unreadCount).toBe(0);
+      expect(again.unreadTotal).toBe(0);
+    }
+    expect(await everyMessage()).toEqual(once);
+    const me = await caller(token);
+    const cursorOf = async (id: string) => ({
+      time: (
+        await db.execute<{ t: string }>(
+          sql`select created_at::text as t from messages where id = ${id}`,
+        )
+      )[0]!.t,
+      id,
+    });
+    expect(await markStatement(db, me, t.opening.id, await cursorOf(t.r2))).toEqual([]);
+
+    // Two more replies, and two markers racing for them.
+    const later = (seconds: number) => new Date(Date.now() + seconds * 1000);
+    const r3 = await teamRow(t.opening.id, { createdAt: later(10) });
+    const r4 = await teamRow(t.opening.id, { createdAt: later(11) });
+    infos.mockClear();
+    const answers = await Promise.all([
+      marked(token, t.opening.id, r4),
+      marked(token, t.opening.id, r4),
+    ]);
+    expect(answers.map((a) => a.ticket.unreadCount)).toEqual([0, 0]);
+    const counts = infos.mock.calls
+      .map((call) => /^\[api\] read marked .* marked=(\d+) /.exec(String(call[0]))?.[1])
+      .filter((count) => count !== undefined)
+      .map(Number);
+    expect(counts.sort()).toEqual([0, 2]);
+    const rows = await everyMessage();
+    for (const id of [r3, r4]) {
+      expect(rows.get(id)).toMatchObject({ readAt: expect.any(Date), deliveryStatus: 'read' });
+    }
+  });
+
+  it('takes the customer’s own message as upTo, and breaks a tie on the instant by id', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+    const answer = await marked(token, t.opening.id, t.c2);
+    expect(answer.ticket.unreadCount).toBe(0);
+    const rows = await everyMessage();
+    for (const id of [t.r1, t.s1, t.r2]) expect(rows.get(id)?.readAt).not.toBeNull();
+    expect(rows.get(t.n1)?.readAt).toBeNull();
+
+    // Two replies stamped to the microsecond alike: the lower id is first.
+    const { ticket: tied } = await opened(token, { text: 'Tied', locale: 'en' });
+    const stamp = new Date(Date.now() + 60_000);
+    const pair = [
+      await teamRow(tied.id, { createdAt: stamp }),
+      await teamRow(tied.id, { createdAt: stamp }),
+    ].sort();
+    const [lower, higher] = pair as [string, string];
+    expect((await marked(token, tied.id, lower)).ticket.unreadCount).toBe(1);
+    const after = await everyMessage();
+    expect(after.get(lower)?.readAt).not.toBeNull();
+    expect(after.get(higher)?.readAt).toBeNull();
+
+    // Ids in upper case, as a native UUID type prints them.
+    expect(
+      (await marked(token, tied.id.toUpperCase(), higher.toUpperCase())).ticket.unreadCount,
+    ).toBe(0);
+    expect((await everyMessage()).get(higher)?.readAt).not.toBeNull();
+  });
+
+  it('refuses an upTo the thread does not return, naming it, and marks nothing', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+    const forward = await teamRow(t.opening.id, { direction: 'inbound', kind: 'forward' });
+    const reaction = await teamRow(t.opening.id, {
+      direction: 'inbound',
+      bodyText: '[reacted 🙏]',
+      meta: { whatsappType: 'reaction' },
+    });
+    const other = await opened(token, { text: 'Another parcel', locale: 'en' });
+    const before = await everyMessage();
+
+    for (const upTo of [t.n1, t.system, forward, reaction, other.message.id, randomUUID()]) {
+      expect(await refusal(await markRead(token, t.opening.id, upTo))).toMatchObject({
+        status: 400,
+        code: 'invalid_request',
+        field: 'upTo',
+      });
+    }
+    for (const body of [{}, { upTo: 'not-a-message' }]) {
+      const response = await postRead(
+        clientRequest(`/tickets/${t.opening.id}/read`, token, { method: 'POST', body }),
+        params(t.opening.id),
+      );
+      expect(await refusal(response)).toMatchObject({
+        status: 400,
+        code: 'invalid_request',
+        field: 'upTo',
+      });
+    }
+    expect(await everyMessage()).toEqual(before);
+  });
+
+  it('is drawn as Read in the console, never over a failure, and passes a reaction by', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+    const at = (seconds: number) => new Date(Date.now() + seconds * 1000);
+    const failed = await teamRow(t.opening.id, {
+      deliveryStatus: 'failed',
+      deliveryError: 'contrived',
+      createdAt: at(7),
+    });
+    // Impossible on `api`, which has no reactions: the badge and the marker
+    // still answer it alike.
+    const reaction = await teamRow(t.opening.id, {
+      bodyText: '[reacted 👍]',
+      meta: { whatsappType: 'reaction' },
+      createdAt: at(8),
+    });
+    const last = await teamRow(t.opening.id, { createdAt: at(9) });
+    expect(
+      TicketEnvelope.parse(await (await ticket(token, t.opening.id)).json()).ticket.unreadCount,
+    ).toBe(5);
+
+    await marked(token, t.opening.id, last);
+    const rows = await everyMessage();
+    expect(rows.get(failed)).toMatchObject({ readAt: expect.any(Date), deliveryStatus: 'failed' });
+    expect(rows.get(reaction)).toMatchObject({ readAt: null, deliveryStatus: 'delivered' });
+
+    const [row] = await db
+      .insert(agents)
+      .values({ name: 'Admin', email: `admin.read${seq}@shipblu.test`, role: 'admin' })
+      .returning();
+    const detail = await getConversation(
+      {
+        id: row!.id,
+        email: row!.email,
+        name: row!.name,
+        role: row!.role,
+        permissions: {},
+        avatarUrl: null,
+        avatarColor: row!.avatarColor,
+        isAcceptingTickets: true,
+        acceptingOffReason: null,
+        sessionIdleForMs: 0,
+      },
+      t.opening.number,
+    );
+    const drawn = (id: string) => deliveryOf(detail!.messages.find((m) => m.id === id)!);
+    expect(drawn(t.r1)).toEqual({ receipt: 'read' });
+    expect(drawn(failed)).toMatchObject({ error: expect.stringContaining('Not delivered') });
+  });
+
+  // The decision is read before the write: a ticket deleted, merged or marked
+  // spam between the two, or never the caller's, is in the write's own WHERE.
+  it('scopes its write in the statement that acts', async () => {
+    await appRow();
+    const token = await minted();
+    const me = await caller(token);
+    const stranger = await caller(await minted(`${user}_b`, phoneOf(seq + 5000)));
+    const far = new Date(Date.now() + 3_600_000).toISOString();
+    const everything = { time: far.replace('T', ' ').replace('Z', '+00'), id: randomUUID() };
+
+    const { ticket: mine } = await opened(token);
+    await teamRow(mine.id);
+    expect(await markStatement(db, stranger, mine.id, everything)).toEqual([]);
+    for (const change of [{ deletedAt: new Date() }, { isSpam: true }]) {
+      const { ticket: gone } = await opened(token, { text: 'Gone', locale: 'en' });
+      await teamRow(gone.id);
+      await db.update(conversations).set(change).where(eq(conversations.id, gone.id));
+      expect(await markStatement(db, me, gone.id, everything)).toEqual([]);
+    }
+    expect(
+      await db.select({ id: messages.id }).from(messages).where(isNotNull(messages.readAt)),
+    ).toEqual([]);
+    expect(await markStatement(db, me, mine.id, everything)).toHaveLength(1);
+  });
+
+  it('spends the read bucket, never the send bucket', async () => {
+    await appRow();
+    const token = await minted();
+    const t = await threadOfEverything(token);
+    for (let i = 0; i < 20; i++) await marked(token, t.opening.id, t.r2);
+    expect((await send(token, t.opening.id, 'Any news?')).status).toBe(201);
+  });
+});
+
+/**
+ * The marker holds the requester as the sends do (`holdRequester`): a merge of
+ * the session's contact committed after the gate, or in flight, moves the
+ * ticket's requester, and a marker reading the gate's contact answered `404` —
+ * which the SDK meets by dropping the ticket and failing its outbox.
+ */
+describe('a contact merge between the gate and the read marker', () => {
+  async function survivorContact(): Promise<string> {
+    const { contactId } = await resolveContact({
+      channel: 'email',
+      identifier: `nour.read${seq}@example.test`,
+    });
+    return contactId;
+  }
+
+  it('marks the user’s ticket after a merge committed since its gate', async () => {
+    await appRow();
+    const token = await minted();
+    const before = await caller(token);
+    const { ticket: opening } = await opened(token);
+    const reply = await teamRow(opening.id);
+    const survivor = await survivorContact();
+
+    const hold = holdNextTransaction('before');
+    const marking = markRead(token, opening.id, reply);
+    await hold.atHold;
+    const merged = await mergeContacts({
+      survivorId: survivor,
+      loserId: before.contactId,
+      agentId: null,
+    });
+    expect(merged.ok).toBe(true);
+    hold.release();
+
+    const response = await marking;
+    expect(response.status).toBe(200);
+    expect(ReadResult.parse(await response.json()).ticket.unreadCount).toBe(0);
+    expect((await everyMessage()).get(reply)?.readAt).not.toBeNull();
+  });
+
+  it('waits out a merge in flight, then marks', async () => {
+    await appRow();
+    const token = await minted();
+    const before = await caller(token);
+    const { ticket: opening } = await opened(token);
+    const reply = await teamRow(opening.id);
+    const survivor = await survivorContact();
+
+    const hold = holdNextTransaction('after');
+    const merging = mergeContacts({
+      survivorId: survivor,
+      loserId: before.contactId,
+      agentId: null,
+    });
+    await hold.atHold;
+    const marking = markRead(token, opening.id, reply);
+    const waited = await untilWaitingOnALock(db, { rowLockIn: '^\\s*select\\M' });
+    hold.release();
+    expect(waited).toBe(true);
+    expect((await merging).ok).toBe(true);
+
+    expect((await marking).status).toBe(200);
+    expect((await everyMessage()).get(reply)?.readAt).not.toBeNull();
   });
 });

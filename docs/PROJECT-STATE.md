@@ -2277,8 +2277,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   cascading, nothing rewritten): which app identity opened a ticket, and the
   tracking number it was opened with. Four routes on the client plane:
   `POST /tickets`, `GET /tickets/{id}`, and `GET` and `POST
-/tickets/{id}/messages`; `GET /tickets` answers `404` with no body until
-  stage 5 brings the list. A ticket opened from the app is on the `api`
+/tickets/{id}/messages`; `GET /tickets` answered `404` with no body until
+  stage 5 brought the list (below), and does again on a revert of stage 5. A ticket opened from the app is on the `api`
   channel, filed under the oldest active `api` row's group and routed by its
   mode as every ingest path's is, with an `opened_from_app` event the ticket's
   header reads as "myBlu · phone vouched for by the app · iOS 5.4.1". "myBlu
@@ -2301,6 +2301,54 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   new holder's myBlu ticket, which the portal's exclusion is there to prevent.
   A revert of anything else in this stage keeps `notOnThePortal()` in
   `lib/portal/tickets.ts`; `api_tickets` itself is additive and can stay.
+- **The myBlu app's history and unread arrive with stage 5 of
+  `plans/myblu-ticket-api.md`,** inert on the same terms as stage 4 (the token
+  and an active `api` row). No schema, no migration, no variable, and no
+  shape: the document and its changelog are as stage 4 left them.
+  `GET /tickets` is the user's tickets, newest first by `(lastMessageAt, id)`,
+  every status, paged back with `before`, optionally only those opened with one
+  `trackingNumber` (as stored on `api_tickets`, never an agent's link), with
+  `unreadTotal` over every ticket whatever the filter; it reads no channel row,
+  so it goes on while new tickets are switched off. Its cursor is signed as a
+  thread's is, under a purpose of its own, so neither is read on the other's
+  page: each is `400 invalid_cursor` there. `POST /tickets/{id}/read`
+  marks the team's replies on one ticket read up to `upTo`: the first writer of
+  `messages.read_at` and of `delivery_status = 'read'` on a channel without a
+  provider, which is what makes the console's bubble draw Read — `read` only
+  from `sent` or `delivered`, so a failure keeps its receipt. It spends the
+  reads bucket. `GET /config` now carries `support`: the hours of the oldest
+  active `api` row's default group, else the default schedule, in their own
+  zone, with `online: false` and nulls when there are none (a zone luxon cannot
+  read counts as none) and `opensAt` looked for a year ahead. Production's
+  default schedule, read for the stage's design on 2026-11-13, is Cairo 10:00
+  to 18:00, Saturday to Thursday, with the Sales Team's override shut on
+  Saturday. **A pilot can run from here;**
+  the SDK's 0.2 follows. After the release carrying stages 4 and 5 is on
+  `main`, and once an `api` ticket exists (the pilot's, or the owner's test
+  ticket before it is purged), read the plans on production, read-only: first
+  `select to_regclass('public.api_tickets')`, the `api` row and ticket counts,
+  `pg_stat_user_tables.last_autoanalyze` for `conversations`, `messages` and
+  `api_tickets`, and `most_common_vals` of `conversations.channel`; then each
+  statement built locally with `toSQL()`, a real identity, contact and ticket
+  inlined, under `EXPLAIN (ANALYZE, BUFFERS, VERBOSE)` — the poll's two
+  statements (`ownedTicketRow` with the badge, then the page), `listStatement`
+  with a limit of 21 with and without `trackingNumber`, and the badge alone —
+  and `markStatement` under a plain `EXPLAIN` only, since `ANALYZE` would run
+  the `UPDATE`. Expect `api_tickets_identity_idx` driving the list and the
+  badge, the preview and unread subqueries above the sort, run at most
+  `limit + 1` times, the badge once as an InitPlan, and the marker an InitPlan
+  on `conversations_pkey` over `messages_conversation_idx`. A walk of
+  `conversations_channel_idx` instead means `'api'` is not yet among that
+  column's common values: record it with the `last_autoanalyze` read, and
+  re-check later; an `ANALYZE` by hand writes statistics and needs the owner.
+  Write what was found here. Way back: revert, which puts stage 4's body-less
+  `404` back on `GET /tickets` and Next's `404` on the marker, both of which
+  the SDK reads as a route not served yet, and leaves `support` absent, which
+  every client handles; a `read_at` or `read` already written stays, and the
+  build before it draws both. Two things stay open with the owner: a side
+  conversation's answer moves an `api` ticket's `lastMessageAt`, so the app's
+  list can show the ticket move with nothing new to read, and the tracking
+  number rides in the list's query string (the plan's _Risks_).
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and

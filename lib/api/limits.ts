@@ -69,7 +69,13 @@ export function admitMint(externalUserId: string): Admission {
   return admit(`api-v1:mint:${externalUserId}`, MINT_LIMIT, MINT_WINDOW_MS);
 }
 
-/** Reads, on the session's identity: what a polling app spends. */
+/**
+ * Reads, on the session's identity: what a polling app spends — every `GET`,
+ * and the read marker (`POST /tickets/{id}/read`). The marker writes no
+ * message, and the SDK retries it as it retries a read; spent from the send
+ * bucket, twenty a minute, a user scrolling through threads would have their
+ * next message refused.
+ */
 const READ_LIMIT = 240;
 
 export function admitRead(identityId: string): Admission {

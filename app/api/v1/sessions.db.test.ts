@@ -1,16 +1,21 @@
 import { and, eq } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
   apiSessions,
+  businessHours,
   channels,
   contactIdentities,
   contactSessions,
   contacts,
+  groups,
+  holidays,
   sessions,
 } from '@/db/schema';
-import { ErrorBody, Config, Session } from '@/lib/api/schemas';
+import type { WeeklySchedule } from '@/db/schema/config';
+import { ErrorBody, Config, Session, SupportHours } from '@/lib/api/schemas';
 import {
   deleteSweptApiSessions,
   endStatement,
@@ -22,6 +27,8 @@ import {
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { mergeContacts } from '@/lib/contacts/merge';
 import { resetEnvCache } from '@/lib/env';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
+import { wallClockInstant } from '@/lib/hours/wall-clock';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { resolveContact } from '@/lib/tickets/contacts';
@@ -55,6 +62,9 @@ beforeEach(() => {
   user = `u_${(seq += 1)}`;
   vi.stubEnv('MYBLU_API_TOKEN', TOKEN);
   resetEnvCache();
+  // The catalog is memoised for thirty seconds: across a truncated database it
+  // would answer the last test's hours.
+  forgetHoursCatalog();
 });
 
 afterEach(() => {
@@ -359,9 +369,13 @@ describe('GET /config', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('shipblu-request-id')).toMatch(/^[0-9a-f-]{36}$/);
     const body = (await response.json()) as Record<string, unknown>;
-    Config.parse(body);
-    // `support` is absent, not null, until stage 5.
-    expect(Object.keys(body).sort()).toEqual(['limits', 'polling', 'tickets', 'user']);
+    const parsed = Config.parse(body);
+    expect(Object.keys(body).sort()).toEqual(['limits', 'polling', 'support', 'tickets', 'user']);
+    // The seeded default schedule, whatever the time of day: open exactly when
+    // there is no opening to wait for.
+    const support = SupportHours.parse(parsed.support);
+    expect(support.timezone).toBe('Africa/Cairo');
+    expect(support.online).toBe(support.opensAt === null);
     expect(body).toMatchObject({
       user: { id: await identityId(), externalId: user },
       tickets: { canCreate: false, maxOpen: 10 },
@@ -388,6 +402,130 @@ describe('GET /config', () => {
 
     await db.update(channels).set({ isActive: false }).where(eq(channels.id, row!.id));
     expect(Config.parse(await (await config(token)).json()).tickets.canCreate).toBe(false);
+  });
+
+  /**
+   * `support` is the hours of the oldest active `api` row's default group, its
+   * own schedule or else the default, each with its own zone and holidays.
+   * Every schedule here is open round the clock or never, so no answer
+   * depends on the time the suite runs.
+   */
+  describe('support', () => {
+    const always: WeeklySchedule = Object.fromEntries(
+      ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map((d) => [
+        d,
+        [{ start: '00:00', end: '24:00' }],
+      ]),
+    ) as WeeklySchedule;
+    const never: WeeklySchedule = { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] };
+
+    async function defaultSchedule(): Promise<string> {
+      const [row] = await db
+        .update(businessHours)
+        .set({ schedule: always, timezone: 'Africa/Cairo' })
+        .where(eq(businessHours.isDefault, true))
+        .returning({ id: businessHours.id });
+      return row!.id;
+    }
+
+    async function schedule(name: string, week: WeeklySchedule, timezone: string) {
+      const [row] = await db
+        .insert(businessHours)
+        .values({ name, schedule: week, timezone })
+        .returning({ id: businessHours.id });
+      return row!.id;
+    }
+
+    async function group(name: string, businessHoursId: string | null = null) {
+      const [row] = await db
+        .insert(groups)
+        .values({ name, businessHoursId })
+        .returning({ id: groups.id });
+      return row!.id;
+    }
+
+    async function row(type: 'api' | 'webchat', defaultGroupId: string | null) {
+      await db.insert(channels).values({ type, name: `${type} row`, config: {}, defaultGroupId });
+    }
+
+    async function supportNow(token: string) {
+      forgetHoursCatalog();
+      const answer = Config.parse(await (await config(token)).json());
+      return { canCreate: answer.tickets.canCreate, support: SupportHours.parse(answer.support) };
+    }
+
+    it('follows the api row’s group, and the default for a group with no schedule of its own', async () => {
+      const token = await minted();
+      await defaultSchedule();
+      const dubai = await schedule('Dubai desk', never, 'Asia/Dubai');
+      await row('api', await group('Dubai desk', dubai));
+      // A web chat row's group keeps other hours, and changes nothing here.
+      await row('webchat', await group('Chat desk', await schedule('Chat', always, 'Asia/Dubai')));
+
+      expect(await supportNow(token)).toEqual({
+        canCreate: true,
+        support: { online: false, opensAt: null, timezone: 'Asia/Dubai' },
+      });
+
+      await db
+        .update(channels)
+        .set({ defaultGroupId: await group('Care') })
+        .where(eq(channels.type, 'api'));
+      expect(await supportNow(token)).toEqual({
+        canCreate: true,
+        support: { online: true, opensAt: null, timezone: 'Africa/Cairo' },
+      });
+    });
+
+    it('answers the default with no active api row, while no ticket can be opened', async () => {
+      const token = await minted();
+      await defaultSchedule();
+      await row('webchat', await group('Chat desk', await schedule('Chat', never, 'Asia/Dubai')));
+      expect(await supportNow(token)).toEqual({
+        canCreate: false,
+        support: { online: true, opensAt: null, timezone: 'Africa/Cairo' },
+      });
+    });
+
+    it('says nothing about hours when no schedule is the default and the group has none', async () => {
+      const token = await minted();
+      await db.update(businessHours).set({ isDefault: false });
+      await row('api', await group('Care'));
+      expect((await supportNow(token)).support).toEqual({
+        online: false,
+        opensAt: null,
+        timezone: null,
+      });
+    });
+
+    it('closes for a holiday on the group’s own calendar, and only that one', async () => {
+      const token = await minted();
+      const defaultId = await defaultSchedule();
+      const dubai = await schedule('Dubai desk', always, 'Asia/Dubai');
+      await row('api', await group('Dubai desk', dubai));
+      const today = DateTime.now().setZone('Asia/Dubai');
+
+      // A holiday on the default calendar does not close a group with its own.
+      await db.insert(holidays).values({ businessHoursId: defaultId, date: today.toISODate()! });
+      expect((await supportNow(token)).support).toEqual({
+        online: true,
+        opensAt: null,
+        timezone: 'Asia/Dubai',
+      });
+
+      // Dubai keeps no summer time, so tomorrow has its midnight.
+      await db.insert(holidays).values({ businessHoursId: dubai, date: today.toISODate()! });
+      const tomorrow = wallClockInstant(
+        `${today.plus({ days: 1 }).toISODate()}T00:00`,
+        'Asia/Dubai',
+      );
+      expect(tomorrow).toBeInstanceOf(Date);
+      expect((await supportNow(token)).support).toEqual({
+        online: false,
+        opensAt: (tomorrow as Date).toISOString(),
+        timezone: 'Asia/Dubai',
+      });
+    });
   });
 
   it('requires ShipBlu-Client', async () => {

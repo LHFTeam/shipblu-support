@@ -59,7 +59,7 @@ import {
   WebhookSignatureHeader,
   WebhookTimestampHeader,
 } from '@/lib/api/schemas';
-import { encodeCursor } from '@/lib/api/cursor';
+import { encodeCursor, type CursorKind } from '@/lib/api/cursor';
 import { MAX_COMMENT } from '@/lib/csat/limits';
 import {
   MAX_WIDGET_FILES,
@@ -275,13 +275,18 @@ const EXTERNAL_ID = 'u_83412';
 
 /**
  * A cursor as the server mints one (`encodeCursor`): base64url of Postgres's
- * timestamp text, the row id and their signature. Shown so the examples look
- * like what arrives; opaque to a client, which never reads one. Signed under a
- * key no server holds, since the document is built without the environment, so
- * the example is refused like any cursor this server did not mint.
+ * timestamp text, the row id and their signature, under the purpose of the
+ * pages it bounds. Shown so the examples look like what arrives; opaque to a
+ * client, which never reads one. Signed under a key no server holds, since the
+ * document is built without the environment, so the example is refused like
+ * any cursor this server did not mint.
  */
-function cursor(timestamp: string, rowId: string): string {
-  return encodeCursor({ time: timestamp, id: rowId }, 'the published example, signed by no server');
+function cursor(kind: CursorKind, timestamp: string, rowId: string): string {
+  return encodeCursor(
+    kind,
+    { time: timestamp, id: rowId },
+    'the published example, signed by no server',
+  );
 }
 
 const OPENING: z.input<typeof Message> = {
@@ -680,12 +685,13 @@ const SECURITY: Record<Plane, Json[]> = {
 };
 
 function operation(op: Operation): Json {
-  // "The path answers `404`" holds for `GET /tickets` too, on the path
-  // `POST /tickets` serves from stage 4, only because stage 4's route exports
-  // `GET` and answers it that `404` until stage 5: Next answers a method a
-  // route file does not export with `405`, which an SDK reads as its own bug
-  // (`plans/myblu-ticket-api.md`, stage 4; `openapi.test.ts` names every path
-  // whose methods ship apart).
+  // "The path answers `404`" held for `GET /tickets` too, on the path
+  // `POST /tickets` serves from stage 4, only because stage 4's route exported
+  // `GET` and answered it that `404` until stage 5 replaced it with the list —
+  // and holds again on a revert of stage 5, which puts it back: Next answers a
+  // method a route file does not export with `405`, which an SDK reads as its
+  // own bug (`plans/myblu-ticket-api.md`, stage 4; `openapi.test.ts` names
+  // every path whose methods ship apart).
   const served =
     op.stage === '0b'
       ? 'Served from stage 0b.'
@@ -981,7 +987,7 @@ function paths(): Json {
             newest: example(MessagesPage, 'The newest page of a short thread', {
               messages: [OPENING, PHOTO, REPLY],
               olderCursor: null,
-              newerCursor: cursor('2026-11-12 09:41:07.004213+00', REPLY.id),
+              newerCursor: cursor('messages', '2026-11-12 09:41:07.004213+00', REPLY.id),
               ticket: TICKET,
               unreadTotal: 1,
               pollAfterSeconds: 5,
