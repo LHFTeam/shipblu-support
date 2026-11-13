@@ -356,7 +356,7 @@ const REQUESTER_HOPS = 3;
  * contacts first — so a send holding a ticket's row never waits on a merge
  * that is waiting for that row.
  */
-async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
+export async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
   let followed: string | null = null;
   for (let hop = 0; hop < REQUESTER_HOPS; hop++) {
     const [identity] = await tx

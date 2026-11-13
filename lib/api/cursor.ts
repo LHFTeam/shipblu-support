@@ -29,8 +29,15 @@ import { isUuid } from '@/lib/http/uuid';
  *
  * Unbound to its ticket, as the guide promises nothing more than "minted here":
  * one ticket's cursor sent for another of the same user's reads that ticket
- * from the instant it names. The tickets list's cursor (stage 5) is to sign
- * under a purpose of its own, so one kind is never read as the other.
+ * from the instant it names. Bound to its kind, though (`CursorKind`): a
+ * thread's and the tickets list's cursors carry the same two things, a
+ * timestamp and a uuid, and read as the other one would page from a message's
+ * `created_at` on a ticket's `last_message_at`, or the other way round — a
+ * page from an instant that says nothing about the rows it is compared with.
+ * So each signs under a purpose of its own, and one sent where the other is
+ * read is refused like any cursor this server did not mint. The kind is a
+ * required argument on both sides, so no page can mint or read a cursor
+ * without saying which.
  *
  * What a cursor carries is also refused when Postgres could not read it back,
  * before a query rather than by Postgres, because the text goes into the
@@ -42,7 +49,18 @@ import { isUuid } from '@/lib/http/uuid';
 
 export type Cursor = { time: string; id: string };
 
-const PURPOSE = 'myblu-messages-cursor';
+/** Which pages a cursor bounds: a thread's messages, or the user's tickets. */
+export type CursorKind = 'messages' | 'tickets';
+
+/**
+ * What each kind signs under. `messages` is stage 4's, unchanged, so a
+ * thread's cursor an app already holds still reads. Neither is a prefix of the
+ * other, so no text one signs is a text the other signs.
+ */
+const PURPOSES: Record<CursorKind, string> = {
+  messages: 'myblu-messages-cursor',
+  tickets: 'myblu-tickets-cursor',
+};
 
 /**
  * Postgres's ISO output for a `timestamptz`, as the pool's sessions print it:
@@ -54,24 +72,32 @@ const PURPOSE = 'myblu-messages-cursor';
 const TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?[+-](\d{2})(?::(\d{2})(?::(\d{2}))?)?$/;
 
-function signature(cursor: Cursor, secret: string): string {
+function signature(kind: CursorKind, cursor: Cursor, secret: string): string {
   return createHmac('sha256', secret)
-    .update(`${PURPOSE}:${cursor.time}|${cursor.id}`)
+    .update(`${PURPOSES[kind]}:${cursor.time}|${cursor.id}`)
     .digest('base64url');
 }
 
 /**
- * The cursor a page answers, signed. `secret` is `APP_SECRET` everywhere but
- * the published document's example (`lib/api/openapi.ts`), which is built
- * without the environment and signs under a key no server holds.
+ * The cursor a page of `kind` answers, signed. `secret` is `APP_SECRET`
+ * everywhere but the published document's example (`lib/api/openapi.ts`),
+ * which is built without the environment and signs under a key no server
+ * holds.
  */
-export function encodeCursor(cursor: Cursor, secret: string = env().APP_SECRET): string {
-  const text = `${cursor.time}|${cursor.id}|${signature(cursor, secret)}`;
+export function encodeCursor(
+  kind: CursorKind,
+  cursor: Cursor,
+  secret: string = env().APP_SECRET,
+): string {
+  const text = `${cursor.time}|${cursor.id}|${signature(kind, cursor, secret)}`;
   return Buffer.from(text, 'utf8').toString('base64url');
 }
 
-/** The cursor a value names, or null for one this server did not mint. */
-export function decodeCursor(value: string): Cursor | null {
+/**
+ * The cursor a value names, or null for one this server did not mint for a
+ * page of `kind` — another kind's included.
+ */
+export function decodeCursor(kind: CursorKind, value: string): Cursor | null {
   const decoded = Buffer.from(value, 'base64url').toString('utf8');
   // Only the spelling this server writes: Node's decoder skips characters
   // outside the alphabet and ignores stray padding bits, so without this a
@@ -84,7 +110,7 @@ export function decodeCursor(value: string): Cursor | null {
     return null;
   }
   const cursor = { time, id };
-  if (!safeEqual(given, signature(cursor, env().APP_SECRET))) return null;
+  if (!safeEqual(given, signature(kind, cursor, env().APP_SECRET))) return null;
   if (!isUuid(id) || !isPrintedTimestamp(time)) return null;
   return cursor;
 }
