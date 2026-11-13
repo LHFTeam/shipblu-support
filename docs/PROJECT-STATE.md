@@ -5,12 +5,52 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-11-12, against `main` at `7605993`. The figures in §1 and §5
+Last updated: 2026-11-13, against `main` at `c354332`. The figures in §1 and §5
 were last re-measured as a whole against production on 2026-09-20, and a
 paragraph re-read since gives its own date; where a number here disagrees with
 an older paragraph elsewhere in the file, the older one has not been re-checked.
 
-**Production runs `7605993`, which deployed itself on 2026-11-11, all six
+**Production runs `c354332`:** release LHFTeam/shipblu-support#526, merged at
+23:58:05 UTC on 2026-11-12. It carries:
+
+- #521: links agents send name `support.shipblu.com`;
+- #523: one writer of a ticket's assignee.
+
+The review of LHFTeam/shipblu-support#524 read the web service live on it at
+00:08:14 on Render. At 13:02 UTC on 2026-11-13 `/api/health` answered `ok` on
+`c354332`, with nothing pending or processing and 28 dead jobs, as at 21:08 the day before. It
+adds no migration. `db/sql/009` changed (#523), and is replayed on every deploy
+as all of `db/sql/` is. Its way back is `aa0131d` on each service, with the
+same dashboard caveat as below. A rollback leaves whatever that replay of `009`
+wrote.
+
+**Production ran `aa0131d`, which deployed itself on 2026-11-12, all six
+services by 20:38:58 UTC:** release LHFTeam/shipblu-support#522, which carries:
+
+- #514: a Messenger reply typed in Meta Business Suite is filed from its echo
+  (§6.118);
+- #516: a coexistence number's tickets are its owner's alone;
+- #517: one definition of an email address;
+- #510, #513, #515 and #520: the proxy's head files and Freshdesk's old
+  portal, category and folder URLs;
+- #511: the widget's unsigned claim;
+- docs.
+
+It was merged at 20:27:49 with all nine checks green on the pull request. The
+four crons were live at 20:36:45–20:37:01, the worker at 20:38:27 and the web
+service at 20:38:58 (read on Render). It adds no migration. At 21:08
+`/api/health` answered `ok` on `aa0131d`, with the database at 7 ms, nothing
+pending or processing, no lost admission, and 28 dead jobs. The one added
+since the 27 below is a `send_notification_email` refused at 15:51 for an
+address the old format check rejected, the case #517 fixes. Its way back is
+`7605993` on each service. That is a revert through `dev`, or a dashboard
+rollback, which turns that service's auto-deploy off (below), so the next
+merge into `main` does not deploy it until auto-deploy is turned back on. No
+migration lies between the two.
+
+The release before it:
+
+**Production ran `7605993`, which deployed itself on 2026-11-11, all six
 services by 14:19:54 UTC:** release #508, which carries #491 — a form's new
 requester is written in the transaction that opens the ticket, so a refused or
 failed submission leaves no contact behind — #503, `robots.txt` and the sitemap
@@ -28,9 +68,9 @@ named below and no lost admission on the first pool; on the Render host
 404, and Freshdesk's old URLs 301 (PR 3, live since `932e8ea` below). Every
 article shape went to the article, and a folder URL to `/ar` when its id is a
 Freshdesk folder `kb_folders.external_id` holds; `kb_redirects` holds no folder
-rows, and the route does not need any. From the folder rule on, which is not
-deployed until `dev` reaches `main`, a folder somebody can open goes to its
-own page instead (§5.1). Its way back is
+rows, and the route does not need any. From the folder rule on (#520, live
+with `aa0131d` above), a folder somebody can open goes to its own page
+instead (§5.1). Its way back is
 `932e8ea` on each service: a code-only revert through `dev`, or a dashboard
 rollback, which turns that service's auto-deploy off (below); no migration lies
 between the two.
@@ -1080,6 +1120,17 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                             |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                             |
 
+`shipblu-support` answers on one custom domain, **`support.shipblu.com`**,
+beside its `onrender.com` host. It was added in the dashboard on 2026-11-11,
+when the CNAME moved here from Freshdesk (`plans/freshdesk-disconnection.md`).
+On 2026-11-13 the dashboard listed it alone, verified, with its certificate
+issued, and the Render subdomain enabled; request logs for the 30 days to
+2026-11-12 name no other host. `render.yaml` states both, `domains:` and
+`renderSubdomainPolicy: enabled`. The `onrender.com` host has to stay on: it
+is where the console is served once `KB_PUBLIC_HOST` names the domain, and
+every request to `/api/webhooks/*` in the logs since 2026-11-12 reached it.
+Staging has no custom domain.
+
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
 2026-09-25 the running service dropped the middle one while the blueprint
@@ -1670,8 +1721,7 @@ the rest of the cutover still needs, and some of it is now partly done:_
 - **The knowledge base no longer depends on Freshdesk, and
   `support.shipblu.com` answers from this app. What is left of the
   disconnection is setting `KB_PUBLIC_HOST`, deciding whether to run the
-  import once more, writing the domain into `render.yaml`, and work owned
-  outside this repository.** The record and the
+  import once more, and work owned outside this repository.** The record and the
   checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
   stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
   images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
@@ -1698,17 +1748,28 @@ the rest of the cutover still needs, and some of it is now partly done:_
     2026-11-11).
 
   **The domain moved on 2026-11-11**, between about 19:00 and 20:54 UTC (the
-  header). `KB_PUBLIC_HOST` still does not name it, so the host is served as a
-  console host. Freshdesk's bookmarks there, `/support/home` and
-  `/support/tickets/new`, go to the console's sign-in, and so does `/inbox`.
-  The widget's `BASE`, the sitemap and the canonicals still name the Render
-  host. The favicon is behind sign-in on every host, a separate bug:
-  `/icon.svg` is not a public path, and once the variable is set the help
-  centre's host rewrites it to `/help/icon.svg`, which 404s. It is fixed on
-  `dev` in #510 (`7074dee`), and reaches production with the next release. Setting the variable is the next step (the
-  `KB_PUBLIC_HOST` paragraph below). Once it is set, the Freshdesk portal
-  paths that are not an article or a folder become the help centre's 404
-  rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
+  header). Until `KB_PUBLIC_HOST` named it and a deploy read it, the host was
+  served as a console host. Freshdesk's bookmarks there, `/support/home` and
+  `/support/tickets/new`, went to the console's sign-in, and so did `/inbox`.
+  The widget's `BASE`, the sitemap and the canonicals named the Render host.
+  The favicon was behind sign-in on every host, a separate bug:
+  `/icon.svg` was not a public path, and once the variable is set the help
+  centre's host would rewrite it to `/help/icon.svg`, which 404s. #510
+  (`7074dee`) fixed it, live with `aa0131d`. At 22:15 UTC on 2026-11-12
+  `/icon.svg` answered 200 `image/svg+xml` signed out on both the Render host
+  and `support.shipblu.com`. **The variable is in effect now.** It was
+  reported set on 2026-11-12 (the `KB_PUBLIC_HOST` paragraph below), and by
+  13:01 UTC on 2026-11-13, after the deploys of `aa0131d` and `c354332`, both
+  hosts published the domain:
+
+  - the widget's `BASE`, `robots.txt`'s sitemap line, all 114 `<loc>`s in the
+    sitemap and an article's canonical named `support.shipblu.com`;
+  - `/inbox` on the domain answered 404, and `/support/home` and
+    `/support/tickets/new` answered 302 to `/ar` and `/ar#contact`.
+
+  So the domain serves only the help centre. The Freshdesk portal paths
+  that are not an article or a folder would otherwise have become the help
+  centre's 404 rather than the sign-in page. PR 7 of the plan (#513) answers them first, on
   every host and with the variable set or not, each with a 302. The home and
   the index go to `/<locale>`, the ticket pages and the sign-in to the home's
   contact band, and Freshdesk's search to ours. A category goes to its own
@@ -8958,13 +9019,77 @@ found"}` and not Next's page. The same route called by its own URL
       (`accountableOrAssigneeAt`). 15 of the 49 in `messaging` are signed by
       name by the Sales team, most on Customer Care tickets.
 
-      **The 220 Page Inbox echoes are still in `webhook_events`**, one per
-      delivery: 49 in `messaging` and 171 in `standby`, received 2026-10-13 to
-      2026-11-12 13:55 UTC, all marked processed. The nightly cleanup deletes a
-      processed delivery 30 days after it was processed. 13 go at 00:00 UTC on
-      2026-11-13, then a few most nights, and the last on 2026-12-13. Once this
-      is deployed, a replay files them, and a replay is a production write:
-      `process_webhook` skips a processed row. The deliveries are listed by:
+      **Replayed on 2026-11-12, once production ran this build.** The release
+      (LHFTeam/shipblu-support#522, aa0131d) put every service on it by 20:38:58
+      UTC. At 21:02:35 one statement cleared `processed_at` on 220 deliveries
+      and queued a `process_webhook` job for each. Every job completed on its
+      first attempt.
+
+      **The 220 are every kept delivery holding a Page Inbox echo.** 49 are in
+      `messaging` and 171 in `standby`, received 2026-10-13 to 2026-11-12
+      13:55:58 UTC, and each holds only the echo. None arrived between then and
+      the deploy: 46 Page deliveries came in over that window and none was an
+      echo. None has arrived since either, to 22:11. The selection was bounded
+      to `received_at` before 20:38:27, when the new worker went live. That
+      bound alone does not prove the old worker processed them: a delivery
+      received just before then could have been processed by the new one. What
+      proves it is the list saved before the write. Every target's original
+      `processed_at` was 13:55:58 or earlier, so none had been filed by the new
+      build.
+
+      **The jobs carry no dedupe key.** The live path keys a delivery's job
+      `process_webhook:<id>`. The nightly cleanup deletes a completed job 7 days
+      after it completes (`completedJobRetentionFilter`), and that frees the
+      key. So the key was free for the October deliveries, and still taken for
+      those processed in the last week. Without a key the insert answers for
+      both.
+
+      - **210 echoes were filed, on 120 tickets:** 45 from `messaging` and 165
+        from `standby`, all labelled `meta_business_suite`, none with an
+        author. All 120 tickets now carry a `first_responded_at`.
+      - **10 were refused by the rules above**, as a read beforehand predicted
+        from the tickets' state: 3 with no live ticket (one of them closed), 6
+        older than every customer message on the customer's current ticket,
+        and 1 sent within 10 s of the customer.
+      - **Nothing else moved.** No message was sent, no event or survey was
+        written on those tickets, and no job went dead.
+      - **Two files were stored.** Two `download_media` jobs stored two PNGs,
+        about 63 KB each, both on one ticket. Meta's links still served them.
+
+      **The rebuild** was one `rollup_metrics` job with `from=2026-10-13` and
+      `max_attempts` 1. A failed rebuild is deterministic, and five attempts
+      would rebuild thirty days five times. It started at 21:07:43, after the
+      web service was live on `aa0131d`. By 21:08:18 it had rebuilt the 30 days
+      from 2026-10-13 to 2026-11-11 (`rollup_days.computed_at`), and it
+      completed on its one attempt at 21:08:19. A day refused by
+      `reconcileFailure` makes the job throw after writing the rest, so no day
+      was refused. 2026-11-12 is the nightly's, at 00:00 UTC.
+
+      **The write chose its 220 rows by this predicate**, run at 21:02:35 in
+      the statement that cleared them. It selected deliveries the old build had
+      processed:
+
+      ```sql
+      w.provider = 'meta' and w.payload->>'object' = 'page'
+        and w.signature_verified
+        and w.processed_at is not null
+        and w.received_at < '2026-11-12 20:38:27+00'
+        and e.value->'message'->>'is_echo' = 'true'
+        and e.value->'message'->>'app_id' is not null
+        and e.value->'message'->>'app_id' <> '1009187740467732'
+      ```
+
+      `w` is a delivery and `e` each event in its `entry[].messaging[]` and
+      `entry[].standby[]`, unnested as in the query below. It takes any app
+      but ours, wider than the prose: every one of the 220 named the Page
+      Inbox (`263902037430900`, `PAGE_INBOX_APP_ID`), so the two agreed. A
+      later replay should name the Page Inbox, as the query below does,
+      because `<>` would also take a third app's `standby` echo, which
+      `echoDisposition` drops. Each replayed
+      delivery's `processed_at` is now 21:02 on 2026-11-12, so the nightly
+      cleanup keeps it until about 2026-12-12. Until then, the query that lists
+      what was replayed is the same one bounded on the new `processed_at`. Run
+      before the write, it would have returned nothing.
 
       ```sql
       select distinct w.id from webhook_events w
@@ -8974,23 +9099,49 @@ found"}` and not Next's page. The same route called by its own URL
       cross join lateral jsonb_array_elements(case jsonb_typeof(en.entry->arr.k)
         when 'array' then en.entry->arr.k else '[]' end) e(value)
       where w.provider = 'meta' and w.payload->>'object' = 'page'
-        and (e.value->'message'->>'is_echo')::boolean
+        and w.signature_verified
+        and w.received_at < '2026-11-12 20:38:27+00'
+        and w.processed_at >= '2026-11-12 21:02:35+00'
+        and w.processed_at < '2026-11-12 21:05:00+00'
+        and e.value->'message'->>'is_echo' = 'true'
         and e.value->'message'->>'app_id' = '263902037430900';
       ```
 
-      A replayed echo files only on its customer's live ticket, and only when
-      the ticket has a customer message no newer than the echo. So an old reply
-      whose customer has written again since, on a new ticket, stays out. One
-      whose ticket is closed stays out too.
+      **The replay's rows stay identifiable after the deliveries are gone.** A
+      filed row is dated by its echo, and every replayed echo was sent at or
+      before 13:55:58. No echo from another app arrived from then to the
+      deploy, and none in the hours after it. So the replay's rows are the
+      `messages` whose `meta->>'echoSource'` is `meta_business_suite` or
+      `other_app` and whose `created_at` is at or before
+      `2026-11-12 13:55:58.68+00`. That is the 210, and the predicate does not
+      expire. `business_app` is left out on purpose: it marks a coexistence
+      phone's echoes, which the replay never touched.
 
-      For each id: set its `processed_at` to null, then run
-      `npm run job -- process_webhook webhookEventId=<id>`. Every other item in
-      a delivery is idempotent on a second run (`process-meta-webhook.ts`).
-      Then run `rollup_metrics from=2026-10-13` so the reports take the first
-      responses. The way back is deleting the rows the replay filed (`messages`
-      whose `meta->>'echoSource'` is `meta_business_suite`), which leaves the
-      tickets' `last_agent_message_at` and `first_responded_at` where the
-      replay moved them.
+      **The way back** has three steps:
+
+      1. Delete those `messages` rows. That cascades to their `attachments`
+         rows.
+      2. Remove the two objects the downloads wrote, which nothing deletes
+         when the rows go:
+         `conversations/869d183d-c9ec-4e45-a19d-05a9d2e543db/1897b748-bb43-4a63-93f4-7a7b5a8f7652-0.png`
+         and `…/52aa045f-cbbc-4ebb-98ab-d5ddc3e1a17c-0.png` in the same
+         folder.
+      3. Run the same rollup.
+
+      **It removes the replies, not what they did to the tickets.** Filing
+      each one moved the ticket's `first_responded_at` and
+      `last_agent_message_at` and stopped its clocks (`onAgentReply`). The
+      rollup reads those columns, so step 3 rebuilds the first-response
+      figures the replay produced. The review of
+      LHFTeam/shipblu-support#524 measured how many tickets that affects:
+      `first_responded_at` equals a replayed echo's `created_at` on 119 of the
+      120 tickets, and `last_agent_message_at` does on 112. Neither column
+      keeps its old value, but both can be derived from the replies that
+      remain after step 1: the earliest and latest outbound reply by an agent
+      or a team echo, or null where there is none. No statement for that is
+      written here, because it has not been run against the data. What
+      cannot be derived is the clocks' state: a `next_response_due_at`
+      cleared, and the breach an answered ticket was spared.
 
 ### Tooling notes for this environment
 
