@@ -40,10 +40,13 @@ to `/api/v1/config`, and a client should never rely on following it.
 
 **The shapes are published before the routes exist.** The contract went out in
 stage 0b of the plan so the app and the SDK could be written against it; the
-routes land stage by stage after it. Until a route's stage ships, its path
-answers `404` with the framework's own page, not this API's error body, and an
-SDK changes nothing on one (_Errors_). The document marks each operation with
-the stage that serves it (`x-shipblu-stage`):
+routes land stage by stage after it. Until an operation's stage ships, it
+answers `404` without this API's error body, and an SDK changes nothing on one
+(_Errors_). That is the framework's own page, but for `GET /tickets` from
+stage 4 until stage 5: the route serving `POST /tickets` answers its `GET`
+with an empty `404` of its own, never a `405`, so an SDK reads it as it reads
+every operation not served yet. The document marks each operation with the
+stage that serves it (`x-shipblu-stage`):
 
 | Stage | Serves                                                                                                   |
 | ----- | -------------------------------------------------------------------------------------------------------- |
@@ -548,10 +551,11 @@ codes are added.
 
 An answer without this API's error body — a proxy's page, or the framework's
 `404` for a route this server does not serve — is classified by its status as
-well, with one exception. Such a `404` says nothing about the ticket: a route
-answers it before its stage ships, and again if that stage is reverted. So the
-SDK fails the call and changes nothing in its store or its outbox; only
-`not_found` in the body drops a ticket.
+well, with one exception. Such a `404` says nothing about the ticket: an
+operation answers it before its stage ships — `GET /tickets` included, while
+`POST /tickets` on the same path is already served — and again if that stage
+is reverted. So the SDK fails the call and changes nothing in its store or its
+outbox; only `not_found` in the body drops a ticket.
 
 | HTTP | `code`                               | Also in `error`                                                                           | What the SDK does                                                                                               |
 | ---- | ------------------------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |

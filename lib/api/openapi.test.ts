@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { openApiDocument } from './openapi';
+import { openApiDocumentJson } from './openapi';
 import { ERROR_STATUS, ErrorCode } from './schemas';
 
 /**
@@ -23,7 +23,9 @@ const root = (path: string) => fileURLToPath(new URL(`../../${path}`, import.met
 
 type Json = Record<string, unknown>;
 
-const built = JSON.parse(JSON.stringify(openApiDocument())) as Json;
+// The serialised copy the route sends, so what is compared with the committed
+// file is what `GET /openapi.json` answers.
+const built = JSON.parse(openApiDocumentJson()) as Json;
 const committed = JSON.parse(readFileSync(root('docs/myblu-api.openapi.json'), 'utf8')) as Json;
 const guide = readFileSync(root('docs/myblu-api.md'), 'utf8');
 const changelog = readFileSync(root('docs/myblu-api-changelog.md'), 'utf8');
@@ -249,6 +251,30 @@ describe('the worked examples', () => {
     // Every code is answered somewhere: a code no operation gives is a promise
     // the guide makes to nobody.
     expect([...used].sort()).toEqual([...ErrorCode.options].sort());
+  });
+});
+
+/**
+ * Until an operation's stage ships, it answers `404` without this API's body,
+ * which an SDK reads as a route not served yet and changes nothing on. But a
+ * path is one route file, and Next answers a method that file does not export
+ * with `405`, which an SDK classifies by its status as `invalid_request`, its
+ * own bug. So where a path's methods ship in different stages, the earlier
+ * stage's route exports the later method too and answers it that `404` until
+ * its own stage (`plans/myblu-ticket-api.md`, stage 4). Every such path is
+ * named here, so a new one is noticed when it is published rather than when
+ * an SDK meets the `405`.
+ */
+describe('the stages', () => {
+  it('ship every method of a path together, but on the paths the plan names', () => {
+    const mixed = Object.entries(built.paths as Record<string, Record<string, Json>>)
+      .filter(
+        ([, methods]) =>
+          new Set(Object.values(methods).map((op) => op['x-shipblu-stage'])).size > 1,
+      )
+      .map(([path]) => path);
+    // `GET /tickets` ships in stage 5 on the path `POST /tickets` serves from stage 4.
+    expect(mixed).toEqual(['/tickets']);
   });
 });
 

@@ -64,6 +64,7 @@ import {
   MAX_WIDGET_FILES,
   MAX_WIDGET_FILE_BYTES,
   MAX_WIDGET_MESSAGE_CHARS,
+  MAX_WIDGET_REQUEST_BYTES,
   MAX_WIDGET_TOTAL_BYTES,
 } from '@/lib/widget/files';
 
@@ -394,6 +395,9 @@ const SURVEY_AR: z.input<typeof Survey> = {
 /**
  * Every refusal, once, with the sentence a developer's log would hold. The
  * `when` line is what a response's description says the code means there.
+ * A number a sentence quotes is read from the constant the route will check
+ * against, the widget's own (`lib/widget/files.ts`), so raising a ceiling
+ * moves the example with it rather than leaving it quoting the old one.
  */
 const REFUSALS: Record<
   ErrorCode,
@@ -422,7 +426,7 @@ const REFUSALS: Record<
   },
   file_refused: {
     summary: 'A file over the limit',
-    message: 'IMG_0412.MOV is larger than 26214400 bytes.',
+    message: `IMG_0412.MOV is larger than ${MAX_WIDGET_FILE_BYTES} bytes.`,
     when: '`file_refused`: one file, or all of them, refused; `reason` says why and `filename` which.',
     extras: { reason: 'too_large', filename: 'IMG_0412.MOV' },
   },
@@ -468,7 +472,7 @@ const REFUSALS: Record<
   },
   too_large: {
     summary: 'A body over the ceiling',
-    message: 'The body is larger than 27262976 bytes.',
+    message: `The body is larger than ${MAX_WIDGET_REQUEST_BYTES} bytes.`,
     when: '`too_large`: the body is larger than this server reads.',
   },
   client_upgrade_required: {
@@ -669,6 +673,12 @@ const SECURITY: Record<Plane, Json[]> = {
 };
 
 function operation(op: Operation): Json {
+  // "The path answers `404`" holds for `GET /tickets` too, on the path
+  // `POST /tickets` serves from stage 4, only because stage 4's route exports
+  // `GET` and answers it that `404` until stage 5: Next answers a method a
+  // route file does not export with `405`, which an SDK reads as its own bug
+  // (`plans/myblu-ticket-api.md`, stage 4; `openapi.test.ts` names every path
+  // whose methods ship apart).
   const served =
     op.stage === '0b'
       ? 'Served from stage 0b.'
@@ -1333,6 +1343,7 @@ function document(): Json {
 }
 
 let built: Json | undefined;
+let serialised: string | undefined;
 
 /**
  * The document, built once per process on first use. Lazily, never at module
@@ -1342,4 +1353,15 @@ let built: Json | undefined;
 export function openApiDocument(): Json {
   built ??= document();
   return built;
+}
+
+/**
+ * The document as the route sends it, serialised once beside the object. It
+ * is some 120 kilobytes of JSON and the same on every request until the next
+ * deploy, so stringifying it per request spent an instance's CPU on a route
+ * whose only limit is the address bucket's 1,200 a minute.
+ */
+export function openApiDocumentJson(): string {
+  serialised ??= JSON.stringify(openApiDocument());
+  return serialised;
 }

@@ -58,8 +58,21 @@ const ADDED = 'Values are added without notice, and a client must accept one it 
  */
 const id = (description: string) => z.guid().describe(description);
 
-/** An instant: ISO-8601 in UTC, with its `Z`, as `toISOString()` writes it. */
-const instant = (description: string) => z.iso.datetime().describe(description);
+/**
+ * An instant: ISO-8601 in UTC, with its `Z`, as `toISOString()` writes it.
+ * Every instant here is one of these, the nullable ones included, so the rule
+ * is stated once.
+ *
+ * A nullable one is `instant().nullable().describe(…)`, described after
+ * `nullable()` as every nullable field here is. zod hangs a description on the
+ * schema it is handed, so `instant('…').nullable()` would publish it inside the
+ * `anyOf`'s string arm and leave the field itself undescribed, where a reader
+ * of the document looks for it.
+ */
+const instant = (description?: string) => {
+  const schema = z.iso.datetime();
+  return description === undefined ? schema : schema.describe(description);
+};
 
 /** A count or a size, never negative. */
 const count = (description: string) => z.int().min(0).describe(description);
@@ -355,8 +368,7 @@ export const Ticket = z
 export const SupportHours = z
   .looseObject({
     online: z.boolean().describe('Whether the support team is working now, by its own hours.'),
-    opensAt: z.iso
-      .datetime()
+    opensAt: instant()
       .nullable()
       .describe(
         "When it next opens, while it is closed; null while it is open or when the team's hours are not set.",
@@ -458,8 +470,7 @@ export const Survey = z
       ),
     button: z.string().describe("The confirm button's label."),
     thanks: z.string().describe('What to show once it is answered.'),
-    expiresAt: z.iso
-      .datetime()
+    expiresAt: instant()
       .nullable()
       .describe('When it can no longer be answered; null when it does not lapse.'),
   })
@@ -734,29 +745,39 @@ export const CreateTicketRequest = z
   .describe('Open a ticket with its first message.');
 
 /**
- * The same request with files, accepted from the files stage (stage 7). Before
- * it, a multipart body is `400 invalid_request`. The parts are named as the
- * JSON fields are — the widget's own text part is `body`; here it is `text` in
- * both encodings — and `files` repeats, one part per file in the order to show
- * them.
+ * What the two multipart sends share: the `text` part, the `files` part, and
+ * when either is accepted. Stated once rather than in each, because both
+ * routes read their parts through the same functions, the widget's own
+ * (stage 7), so a part or a sentence changed on one schema and not the other
+ * would publish two rules for one check.
+ *
+ * The parts are named as the JSON fields are — the widget's own text part is
+ * `body`; here it is `text` in both encodings — and `files` repeats, one part
+ * per file in the order to show them.
  */
+const multipart = {
+  text: messageText(
+    'What the user wrote; may be empty or left out when there is a file.',
+  ).optional(),
+  files: z
+    .array(z.file())
+    .optional()
+    .describe(
+      'Repeated, one part per file in the order to show them. Each part carries its filename and a `Content-Type` from `GET /config`; one with none, or `application/octet-stream`, is admitted by its extension.',
+    ),
+  accepted:
+    'Accepted from the files stage; before it, a multipart body is `400 invalid_request`. `Content-Length` is required (`411` without it).',
+};
+
+/** The same request with files, accepted from the files stage (stage 7). */
 export const CreateTicketMultipart = z
   .object({
-    text: messageText(
-      'What the user wrote; may be empty or left out when there is a file.',
-    ).optional(),
+    text: multipart.text,
     locale: Locale,
     trackingNumber: TrackingNumber.optional(),
-    files: z
-      .array(z.file())
-      .optional()
-      .describe(
-        'Repeated, one part per file in the order to show them. Each part carries its filename and a `Content-Type` from `GET /config`; one with none, or `application/octet-stream`, is admitted by its extension.',
-      ),
+    files: multipart.files,
   })
-  .describe(
-    'Open a ticket with files. Accepted from the files stage; before it, a multipart body is `400 invalid_request`. `Content-Length` is required (`411` without it).',
-  );
+  .describe(`Open a ticket with files. ${multipart.accepted}`);
 
 export const SendMessageRequest = z
   .object({
@@ -768,21 +789,8 @@ export const SendMessageRequest = z
   .describe('Send a message on a ticket.');
 
 export const SendMessageMultipart = z
-  .object({
-    text: messageText(
-      'What the user wrote; may be empty or left out when there is a file.',
-    ).optional(),
-    locale: Locale,
-    files: z
-      .array(z.file())
-      .optional()
-      .describe(
-        'Repeated, one part per file in the order to show them. Each part carries its filename and a `Content-Type` from `GET /config`; one with none, or `application/octet-stream`, is admitted by its extension.',
-      ),
-  })
-  .describe(
-    'Send a message with files. Accepted from the files stage; before it, a multipart body is `400 invalid_request`. `Content-Length` is required (`411` without it).',
-  );
+  .object({ text: multipart.text, locale: Locale, files: multipart.files })
+  .describe(`Send a message with files. ${multipart.accepted}`);
 
 export const MarkReadRequest = z
   .object({
@@ -818,12 +826,23 @@ export const AttachmentId = id(
  * `400 invalid_request`. With neither, the newest page — the existing read
  * models are `orderBy(asc).limit(200)`, which silently stops showing a long
  * conversation's new replies.
+ *
+ * "Never both" is a refinement here rather than a sentence for the route to
+ * remember, so the schema the route parses with refuses what the guide says is
+ * refused. Its issue names no field: neither cursor is wrong on its own, and
+ * `field` is for the one field to blame. `z.toJSONSchema` cannot express it,
+ * and the document reads this object only field by field (`queryParameters`),
+ * so it publishes nothing; the parameters' descriptions are where a client
+ * reads it.
  */
 export const ListMessagesQuery = z
   .object({
     after: Cursor.optional().describe('A `newerCursor`: the messages after it. Not with `before`.'),
     before: Cursor.optional().describe('An `olderCursor`: the page before it. Not with `after`.'),
     limit: PageLimit,
+  })
+  .refine((query) => query.after === undefined || query.before === undefined, {
+    error: '`after` and `before` cannot be sent together.',
   })
   .describe("Which page of a ticket's messages. With no cursor, the newest page.");
 
@@ -891,8 +910,7 @@ export const SurveyCreatedEvent = z
     survey: z
       .looseObject({
         id: id('The survey; read it with `GET /tickets/{id}/survey`.'),
-        expiresAt: z.iso
-          .datetime()
+        expiresAt: instant()
           .nullable()
           .describe('When it can no longer be answered; null when it does not lapse.'),
       })

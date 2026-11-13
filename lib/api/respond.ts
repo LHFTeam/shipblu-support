@@ -50,10 +50,17 @@ function headersFor(init: AnswerInit): Headers {
 
 /** A successful answer: `body` as JSON, with the two headers every answer carries. */
 export function apiJson(body: unknown, init: AnswerInit): Response {
-  return new Response(JSON.stringify(body), {
-    status: init.status ?? 200,
-    headers: headersFor(init),
-  });
+  return apiJsonText(JSON.stringify(body), init);
+}
+
+/**
+ * The same answer for a body already serialised, which the caller vouches is
+ * JSON: the contract's route, whose 120 kilobytes are the same on every
+ * request and are stringified once (`openApiDocumentJson`). One function under
+ * both, so a body sent as text cannot leave without the two headers.
+ */
+export function apiJsonText(json: string, init: AnswerInit): Response {
+  return new Response(json, { status: init.status ?? 200, headers: headersFor(init) });
 }
 
 type ErrorExtras = {
@@ -64,9 +71,17 @@ type ErrorExtras = {
   reason?: z.output<typeof FileRefusalReason>;
   /** On `file_refused`: the file refused, or null when it is all of them. */
   filename?: string | null;
-  /** On `rate_limited`: sent as `Retry-After`, the seconds the limiter says are left. */
-  retryAfterSeconds?: number;
 };
+
+/**
+ * On `rate_limited`, and only there: sent as `Retry-After`, the seconds the
+ * limiter says are left. Required, because a `429` without it leaves an SDK to
+ * guess a wait — the guide's scenario 6 obeys the header, and the document
+ * publishes it on every `429` — and refused on any other code, where the
+ * document publishes no `Retry-After` for a client to read.
+ */
+type RateLimitedExtras = ErrorExtras & { retryAfterSeconds: number };
+type OtherExtras = ErrorExtras & { retryAfterSeconds?: never };
 
 /**
  * A refusal. The status comes from the code, never from the caller, so a code
@@ -76,8 +91,27 @@ type ErrorExtras = {
  * `message` is English for a developer's log and is never shown to the user,
  * so it may say exactly what was wrong; it must never carry a token, a phone or
  * the body that was refused, since the app may log it.
+ *
+ * Two overloads, so `rate_limited` without `retryAfterSeconds` does not
+ * compile. A caller holding an `ErrorCode` it has not narrowed matches neither
+ * and must narrow it first, which is the point: such a code can be
+ * `rate_limited`.
  */
-export function apiError(code: ErrorCode, message: string, extras: ErrorExtras): Response {
+export function apiError(
+  code: 'rate_limited',
+  message: string,
+  extras: RateLimitedExtras,
+): Response;
+export function apiError(
+  code: Exclude<ErrorCode, 'rate_limited'>,
+  message: string,
+  extras: OtherExtras,
+): Response;
+export function apiError(
+  code: ErrorCode,
+  message: string,
+  extras: RateLimitedExtras | OtherExtras,
+): Response {
   const body: ErrorBody = {
     error: {
       code,

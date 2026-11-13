@@ -4,12 +4,13 @@ import { GET } from './route';
 
 /**
  * The contract's route: what every answer of this API carries, and the address
- * bucket in front of it. The document itself is `lib/api/openapi.test.ts`'s;
- * here the builder is a stand-in, so twelve hundred requests do not each
- * serialise the whole contract.
+ * bucket in front of it. The document itself is `lib/api/openapi.test.ts`'s,
+ * which also reads the serialised copy the route sends; here that copy is a
+ * stand-in, so checking a header does not build the whole contract.
  */
 vi.mock('@/lib/api/openapi', () => ({
-  openApiDocument: () => ({ openapi: '3.1.0', info: { title: 'stand-in', version: 'x' } }),
+  openApiDocumentJson: () =>
+    JSON.stringify({ openapi: '3.1.0', info: { title: 'stand-in', version: 'x' } }),
 }));
 
 let next = 0;

@@ -1,6 +1,6 @@
 import { admitAddress } from '@/lib/api/limits';
-import { openApiDocument } from '@/lib/api/openapi';
-import { apiError, apiJson, newRequestId } from '@/lib/api/respond';
+import { openApiDocumentJson } from '@/lib/api/openapi';
+import { apiError, apiJsonText, newRequestId } from '@/lib/api/respond';
 import { logger } from '@/lib/log';
 
 // The limiter has to run on every request, so nothing here may be prerendered
@@ -32,7 +32,7 @@ export function GET(request: Request): Response {
   }
 
   try {
-    return apiJson(openApiDocument(), { requestId });
+    return apiJsonText(openApiDocumentJson(), { requestId });
   } catch (error) {
     log.error(`openapi document failed requestId=${requestId}`, error);
     return apiError('internal', 'The contract could not be built.', { requestId });

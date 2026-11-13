@@ -1057,11 +1057,21 @@ would lose the user's words to a pause meant to be undone.
 
 An answer without this body — a proxy's page, or the framework's `404` for a
 route this server does not serve — is classified by its status too, with one
-exception: such a `404` says nothing about the ticket. Every route answers it
-until its stage ships, since stage 0b publishes the shapes first, and again if
-that stage is reverted, so an SDK that dropped the ticket on it would empty
+exception: such a `404` says nothing about the ticket. Every operation answers
+it until its stage ships, since stage 0b publishes the shapes first, and again
+if that stage is reverted, so an SDK that dropped the ticket on it would empty
 its user's store on a revert. It fails the call and changes nothing in its
 store or its outbox; only `not_found` in the body drops a ticket.
+
+One operation needs its route's help to keep that. A path is one route file,
+and Next answers a method the file does not export with `405`, which the SDK
+classifies by its status as `invalid_request`, its own bug, and not as a route
+not served yet. So a route serving one method of a path whose other method
+ships later exports that method too, answering `404` with no body until its
+stage replaces it. `GET /tickets`, stage 5's on the path `POST /tickets` serves
+from stage 4, is the one such case (stage 4, below), and `openapi.test.ts`
+names every path whose methods ship in different stages, so a new one is
+noticed when it is published.
 
 The exact shapes live in `lib/api/schemas.ts`, which the routes validate with,
 and are published from there. The tables above are the plan; the schemas are
@@ -1399,7 +1409,15 @@ costs every app one silent refresh.
 `lib/api/tickets.ts`, the four routes, the cursor, `opened_from_app` with its
 label and the header line, the `api` arm in `requesterLocale`, the portal's
 exclusion of `api` from its list, its ticket page and its reply, and `api` in
-the three lists under _The console_. Verified by `tickets.db.test.ts`: one key
+the three lists under _The console_. A route file serving one method of a
+path whose other method ships later exports that method too, answering `404`
+with no body until its stage replaces it; `GET /tickets`, stage 5's on the path
+`POST /tickets` serves, is the one such case, so `app/api/v1/tickets/route.ts`
+exports both. Exporting `POST` alone, it would answer `GET` with Next's `405`,
+which the SDK reads as its own bug rather than as a route not served yet
+(_The API_), and the app's list would fail as a broken request instead of
+waiting for its stage. Verified by a route test that `GET /tickets` answers
+`404` with no body, and by `tickets.db.test.ts`: one key
 twice is one ticket; two creates racing on a key answer the same ids; another
 identity's ticket, **a second identity's on the same contact**, the same
 contact's WhatsApp ticket and a merged one are each 404; a note is never
@@ -1414,14 +1432,15 @@ the inbox, answer from the console, read the answer back, then purge the
 ticket and the contact. The pull request says plainly that this writes to
 production and what removes it. **The SDK's 0.1 is cut from here.**
 
-**5. History and unread.** No schema. The list with its filter, the read
-marker, hours on `GET /config`. Verified by tests (the list is scoped and
-stable under a tie; `read` is idempotent, touches only outbound replies and
-refuses a note's id; a fresh session for the same user lists the same
-tickets) and by `EXPLAIN ANALYZE` of the poll and the list on production,
-read-only, which shows the index is used and nothing about load. Way back:
-revert; `read_at` on a reply is drawn by the build before it. **A pilot can
-run from here.**
+**5. History and unread.** No schema. The list with its filter, in place of
+stage 4's `404` on `GET /tickets`; the read marker; hours on `GET /config`.
+Verified by tests (the list is scoped and stable under a tie; `read` is
+idempotent, touches only outbound replies and refuses a note's id; a fresh
+session for the same user lists the same tickets) and by `EXPLAIN ANALYZE` of
+the poll and the list on production, read-only, which shows the index is used
+and nothing about load. Way back: revert, which puts stage 4's `404` back on
+`GET /tickets`; `read_at` on a reply is drawn by the build before it. **A
+pilot can run from here.**
 
 **6. Push.** `MYBLU_WEBHOOK_URL`, `MYBLU_WEBHOOK_SECRET` and
 `MYBLU_WEBHOOK_SECRET_PREVIOUS`, declared as stage 3's are. `notify_myblu` in
