@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeActorLabel, describeEvent } from './event-labels';
+import { appBuild, describeActorLabel, describeEvent } from './event-labels';
 
 /**
  * The branches where a timeline sentence goes wrong without anything failing:
@@ -80,6 +80,20 @@ describe('describeEvent', () => {
     );
     expect(describeEvent('unverified_submitter', {})).toBe(
       'submitted without signing in, as an unknown address',
+    );
+  });
+
+  // The myBlu app's provenance: who vouched for the phone, never "verified",
+  // and the build an agent needs to reproduce what the customer saw.
+  it('says a ticket opened in the myBlu app, who vouched for it and from which build', () => {
+    const data = { app: 'myblu', platform: 'ios', appVersion: '5.4.1', sdkVersion: 'sdk-ts/0.1.0' };
+    expect(describeEvent('opened_from_app', data)).toBe(
+      'opened this ticket in the myBlu app, phone vouched for by the app (iOS 5.4.1)',
+    );
+    expect(appBuild({ platform: 'android', appVersion: '5.5.0' })).toBe('Android 5.5.0');
+    expect(appBuild({ platform: 'web' })).toBeNull();
+    expect(describeEvent('opened_from_app', {})).toBe(
+      'opened this ticket in the myBlu app, phone vouched for by the app',
     );
   });
 

@@ -97,6 +97,17 @@ export function describeActorLabel(label: string | null): string | null {
   return label === 'category-detector' ? 'subcategory-detector' : label;
 }
 
+/**
+ * The platform and app version an `opened_from_app` event records, as an agent
+ * reads them — `iOS 5.4.1` — or null when it records neither. The ticket's
+ * header line and its timeline say it through this one function.
+ */
+export function appBuild(data: Record<string, unknown>): string | null {
+  const platform = data.platform === 'ios' ? 'iOS' : data.platform === 'android' ? 'Android' : null;
+  const version = typeof data.appVersion === 'string' && data.appVersion ? data.appVersion : null;
+  return [platform, version].filter(Boolean).join(' ') || null;
+}
+
 export function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
     // The whole point of the event. Without a case here it fell through to the
@@ -109,6 +120,15 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
       }`;
     case 'opened_by_agent':
       return 'opened this ticket on the customer’s behalf';
+    // The myBlu app's API (`plans/myblu-ticket-api.md`): who vouched for the
+    // requester and from which build, as the header line says it. Never
+    // "verified": the phone is the app's backend's word, and the default would
+    // print "opened from app" and drop the build an agent needs to reproduce
+    // what the customer saw.
+    case 'opened_from_app': {
+      const build = appBuild(data);
+      return `opened this ticket in the myBlu app, phone vouched for by the app${build ? ` (${build})` : ''}`;
+    }
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;
     case 'priority_changed':

@@ -16,9 +16,20 @@ import { emptyCatalog, type HoursCatalog } from './resolve';
  *
  * Thirty seconds rather than longer because a due date is computed from this: a
  * schedule change that took minutes to apply would be a wrong deadline, not a
- * stale page. `forgetHoursCatalog()` closes even that gap for the process that
- * made the edit, and the rest converge within the TTL — the same trade
- * `forgetPresencePolicy()` makes, and the reason the TTL is seconds.
+ * stale page. The TTL is the promise: every reader sees an edit within it — the
+ * same trade `forgetPresencePolicy()` makes, and the reason the TTL is seconds.
+ *
+ * `forgetHoursCatalog()` shortens it only for the copy it can reach, which is
+ * not the whole process. This memo lives in the module instance, and a Next
+ * build loads the `route.ts` handlers and the pages with their server actions
+ * through two Turbopack runtimes (`.next/server/chunks/` and
+ * `.next/server/chunks/ssr/`), each with a module cache of its own. So the
+ * admin's save clears the copy the console's pages and actions read, and every
+ * route handler keeps its own until it expires — `GET /api/v1/config`'s
+ * `support`, the widget's hours, and the due dates and out-of-hours replies a
+ * message stored by a route computes. On a `next start` build an hours edit
+ * reached `/api/v1/config` 19 and 27 seconds after the save. The worker and
+ * the crons are processes of their own and never see the forget at all.
  *
  * It memoises the **value, not the promise**, like every other memo in `lib/`.
  * So several concurrent requests arriving in a cold window each still issue
@@ -31,7 +42,8 @@ let cached: { at: number; value: HoursCatalog } | null = null;
 
 /**
  * Drop the memo after a write, so the admin who just saved a schedule sees it
- * applied rather than waiting out the TTL. Only this process; see above.
+ * applied rather than waiting out the TTL. Only this module instance — the
+ * console's pages and actions, not the route handlers beside them; see above.
  */
 export function forgetHoursCatalog(): void {
   cached = null;

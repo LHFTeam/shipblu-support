@@ -436,15 +436,16 @@ async function startReplyClock(
 /**
  * Resume a clock left paused on a ticket whose status no longer stops it.
  *
- * Resolving pauses the clock, and `reopenResolved` — the five inbound paths
- * that put a resolved ticket back to Open — changes the status inside its
- * caller's transaction and never resumed it. The reopened ticket then owed its
+ * Resolving pauses the clock, and `reopenResolved` — the six inbound paths
+ * that put a resolved ticket back to Open, the customer API's `sendApiMessage`
+ * the sixth — changes the status inside its caller's transaction and never
+ * resumed it. The reopened ticket then owed its
  * resolution clock nothing for the time it sat resolved, and breached on the
  * spot; and its next trip to Pending found the clock "already paused", so the
  * resume after it credited everything since the resolve. Every reopen is a
  * customer writing, and every one of them ends here after its transaction
- * commits, so this is the one place that sees all five — where a call in each
- * would be five copies of a rule that only has to be missed once.
+ * commits, so this is the one place that sees all six — where a call in each
+ * would be six copies of a rule that only has to be missed once.
  *
  * The pause ends at the reopen, or at this message if that came first: the
  * `reopened` event is when the status stopped stopping the clock. That also

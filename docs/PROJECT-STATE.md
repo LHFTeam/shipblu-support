@@ -1372,6 +1372,28 @@ there, as `unknown` on a credential sealed under the group's key; a copy on the
 worker alone leaves the badge reading `current` and shows instead as a
 `CredentialKeyError` on the onboarding row or on a send.
 
+Two keys arrive with stage 3 of `plans/myblu-ticket-api.md`, each in the
+environment group and never the shared one, and both set nowhere yet.
+`MYBLU_API_TOKEN` is the myBlu API's server-plane bearer: myBlu's backend
+presents it to mint a session for any of its users and to end a user's
+sessions, so whoever holds it can read any myBlu user's tickets, and it stays on
+that backend — never in the app. `openssl rand -base64 48`, its own value per
+environment; staging's backend never holds production's. **Unset is the API
+switched off**: `POST /api/v1/sessions`, `POST /api/v1/sessions/revoke`,
+`DELETE /api/v1/session` and `GET /api/v1/config` all answer
+`503 not_configured`, the app's two before a session is read, and a value
+under 32 characters counts as unset and says so once in the log
+(`[api] MYBLU_API_TOKEN is shorter than 32 characters and counts as unset`).
+That is what lets every stage of the plan deploy before anybody at myBlu holds a
+value, and it is the way back: unsetting it stops the whole API when the web
+service restarts, not a day later when the sessions run out. Only the web
+service reads it. `MYBLU_API_TOKEN_PREVIOUS` is accepted beside it during a
+rotation — new value in the first, old in the second, the backend moved over,
+then the second unset — and a value suspected of leaking never goes there: the
+plan's _Risks_ has the order (replace, revoke every live row, read the kept
+rows for what was minted). Both are plain `z.string().optional()` in
+`lib/env.ts`, for the reason the WhatsApp keys above are.
+
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
@@ -2213,6 +2235,120 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   stays available and is safe to re-run — a second pass recovers nothing — so
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
+- **The myBlu app's channel row is made by hand, once stage 2 of
+  `plans/myblu-ticket-api.md` is live.** That stage makes `api` a type an admin
+  adds on `/admin/channels` ("myBlu app"): a name, a default group and a
+  routing mode, and a switch of its own (`setApiChannelActive`) that, unlike
+  web chat's, lets the last active row go off, which is how new tickets from
+  the app are stopped. Production had no `api` row when the plan was written
+  (its _Context_, read 2026-11-12). Once the release carrying stage 2 is on
+  `main`, a person creates "myBlu app" with the group the support lead names —
+  the plan's first step that waits for `main`. Nothing reads the row until
+  stage 3's `GET /config` (`apiChannel`), and nothing files under it until
+  stage 4 opens the first ticket, so making it early reaches no customer. Way
+  back: switch it off.
+- **The myBlu API's sessions arrive with stage 3 of `plans/myblu-ticket-api.md`,
+  inert until `MYBLU_API_TOKEN` is set** (§2). It adds `api_sessions`
+  (`0062_api_sessions`, a new table and one foreign key onto
+  `contact_identities`, nothing rewritten) and four routes: `POST /sessions`
+  and `POST /sessions/revoke` on the server plane, `DELETE /session` and
+  `GET /config` on the client plane. A session token is `sbu_…`, stored only as
+  its SHA-256, twenty-four hours from minting with no refresh, and the nightly
+  `cleanup` deletes a row thirty days after it ran out (`api_sessions=` on its
+  log line). Minting resolves the account's `api` identity and joins the
+  number's WhatsApp contact when no other account has joined it or holds the
+  number; the plan's _Identity_ has the rules, and `lib/tickets/contacts.ts`
+  the code. A row keeps the minting request's whole `X-Forwarded-For` chain in
+  `forwarded_for`: read for a leaked token, the hops at its end are the ones
+  the platform appended, and the first is whatever the caller wrote. Once the release is on
+  `main`, with the token unset, check that `POST /api/v1/sessions` and
+  `GET /api/v1/config` both answer `503` with this API's error body, on
+  `support.shipblu.com` and on `shipblu-support.onrender.com`, where a redirect
+  to `/login` would mean `/api/v1` lost its place in `PUBLIC_PREFIXES`. Nothing
+  is minted until the token is set and myBlu's backend calls; stage 4 is the
+  first that writes a ticket. Way back: unset the token, which stops both
+  planes; where sessions were minted that should not have been, revoke every
+  live one, which costs every app one silent refresh:
+  `update api_sessions set revoked_at = now() where revoked_at is null`.
+- **The myBlu app's tickets arrive with stage 4 of `plans/myblu-ticket-api.md`,
+  inert until `MYBLU_API_TOKEN` is set and an active `api` row exists** (§2 and
+  the row above). It adds `api_tickets` (`0063_api_tickets`, a new table with a
+  foreign key onto `conversations` and one onto `contact_identities`, both
+  cascading, nothing rewritten): which app identity opened a ticket, and the
+  tracking number it was opened with. Four routes on the client plane:
+  `POST /tickets`, `GET /tickets/{id}`, and `GET` and `POST
+/tickets/{id}/messages`; `GET /tickets` answered `404` with no body until
+  stage 5 brought the list (below), and does again on a revert of stage 5. A ticket opened from the app is on the `api`
+  channel, filed under the oldest active `api` row's group and routed by its
+  mode as every ingest path's is, with an `opened_from_app` event the ticket's
+  header reads as "myBlu · phone vouched for by the app · iOS 5.4.1". "myBlu
+  app" is now an inbox filter and a channel the rule, SLA-policy and
+  out-of-hours editors offer. The portal no longer lists, opens or takes a reply
+  on an `api` ticket. A revoke with `account_deleted` or `number_released` now
+  deletes that identity's `api_tickets` rows, so its tickets leave the app and
+  stay on the contact. A message's text holding U+0000 is refused `400` (the
+  changelog's 2026-11-13 line). After the release is on `main`, by the owner,
+  with the token set and a test phone no WhatsApp contact holds: mint, create,
+  see "myBlu app" and the header line in the inbox, answer from the console,
+  read the answer back, then purge the ticket and the contact — this writes to
+  production, and the purge is what removes it. **The SDK's 0.1 is cut from
+  here.** Way back: switch the `api` row off, which stops new tickets while the
+  app's reads and replies go on; or unset the token, which stops the whole API.
+  Not a revert, once one `api` ticket exists: the build before this one scopes
+  the help centre's portal by contact with only the read-only channels left
+  out, so it would list, open and take a reply on every app ticket for whoever
+  signs in as that contact — a previous holder of the phone writing into the
+  new holder's myBlu ticket, which the portal's exclusion is there to prevent.
+  A revert of anything else in this stage keeps `notOnThePortal()` in
+  `lib/portal/tickets.ts`; `api_tickets` itself is additive and can stay.
+- **The myBlu app's history and unread arrive with stage 5 of
+  `plans/myblu-ticket-api.md`,** inert on the same terms as stage 4 (the token
+  and an active `api` row). No schema, no migration, no variable, and no
+  shape: the document and its changelog are as stage 4 left them.
+  `GET /tickets` is the user's tickets, newest first by `(lastMessageAt, id)`,
+  every status, paged back with `before`, optionally only those opened with one
+  `trackingNumber` (as stored on `api_tickets`, never an agent's link), with
+  `unreadTotal` over every ticket whatever the filter; it reads no channel row,
+  so it goes on while new tickets are switched off. Its cursor is signed as a
+  thread's is, under a purpose of its own, so neither is read on the other's
+  page: each is `400 invalid_cursor` there. `POST /tickets/{id}/read`
+  marks the team's replies on one ticket read up to `upTo`: the first writer of
+  `messages.read_at` and of `delivery_status = 'read'` on a channel without a
+  provider, which is what makes the console's bubble draw Read — `read` only
+  from `sent` or `delivered`, so a failure keeps its receipt. It spends the
+  reads bucket. `GET /config` now carries `support`: the hours of the oldest
+  active `api` row's default group, else the default schedule, in their own
+  zone, with `online: false` and nulls when there are none (a zone luxon cannot
+  read counts as none) and `opensAt` looked for a year ahead. Production's
+  default schedule, read for the stage's design on 2026-11-13, is Cairo 10:00
+  to 18:00, Saturday to Thursday, with the Sales Team's override shut on
+  Saturday. **A pilot can run from here;**
+  the SDK's 0.2 follows. After the release carrying stages 4 and 5 is on
+  `main`, and once an `api` ticket exists (the pilot's, or the owner's test
+  ticket before it is purged), read the plans on production, read-only: first
+  `select to_regclass('public.api_tickets')`, the `api` row and ticket counts,
+  `pg_stat_user_tables.last_autoanalyze` for `conversations`, `messages` and
+  `api_tickets`, and `most_common_vals` of `conversations.channel`; then each
+  statement built locally with `toSQL()`, a real identity, contact and ticket
+  inlined, under `EXPLAIN (ANALYZE, BUFFERS, VERBOSE)` — the poll's two
+  statements (`ownedTicketRow` with the badge, then the page), `listStatement`
+  with a limit of 21 with and without `trackingNumber`, and the badge alone —
+  and `markStatement` under a plain `EXPLAIN` only, since `ANALYZE` would run
+  the `UPDATE`. Expect `api_tickets_identity_idx` driving the list and the
+  badge, the preview and unread subqueries above the sort, run at most
+  `limit + 1` times, the badge once as an InitPlan, and the marker an InitPlan
+  on `conversations_pkey` over `messages_conversation_idx`. A walk of
+  `conversations_channel_idx` instead means `'api'` is not yet among that
+  column's common values: record it with the `last_autoanalyze` read, and
+  re-check later; an `ANALYZE` by hand writes statistics and needs the owner.
+  Write what was found here. Way back: revert, which puts stage 4's body-less
+  `404` back on `GET /tickets` and Next's `404` on the marker, both of which
+  the SDK reads as a route not served yet, and leaves `support` absent, which
+  every client handles; a `read_at` or `read` already written stays, and the
+  build before it draws both. Two things stay open with the owner: a side
+  conversation's answer moves an `api` ticket's `lastMessageAt`, so the app's
+  list can show the ticket move with nothing new to read, and the tracking
+  number rides in the list's query string (the plan's _Risks_).
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
@@ -2436,9 +2572,11 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   `/reports/canned-suggestions` after the first couple of hundred replies; until
   then the report has nothing to say and says so. Before turning it on, settle
   TypeSafe's data-processing terms: each suggestion sends the ticket's last ten
-  replies, both directions; on a ticket answered by email (email, portal, API)
-  its subject, usually the customer's own words; the channel; and the folder,
-  title and text of every canned response the agent can see. Rollback is the
+  replies, both directions; on a ticket answered by email (email, portal; the
+  myBlu app's `api` tickets stopped being email in stage 1 of
+  `plans/myblu-ticket-api.md`) its subject, usually the customer's own words;
+  the channel; and the folder, title and text of every canned response the
+  agent can see. Rollback is the
   switch, effective within thirty seconds per instance. The first call measures
   what has only been estimated — about 5–6k input tokens and well under a
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and

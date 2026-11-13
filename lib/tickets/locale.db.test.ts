@@ -13,7 +13,7 @@ import { requesterLocale } from './locale';
 withCleanDatabase();
 
 async function ticket(
-  channel: 'whatsapp' | 'facebook' | 'facebook_comment' | 'email' | 'webchat',
+  channel: 'whatsapp' | 'facebook' | 'facebook_comment' | 'email' | 'webchat' | 'api',
 ): Promise<string> {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [open] = await db
@@ -309,6 +309,36 @@ describe('requesterLocale', () => {
 
   it('reads a web chat’s words before its panel, as everywhere else', async () => {
     const id = await ticket('webchat');
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: 'Where is my parcel?',
+      meta: { locale: 'ar' },
+    });
+
+    expect(await requesterLocale(id)).toBe('en');
+  });
+
+  // The myBlu app records the language every message was written in
+  // (`lib/api/tickets.ts`), so a photo sent alone is answered in it too.
+  it('answers a myBlu app ticket with no words in the language the app wrote in', async () => {
+    const id = await ticket('api');
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: '[image]',
+      meta: {
+        webchatFiles: [{ kind: 'image', filename: 'box.jpg' }],
+        locale: 'ar',
+        client: 'sdk-ts/0.4.0 app/5.4.1 ios/18.1',
+      },
+    });
+
+    expect(await requesterLocale(id)).toBe('ar');
+  });
+
+  it('reads a myBlu app ticket’s words before the language the app named', async () => {
+    const id = await ticket('api');
     await db.insert(messages).values({
       conversationId: id,
       direction: 'inbound',

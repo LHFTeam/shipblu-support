@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allow, fits } from './rate-limit';
+import { admit, allow, fits, forwardedChain } from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -31,6 +31,36 @@ describe('allow', () => {
   });
 });
 
+describe('admit', () => {
+  it('answers as allow does, sharing its buckets', () => {
+    const k = key();
+    expect(admit(k, 2, HOUR).allowed).toBe(true);
+    expect(allow(k, 2, HOUR)).toBe(true);
+    expect(admit(k, 2, HOUR).allowed).toBe(false);
+  });
+
+  it('says how long until the window turns, in whole seconds', () => {
+    const k = key();
+    expect(admit(k, 1, 60_000).resetInSeconds).toBe(60);
+    // Refused, and told the same window rather than a fresh one: a refusal is
+    // spent but does not move the end of the window.
+    const refused = admit(k, 1, 60_000);
+    expect(refused.allowed).toBe(false);
+    expect(refused.resetInSeconds).toBeGreaterThan(0);
+    expect(refused.resetInSeconds).toBeLessThanOrEqual(60);
+  });
+
+  it('never says zero, which a client would read as "ask again now"', () => {
+    expect(admit(key(), 1, 10).resetInSeconds).toBe(1);
+  });
+
+  it('starts a window again once it has passed', () => {
+    const k = key();
+    expect(admit(k, 1, -1).allowed).toBe(true);
+    expect(admit(k, 1, HOUR)).toEqual({ allowed: true, resetInSeconds: 3600 });
+  });
+});
+
 describe('fits', () => {
   it('says whether a cost would fit, and spends nothing', () => {
     const k = key();
@@ -50,5 +80,29 @@ describe('fits', () => {
     const k = key();
     allow(k, 10, -1, 10);
     expect(fits(k, 10, 10)).toBe(true);
+  });
+});
+
+describe('forwardedChain', () => {
+  const chain = (value?: string) =>
+    forwardedChain(new Headers(value === undefined ? {} : { 'x-forwarded-for': value }));
+
+  it('keeps the hops the proxies appended after the one a caller wrote', () => {
+    // The first hop is the caller's claim; the last is what connected to the platform.
+    expect(chain('10.0.0.9, 203.0.113.7')).toBe('10.0.0.9, 203.0.113.7');
+    expect(chain(' 198.51.100.4 ')).toBe('198.51.100.4');
+  });
+
+  it('is null with no header, or one with no hop in it', () => {
+    expect(chain()).toBeNull();
+    expect(chain(' , ,')).toBeNull();
+  });
+
+  it('keeps the last eight hops and bounds each, however much a caller writes', () => {
+    const written = Array.from({ length: 40 }, (_, i) => `192.0.2.${i}`).join(',');
+    const kept = chain(`${'x'.repeat(5_000)}, ${written}, 203.0.113.7`)!.split(', ');
+    expect(kept).toHaveLength(8);
+    expect(kept.at(-1)).toBe('203.0.113.7');
+    expect(chain(`${'x'.repeat(5_000)}, 203.0.113.7`)).toBe(`${'x'.repeat(64)}, 203.0.113.7`);
   });
 });

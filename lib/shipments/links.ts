@@ -77,7 +77,39 @@ export async function linkShipmentsFromMessage(input: {
   const empty: LinkedFromMessage = { trackingNumbers: [], sbids: [] };
   if (!isLinkableMessage(input.kind) || !input.bodyText.trim()) return empty;
 
-  const found = detectShipmentRefs(input.bodyText, shipmentPatterns());
+  return linkFound(input, detectShipmentRefs(input.bodyText, shipmentPatterns()));
+}
+
+/**
+ * The tracking number the myBlu app opened a ticket with, linked the way a
+ * number the customer typed is (`plans/myblu-ticket-api.md`, _Tickets_).
+ *
+ * A claim the user made, so it is linked only when `detectShipmentRefs` reads
+ * it as one of ours, or any string the app sends becomes a `shipments` row,
+ * and as `detected`, never `platform`: nothing has confirmed the parcel is
+ * this person's. Everything `linkShipmentsFromMessage` will not do, this will
+ * not either — no shipper or recipient set, no `contact_shipping_accounts`.
+ * Tracking numbers only: an SBID read out of the field would attach a
+ * merchant's account to the ticket on the strength of a string's shape.
+ *
+ * `messageId` is the opening message, the one the number came with, though
+ * not in its text: the link's provenance, as a detected number's is.
+ */
+export async function linkClaimedTrackingNumber(input: {
+  conversationId: string;
+  messageId: string;
+  trackingNumber: string;
+}): Promise<LinkedFromMessage> {
+  const found = detectShipmentRefs(input.trackingNumber, shipmentPatterns());
+  return linkFound(input, { trackingNumbers: found.trackingNumbers, sbids: [] });
+}
+
+/** Link what a detection found, and say so on the timeline once, for links that are new. */
+async function linkFound(
+  input: { conversationId: string; messageId: string },
+  found: LinkedFromMessage,
+): Promise<LinkedFromMessage> {
+  const empty: LinkedFromMessage = { trackingNumbers: [], sbids: [] };
   if (found.trackingNumbers.length === 0 && found.sbids.length === 0) return empty;
 
   const linkedTracking: string[] = [];
