@@ -2213,6 +2213,18 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   stays available and is safe to re-run — a second pass recovers nothing — so
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
+- **The myBlu app's channel row is made by hand, once stage 2 of
+  `plans/myblu-ticket-api.md` is live.** That stage makes `api` a type an admin
+  adds on `/admin/channels` ("myBlu app"): a name, a default group and a
+  routing mode, and a switch of its own (`setApiChannelActive`) that, unlike
+  web chat's, lets the last active row go off, which is how new tickets from
+  the app are stopped. Production had no `api` row when the plan was written
+  (its _Context_, read 2026-11-12). Once the release carrying stage 2 is on
+  `main`, a person creates "myBlu app" with the group the support lead names —
+  the plan's first step that waits for `main`. Nothing reads the row until
+  stage 3's `GET /config` (`apiChannel`), and nothing files under it until
+  stage 4 opens the first ticket, so making it early reaches no customer. Way
+  back: switch it off.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
@@ -2436,9 +2448,11 @@ https://merchant.shipblu.com https://business.shipblu.com`:
   `/reports/canned-suggestions` after the first couple of hundred replies; until
   then the report has nothing to say and says so. Before turning it on, settle
   TypeSafe's data-processing terms: each suggestion sends the ticket's last ten
-  replies, both directions; on a ticket answered by email (email, portal, API)
-  its subject, usually the customer's own words; the channel; and the folder,
-  title and text of every canned response the agent can see. Rollback is the
+  replies, both directions; on a ticket answered by email (email, portal; the
+  myBlu app's `api` tickets stopped being email in stage 1 of
+  `plans/myblu-ticket-api.md`) its subject, usually the customer's own words;
+  the channel; and the folder, title and text of every canned response the
+  agent can see. Rollback is the
   switch, effective within thirty seconds per instance. The first call measures
   what has only been estimated — about 5–6k input tokens and well under a
   second, by analogy with the 647 shadow subcategorisation calls (p50 234 ms) — and

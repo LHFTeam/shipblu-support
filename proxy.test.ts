@@ -70,6 +70,36 @@ describe('the help-centre hostname', () => {
     expect(rewrittenTo(visit(`https://${KB_HOST}/widget?locale=ar`))).toBeNull();
     expect(rewrittenTo(visit(`https://${KB_HOST}/api/widget/session`))).toBeNull();
   });
+
+  it('serves the myBlu API as itself, not under /help', () => {
+    // The API's base URL is on this host. Rewritten, the contract would be a
+    // help-centre 404 and every call after it the same.
+    for (const path of ['/api/v1/openapi.json', '/api/v1/config', '/api/v1/sessions']) {
+      const response = visit(`https://${KB_HOST}${path}`);
+      expect(rewrittenTo(response), path).toBeNull();
+      expect(response.status, path).not.toBe(307);
+    }
+  });
+});
+
+/**
+ * The myBlu API on every host it can be asked on, signed out, which both of its
+ * callers always are. Before `KB_PUBLIC_HOST` names the domain, the domain is
+ * just another host, and the cookie check is all that stands in the way.
+ */
+describe('the myBlu API', () => {
+  it.each([
+    ['the Render host, before KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', undefined],
+    ['the domain, before KB_PUBLIC_HOST is set', KB_HOST, undefined],
+    ['the Render host, once KB_PUBLIC_HOST is set', 'shipblu-support.onrender.com', KB_HOST],
+    ['the staging host', 'shipblu-support-staging.onrender.com', undefined],
+    ['the help-centre host', KB_HOST, KB_HOST],
+  ])('is passed through to its route on %s', (_, host, kbHost) => {
+    setTestEnv({ KB_PUBLIC_HOST: kbHost });
+    const response = visit(`https://${host}/api/v1/openapi.json`);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(rewrittenTo(response)).toBeNull();
+  });
 });
 
 describe('every other hostname', () => {
@@ -102,6 +132,18 @@ describe('every other hostname', () => {
   it('lets a signed-out visitor reach the widget but not the console', () => {
     expect(visit('https://shipblu-support.onrender.com/widget').status).not.toBe(307);
     expect(visit('https://shipblu-support.onrender.com/inbox').status).toBe(307);
+  });
+
+  it('lets the myBlu API through without a session, as itself', () => {
+    // Neither the app nor myBlu's backend carries a cookie. A 307 to /login
+    // would read to their HTTP clients as a page, not as a refusal.
+    for (const path of ['/api/v1/openapi.json', '/api/v1/config', '/api/v1/tickets/x/messages']) {
+      const response = visit(`https://shipblu-support.onrender.com${path}`);
+      expect(response.status, path).not.toBe(307);
+      expect(rewrittenTo(response), path).toBeNull();
+    }
+    // A prefix, and only as a whole segment.
+    expect(visit('https://shipblu-support.onrender.com/api/v1beta').status).toBe(307);
   });
 
   it('lets the health check reach the render probe over the loopback', () => {
