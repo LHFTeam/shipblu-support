@@ -1080,6 +1080,17 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                             |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                             |
 
+`shipblu-support` answers on one custom domain, **`support.shipblu.com`**,
+beside its `onrender.com` host. It was added in the dashboard on 2026-11-11,
+when the CNAME moved here from Freshdesk (`plans/freshdesk-disconnection.md`).
+On 2026-11-13 the dashboard listed it alone, verified, with its certificate
+issued, and the Render subdomain enabled; request logs for the 30 days to
+2026-11-12 name no other host. `render.yaml` states both, `domains:` and
+`renderSubdomainPolicy: enabled`. The `onrender.com` host has to stay on: it
+is where the console is served once `KB_PUBLIC_HOST` names the domain, and
+every request to `/api/webhooks/*` in the logs since 2026-11-12 reached it.
+Staging has no custom domain.
+
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
 2026-09-25 the running service dropped the middle one while the blueprint
@@ -1670,8 +1681,7 @@ the rest of the cutover still needs, and some of it is now partly done:_
 - **The knowledge base no longer depends on Freshdesk, and
   `support.shipblu.com` answers from this app. What is left of the
   disconnection is setting `KB_PUBLIC_HOST`, deciding whether to run the
-  import once more, writing the domain into `render.yaml`, and work owned
-  outside this repository.** The record and the
+  import once more, and work owned outside this repository.** The record and the
   checklist are in `plans/freshdesk-disconnection.md`, and its "Where it
   stands" was measured on 2026-11-11 and 2026-11-12. On 2026-11-07, all 214
   images in 61 of the 112 articles loaded from Freshdesk's attachment bucket,
