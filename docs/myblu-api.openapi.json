@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ShipBlu Support: the myBlu ticket API",
-    "version": "2026-11-12",
+    "version": "2026-11-13",
     "description": "The HTTP API the myBlu app reaches support through, and the webhook it is told of replies by. The guide, `docs/myblu-api.md` in the shipblu-support repository, says what every field means, what an SDK must do, and the scenarios it is checked with; this document is the shapes.\n\nTwo planes. The **server plane** is myBlu's backend, holding `MYBLU_API_TOKEN`: it mints and ends sessions and does nothing else. The **client plane** is the app, through the SDK, holding a session token for one user: it does everything else, as that user.\n\nEvery client-plane request carries `ShipBlu-Client`. Every answer carries `ShipBlu-Request-Id` and `Cache-Control: no-store`. JSON, UTF-8, ISO-8601 instants in UTC, UUID ids, no credential in a URL and no trailing slash.\n\n**It changes by addition.** Fields and enum values appear without notice, and a client ignores a field it does not know and keeps an enum value it does not know. What an operation sends and answers is fixed from the release that ships it; a breaking change is `/api/v2`. Each change is a dated line in `docs/myblu-api-changelog.md`, whose newest date is `info.version`."
   },
   "servers": [
@@ -89,7 +89,7 @@
                       "openapi": "3.1.0",
                       "info": {
                         "title": "ShipBlu Support: the myBlu ticket API",
-                        "version": "2026-11-12"
+                        "version": "2026-11-13"
                       }
                     }
                   }
@@ -527,7 +527,7 @@
         "operationId": "endSession",
         "tags": ["Sessions"],
         "summary": "End this session",
-        "description": "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed.\n\nServed from stage 3. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
+        "description": "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed. The one client-plane call a blocked user is not refused: their session is ended and answered `204` too, since a refusal would leave it live for the rest of its day, and usable again if the block were lifted.\n\nServed from stage 3. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
         "x-shipblu-stage": "3",
         "security": [
           {
@@ -595,29 +595,6 @@
                   },
                   "session_expired": {
                     "$ref": "#/components/examples/session_expired"
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden. `blocked`: the user may not use support. Never refreshed, never retried.",
-            "headers": {
-              "ShipBlu-Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                },
-                "examples": {
-                  "blocked": {
-                    "$ref": "#/components/examples/blocked"
                   }
                 }
               }
@@ -4974,9 +4951,10 @@
             "$ref": "#/components/schemas/Phone"
           },
           "name": {
-            "description": "The user's name, used only when this creates the contact; a name the contact already has is never overwritten. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`.",
+            "description": "The user's name, used only when this creates the contact; a name the contact already has is never overwritten. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
             "type": "string",
-            "maxLength": 200
+            "maxLength": 200,
+            "pattern": "^[^\\u0000]*$"
           },
           "client": {
             "type": "object",
@@ -4988,6 +4966,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 32,
+                "pattern": "^[^\\u0000]*$",
                 "description": "The app version asking, e.g. `5.4.1`."
               }
             },

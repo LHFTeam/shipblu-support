@@ -105,6 +105,33 @@ const schema = z.object({
   WIDGET_IDENTITY_SECRET: z.string().optional(),
 
   /**
+   * The myBlu ticket API's server-plane bearer (`plans/myblu-ticket-api.md`,
+   * _The session_): what myBlu's backend presents to mint a session for one of
+   * its users and to end a user's sessions. Nothing else accepts it — the app
+   * holds a session token, never this — so it mints any user and stays on the
+   * backend. `_PREVIOUS` is accepted beside it only while a rotation is under
+   * way: new value here, old one there, the backend moved, then `_PREVIOUS`
+   * unset. A value suspected of leaking never goes in `_PREVIOUS`.
+   *
+   * **Unset is the API switched off**, on both planes: the server plane and
+   * the app's requests answer `503 not_configured`, the app's before a session
+   * is read (`apiSwitchedOn` in `lib/api/auth.ts`). That is what lets the
+   * routes deploy before anybody at myBlu holds a value, and it is the way
+   * back: unsetting it stops the whole API as soon as the web service
+   * restarts, not a day later when the sessions run out.
+   *
+   * **Plain `z.string().optional()`, and no `min()` here**, for the reason
+   * `LOG_ALL_INCOMING_WEBHOOKS` below gives: `env()` parses this whole schema on
+   * every page and action, so a format rule would turn one short value into a
+   * console that does not load. A value under 32 characters counts as unset,
+   * decided where it is first used and said once in the log there.
+   *
+   * Per environment, never shared: staging's backend never holds production's.
+   */
+  MYBLU_API_TOKEN: z.string().optional(),
+  MYBLU_API_TOKEN_PREVIOUS: z.string().optional(),
+
+  /**
    * Overrides for how a tracking number and an SBID are recognised in message
    * text. Both are regular-expression sources; `lib/shipments/detect.ts` holds
    * the defaults and falls back to them, loudly, if one does not compile.

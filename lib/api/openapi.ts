@@ -94,7 +94,7 @@ import {
  */
 
 /** The date of the newest line in `docs/myblu-api-changelog.md`; the test holds the two together. */
-const CONTRACT_VERSION = '2026-11-12';
+const CONTRACT_VERSION = '2026-11-13';
 
 const TITLE = 'ShipBlu Support: the myBlu ticket API';
 
@@ -535,7 +535,11 @@ const STATUS_WORDS: Record<number, string> = {
   503: 'Not available here.',
 };
 
-/** Every client-plane operation can answer these, before it reads anything of its own. */
+/**
+ * Every client-plane operation can answer these, before it reads anything of its
+ * own — but `blocked` on `DELETE /session`, which ends a blocked user's session
+ * rather than refusing it.
+ */
 const CLIENT_PLANE: readonly ErrorCode[] = [
   'invalid_request',
   'unauthenticated',
@@ -813,10 +817,11 @@ function paths(): Json {
         stage: '3',
         summary: 'End this session',
         description:
-          "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed.",
+          "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed. The one client-plane call a blocked user is not refused: their session is ended and answered `204` too, since a refusal would leave it live for the rest of its day, and usable again if the block were lifted.",
         plane: 'client',
         answers: answer({ status: 204, description: 'Ended.' }),
-        refuses: CLIENT_PLANE,
+        // A blocked user's session is ended, not refused (`endingPlane`).
+        refuses: CLIENT_PLANE.filter((code) => code !== 'blocked'),
       }),
     },
     '/config': {
