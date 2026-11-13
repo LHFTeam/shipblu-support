@@ -3,9 +3,9 @@
  * mode and the classifier are asked (`routingStartFor`). Two things stop one
  * whatever the mode says, and both are decided by ingest, not by the row:
  *
- * - **another row files them.** Email, the Meta rows and web chat each file
- *   under the oldest active row of their type, and so will the myBlu app
- *   (`apiChannel`), so a second one's mode does nothing.
+ * - **another row files them.** Email, the Meta rows, web chat and the myBlu
+ *   app (`apiChannel`) each file under the oldest active row of their type,
+ *   so a second one's mode does nothing.
  * - **an active owner.** An owned number's ticket is stamped with its owner in
  *   the insert, and a ticket with an assignee is never held
  *   (`lib/routing/start.ts`).

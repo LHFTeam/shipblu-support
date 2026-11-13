@@ -179,14 +179,16 @@ const PageLimit = z.coerce
  * characters instead, so a text with emoji in it can pass the published bound
  * and still be refused. The bound stays, because it never refuses a text the
  * server takes; the description says which count decides.
+ *
+ * And `storable`, decided with the stage that first stores it (stage 4): a
+ * message's text and a survey's comment both reach a `text` column, which
+ * refuses U+0000, so one holding it is the `400` naming the field rather than
+ * a `500` a client can never get past by retrying.
  */
 const boundedText = (max: number, limitAt: string, description: string) =>
-  z
-    .string()
-    .max(max)
-    .describe(
-      `${description} At most ${max} UTF-16 code units, as JavaScript's \`length\` counts and \`${limitAt}\` states. \`maxLength\` counts characters, so a text with emoji in it can pass that and still be refused.`,
-    );
+  storable(z.string().max(max)).describe(
+    `${description} At most ${max} UTF-16 code units, as JavaScript's \`length\` counts and \`${limitAt}\` states. \`maxLength\` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it.`,
+  );
 
 /** A message's text: `GET /config` publishes its limit. */
 const messageText = (description: string) =>
@@ -199,7 +201,7 @@ const messageText = (description: string) =>
  * surrogate — drawn as a replacement mark, and refused outright by some
  * decoders — so the server stops one unit short instead.
  */
-const PREVIEW_CHARS = 140;
+export const PREVIEW_CHARS = 140;
 
 // ---------------------------------------------------------------------------
 // Headers

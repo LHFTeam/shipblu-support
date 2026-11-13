@@ -21,11 +21,17 @@ import type { FieldOption } from './condition-builder';
  * well. The engine's `channel` fact is the stored column, which since Stage 1.3
  * of `plans/ticket-category-routing.md` the database keeps on the comment
  * channel for every comment ticket.
+ *
+ * `api`, the myBlu app, arrived with the stage that writes its first ticket
+ * (`plans/myblu-ticket-api.md`, stage 4), as the comment channels arrived with
+ * theirs: a condition naming it is a stored rule or policy, which a revert of
+ * the stage does not undo, so it is offered only once such a ticket can exist.
  */
 const CONDITION_CHANNELS: readonly ConversationChannel[] = [
   'email',
   'whatsapp',
   'webchat',
+  'api',
   'facebook',
   'facebook_comment',
   'instagram',

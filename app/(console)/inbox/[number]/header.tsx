@@ -163,6 +163,18 @@ export function Header({
           {conversation.unverifiedSubmitter ? (
             <Badge tone="warning">Not signed in — sender unverified</Badge>
           ) : null}
+          {/*
+              Opened in the myBlu app, and who vouched for the requester: the
+              app's backend, after its own SMS code. It says who vouched and
+              not "verified", and it sits apart from any linked parcel, because
+              the tracking number the app sent is still a claim.
+            */}
+          {conversation.openedFromApp !== null ? (
+            <Badge tone="neutral">
+              myBlu · phone vouched for by the app
+              {conversation.openedFromApp ? ` · ${conversation.openedFromApp}` : ''}
+            </Badge>
+          ) : null}
           {/* The 24-hour window only bounds a reply sent from here, so on a
                 channel not answered from here the countdown measures nothing. */}
           {whatsappWindow ? (

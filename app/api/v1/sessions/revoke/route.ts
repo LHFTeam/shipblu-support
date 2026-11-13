@@ -17,7 +17,9 @@ const ROUTE = 'POST /sessions/revoke';
  *
  * `204` whether or not the user is known, so the call cannot be used to ask
  * who is. The reason is recorded on every live row; the rows are kept, as the
- * record of who was vouched for, until the nightly sweep.
+ * record of who was vouched for, until the nightly sweep. With
+ * `account_deleted` or `number_released` the account's tickets also leave the
+ * app for good, and stay with the support team (`revokeSessions`).
  */
 export async function POST(request: Request): Promise<Response> {
   const requestId = newRequestId();
@@ -28,7 +30,7 @@ export async function POST(request: Request): Promise<Response> {
     const parsed = RevokeSessionsRequest.safeParse(await jsonBody(request));
     if (!parsed.success) return invalidBody(requestId, parsed.error);
 
-    const { identityId, revoked } = await revokeSessions(
+    const { identityId, revoked, ticketsReleased } = await revokeSessions(
       parsed.data.externalUserId,
       parsed.data.reason,
       new Date(),
@@ -38,6 +40,7 @@ export async function POST(request: Request): Promise<Response> {
       identity: identityId ?? 'none',
       reason: parsed.data.reason,
       revoked,
+      ticketsReleased,
       requestId,
     });
     return apiNoContent({ requestId });

@@ -639,7 +639,9 @@ a screen is open and is woken by a push while it is not.
   `?trackingNumber=` finds the tickets opened with a parcel's number, so a
   shipment screen finds its ticket after a reinstall.
 - A cursor is opaque. Send it back as it came; one this server did not mint is
-  `400 invalid_cursor`, never a first page.
+  `400 invalid_cursor`, never a first page. A cursor is signed, so one built by
+  hand is refused, and so is every cursor held across a change of the server's
+  secret, which is rare: either way, drop it and load the newest page.
 - **Every poll's answer carries `pollAfterSeconds`, and the SDK obeys it.** A
   whole number of seconds, never less than 1. Five seconds on an open thread to
   start, thirty on the list, nothing in the background. It is how load is shed
@@ -673,7 +675,9 @@ From stage 7. Before it, a multipart body is `400 invalid_request`.
 - **Text is counted in UTF-16 code units**, as JavaScript's `length` counts it,
   so an emoji is two. The document's `maxLength` on `text` counts characters,
   so a text with emoji in it can pass that bound and still be refused: check
-  against `limits.messageMaxChars`.
+  against `limits.messageMaxChars`. Text holding U+0000 (NUL), which the
+  database cannot store, is refused `400 invalid_request` too, as a survey's
+  comment holding one is.
 - **A file is admitted on its label and stored by its bytes.** A part's
   `Content-Type` must be one of `limits.contentTypes`; a part with none, or with
   `application/octet-stream`, is admitted only by an extension in
@@ -718,7 +722,10 @@ never delays a sign-in. The bad-bearer bucket counts bearers that were refused
 and only changes how the next refusal is answered, `429` rather than `401`: a
 live session token, or `MYBLU_API_TOKEN`, is never refused for it. No address
 bucket stands in front of a session token: the address is something a caller
-can write.
+can write. A retried `POST /tickets` under a key an earlier attempt already
+spent opens nothing, so it spends the send bucket and never the new-ticket one:
+however often the app retries a ticket it opened, the answer is the replay's
+`200`.
 
 ## The webhook
 
