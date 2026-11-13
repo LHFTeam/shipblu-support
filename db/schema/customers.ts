@@ -262,7 +262,14 @@ export const contactIdentities = pgTable(
      */
     profileFetchedAt: timestamp('profile_fetched_at', { withTimezone: true }),
 
-    /** True once the customer has proven control (clicked a verification link). */
+    /**
+     * True once the customer has proven control: clicked a verification link,
+     * or — on an `api` identity — been vouched for by a backend that verified
+     * it, as myBlu's does with an SMS code before it mints a session
+     * (`plans/myblu-ticket-api.md`, _Identity_). It grants nothing by itself:
+     * every portal lookup is by `channel = 'email'`, so a vouched-for `api`
+     * identity signs nobody in to the help centre.
+     */
     isVerified: boolean('is_verified').notNull().default(false),
 
     /**

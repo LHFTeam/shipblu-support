@@ -134,7 +134,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         label: 'Channels',
         permission: 'admin.channels',
         description:
-          'Email, WhatsApp, Facebook, Instagram and the chat widget: where each lands and how it routes.',
+          'Email, WhatsApp, Facebook, Instagram, the chat widget and the myBlu app: where each lands and how it routes.',
         keywords: [
           'email',
           'mailbox',
@@ -156,6 +156,11 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
           'routing by category',
           'number owner',
           'default group',
+          'myblu',
+          'app',
+          'mobile app',
+          'mobile sdk',
+          'api',
         ],
       },
       {

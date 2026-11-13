@@ -9,8 +9,9 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Where routing starts: the transaction that inserts a ticket on an inbound
- * ingest path — email, WhatsApp, a Meta direct message or comment, and the
- * widget (`plans/ticket-category-routing.md`, decision 5).
+ * ingest path — email, WhatsApp, a Meta direct message or comment, the widget
+ * (`plans/ticket-category-routing.md`, decision 5), and the myBlu app's API
+ * (`createApiTicket`, `plans/myblu-ticket-api.md`).
  *
  * In that transaction rather than after the creation pass, because the things
  * that can assign a ticket in its first second — the priority classifier's

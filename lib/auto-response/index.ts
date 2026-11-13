@@ -201,7 +201,12 @@ async function send(
     // another channel — a merge with the customer's email contact, an agent's
     // edit — and the commenter may never have used it in public; a greeting
     // without one closes its gap (`substitute`).
-    customerName: isComment ? null : ticket.contactName,
+    //
+    // Nor sent into the myBlu app. Its contact is found by the phone the app
+    // vouched for (`plans/myblu-ticket-api.md`, _Identity_), and the name on
+    // that contact can be a previous holder of the number's: greeting the new
+    // one by it would tell them whose number they now have.
+    customerName: isComment || ticket.channel === 'api' ? null : ticket.contactName,
   };
 
   const body = pickBody(rule, context);

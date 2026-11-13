@@ -16,6 +16,7 @@ import {
 } from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
 import { saveSurveySettings } from './actions';
 
 const INITIAL: ActionState = { error: null };
@@ -214,10 +215,15 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
+        {/* Kept, with its stored value, for the stage that lets the app pull
+            its survey (`plans/myblu-ticket-api.md`, stage 8). Until then no
+            survey can reach the app and `channelSwitch` gives this channel
+            none, so the hint says the switch changes nothing yet rather than
+            letting an admin turn it on and wait. */}
         <Toggle
           name="surveyApi"
-          label="API"
-          hint="Tickets opened through the API, by email, when the contact has an address."
+          label={CHANNEL_LABELS.api}
+          hint="Not surveyed yet: the app will fetch its survey and show it itself, in a later release. Until then this switch changes nothing."
           defaultChecked={settings.channels.api}
         />
         <p className="text-xs text-(--color-text-secondary)">
