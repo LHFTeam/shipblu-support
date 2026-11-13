@@ -9070,7 +9070,12 @@ found"}` and not Next's page. The same route called by its own URL
       ```
 
       `w` is a delivery and `e` each event in its `entry[].messaging[]` and
-      `entry[].standby[]`, unnested as in the query below. Each replayed
+      `entry[].standby[]`, unnested as in the query below. It takes any app
+      but ours, wider than the prose: every one of the 220 named the Page
+      Inbox (`263902037430900`, `PAGE_INBOX_APP_ID`), so the two agreed. A
+      later replay should name the Page Inbox, as the query below does,
+      because `<>` would also take a third app's `standby` echo, which
+      `echoDisposition` drops. Each replayed
       delivery's `processed_at` is now 21:02 on 2026-11-12, so the nightly
       cleanup keeps it until about 2026-12-12. Until then, the query that lists
       what was replayed is the same one bounded on the new `processed_at`. Run
@@ -9089,8 +9094,7 @@ found"}` and not Next's page. The same route called by its own URL
         and w.processed_at >= '2026-11-12 21:02:35+00'
         and w.processed_at < '2026-11-12 21:05:00+00'
         and e.value->'message'->>'is_echo' = 'true'
-        and e.value->'message'->>'app_id' is not null
-        and e.value->'message'->>'app_id' <> '1009187740467732';
+        and e.value->'message'->>'app_id' = '263902037430900';
       ```
 
       **The replay's rows stay identifiable after the deliveries are gone.** A
