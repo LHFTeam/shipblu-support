@@ -1368,6 +1368,18 @@ under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
 the card only the widget's row, the editor only another, since a switch can
 change which that is under an open page.
 
+**The myBlu app uses the oldest active `api` row** (`apiChannel`,
+`lib/api/channel.ts`): its default group, and so the hours the app is told,
+and its routing mode. An admin adds and edits it on `/admin/channels` like any
+row — `saveChannel` stores it with an empty config — and switches it with
+`setApiChannelActive`, built as web chat's switch is: its own form behind
+`ConfirmSubmit`, `switchApiChannel` deciding under a transaction lock from the
+stored type, and `lib/api/channel-rows.ts` asked by the page and the action.
+One difference is deliberate, so do not align it with the widget's: the last
+active row may go off. That is what the switch is for. With no row on, the app
+opens no new ticket (`503 not_configured`), while customers keep reading and
+replying on the tickets they have (`plans/myblu-ticket-api.md`, _Tickets_).
+
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST
 (`/api/widget/message`, multipart where the text-only body stays JSON), never

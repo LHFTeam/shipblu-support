@@ -299,6 +299,43 @@ describe('routingReadiness', () => {
     expect(of(await routingReadiness(NOW), owned).starts).toBe('live');
   });
 
+  // The myBlu app's rows need no case of their own here: the app files under
+  // the oldest active one (`apiChannel`), the rule `filingRowOfType` answers
+  // for every type filed by kind, and `routingModeOf` honours the column on
+  // them. So the oldest routes, and a second says which row does instead.
+  it('judges the myBlu app’s rows by the row the app files under', async () => {
+    const recipients = await group('Recipients');
+    await member(recipients, 'Here', {});
+    const off = await channel({
+      type: 'api',
+      name: 'Old app row',
+      routingMode: 'category',
+      isActive: false,
+      defaultGroupId: recipients,
+    });
+    const app = await channel({
+      type: 'api',
+      name: 'myBlu app',
+      routingMode: 'category',
+      defaultGroupId: recipients,
+    });
+    const spare = await channel({
+      type: 'api',
+      name: 'Spare app row',
+      routingMode: 'category_shadow',
+      defaultGroupId: recipients,
+    });
+
+    const readiness = await routingReadiness(NOW);
+
+    expect(of(readiness, app)).toMatchObject({ mode: 'category', starts: 'live' });
+    expect(of(readiness, off)).toMatchObject({ starts: null, warnings: [{ kind: 'inactive' }] });
+    expect(of(readiness, spare)).toMatchObject({
+      starts: null,
+      warnings: [{ kind: 'not_filing_row', filingRow: 'myBlu app' }],
+    });
+  });
+
   it('leaves the classifier to the panel, and marks a row that starts routing with no key', async () => {
     const id = await channel({ name: 'Support mailbox', routingMode: 'category_shadow' });
     const second = await channel({ name: 'Second mailbox', routingMode: 'category' });

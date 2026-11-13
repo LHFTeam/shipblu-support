@@ -41,6 +41,7 @@ import {
   refresh,
   type SettingsState,
   type AdminState,
+  type ApiSwitchState,
   type WebchatSwitchState,
 } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
@@ -49,6 +50,7 @@ import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
 import { switchWebchatRow, webchatEditRefusal } from '@/lib/widget/switch';
+import { switchApiChannel } from '@/lib/api/channel';
 import { isChannelType } from './channel-types';
 
 const log = logger('admin_channels');
@@ -260,8 +262,8 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // below rebuilds `config` and the account link from the type, so a request
   // naming `email` for a WhatsApp channel's id would otherwise wipe its phone
   // number id and its account, and its inbound traffic would route nowhere —
-  // and the same request could rewrite a `portal` or `api` row that no form
-  // edits. The form's field only says what to create.
+  // and the same request could rewrite a `portal` row that no form edits. The
+  // form's field only says what to create.
   let type = String(formData.get('type') ?? '');
   let existing: {
     config: Record<string, unknown>;
@@ -417,7 +419,15 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
             // because this branch was the catch-all; production still carries
             // `{"address": ""}` from that, and this replaces it.
             { faqFolders }
-          : { address };
+          : type === 'api'
+            ? // The myBlu app reaches us with a session, not at anything a row
+              // could hold, so its row carries routing only: the default
+              // group, the mode and the switch (`apiChannel`). An arm of its
+              // own rather than the catch-all below, which would store
+              // whatever `address` the form posted, as web chat's rows once
+              // stored an empty one.
+              {}
+            : { address };
 
   const account = isWhatsApp ? whatsappAccountId : null;
 
@@ -572,9 +582,10 @@ export async function setNumberOwner(_state: AdminState, formData: FormData): Pr
  * would be one any of them could leave out. The switch is a button behind a
  * second click, `ConfirmSubmit`, whose confirmation names where the widget
  * goes; it cannot share the row editor's form, which holds a text box.
- * `switchWebchatRow` decides the rest under its lock, from the stored type:
- * other channels have no switch, and the one it refuses is the widget's last
- * active row.
+ * `switchWebchatRow` decides the rest under its lock, from the stored type: web
+ * chat rows only, since a myBlu app row has a switch of its own under a lock
+ * of its own (`setApiChannelActive`) and no other channel has one, and the one
+ * it refuses is the widget's last active row.
  */
 export async function setWebchatActive(
   _state: WebchatSwitchState,
@@ -595,6 +606,56 @@ export async function setWebchatActive(
   // A refusal about the rows means the page drew them other than they are —
   // another admin switched one, or removed it — so the page is drawn again with
   // the answer, which it shows while its rows agree with the ones refused on.
+  if (!outcome.ok) {
+    if (outcome.stateKey === undefined) return { error: outcome.error };
+    revalidatePath('/admin/channels');
+    return { error: outcome.error, stateKey: outcome.stateKey };
+  }
+
+  revalidatePath('/admin/channels');
+  return { ...ok(), notice: outcome.notice, stateKey: outcome.stateKey };
+}
+
+// --- Whether the myBlu app may open tickets ----------------------------------
+
+/**
+ * Switch a myBlu app row on or off (`plans/myblu-ticket-api.md`, stage 2).
+ *
+ * Its own action and its own form, as web chat's switch is and for its reason:
+ * three forms post to `saveChannel`, and an `isActive` field there would be
+ * one any of them could leave out. A button behind a second click,
+ * `ConfirmSubmit`, whose confirmation says what the switch does to the app.
+ *
+ * Unlike web chat's, the last active row may go off, and that is what this is
+ * for: with no `api` row on, the app opens no new ticket — the plan's
+ * `POST /tickets` answers `503 not_configured` — while customers go on reading
+ * and replying on the tickets they have, so new work stops without cutting
+ * anybody off mid-conversation.
+ *
+ * `admin.channels`, the key that adds and edits the row. Adding one already
+ * lets the app open tickets, so the switch hands out nothing that key does
+ * not, and a key of its own would let somebody make a row they could not then
+ * stop. `switchApiChannel` decides the rest under its lock, from the stored
+ * type.
+ */
+export async function setApiChannelActive(
+  _state: ApiSwitchState,
+  formData: FormData,
+): Promise<ApiSwitchState> {
+  await requirePermission('admin.channels');
+
+  // Canonical, not as given: the switch finds its row among the ones it reads
+  // back by comparing ids in code, which Postgres prints lower-case.
+  const id = canonicalUuid(text(formData, 'id'));
+  if (!id) return { error: GONE };
+  const active = formData.get('active');
+  if (active !== 'on' && active !== 'off') {
+    return { error: 'That form is out of date — reload the page and try again' };
+  }
+
+  const outcome = await switchApiChannel(id, active === 'on');
+  // A refusal about the rows means the page drew them other than they are, so
+  // it is drawn again with the answer, shown while its rows agree.
   if (!outcome.ok) {
     if (outcome.stateKey === undefined) return { error: outcome.error };
     revalidatePath('/admin/channels');
