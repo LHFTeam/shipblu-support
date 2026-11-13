@@ -83,13 +83,19 @@ export function subjectWords(subject: string | null): string | null {
 
 /**
  * What ingest names a ticket that arrives with nothing to name it by: an email
- * with no subject, or a chat whose opening message has no first line. Ingest
- * writes from here and `subjectWords` refuses from here, so a name changed in
- * one place is changed in both.
+ * with no subject, or a chat or a myBlu app ticket whose opening message has no
+ * first line. Ingest writes from here and `subjectWords` refuses from here, so
+ * a name changed in one place is changed in both.
+ *
+ * The app's name is here before anything writes it, so `subjectWords` already
+ * refuses it on the day its insert path does: the API answers a ticket's
+ * `subject` through `subjectWords` (`plans/myblu-ticket-api.md`), and a name we
+ * gave a ticket must reach the app as null, for the app to draw its own title.
  */
 export const UNNAMED_SUBJECT = {
   email: '(no subject)',
   webchat: 'Web chat',
+  api: 'myBlu app',
   whatsapp: 'WhatsApp conversation',
   facebook: 'Facebook',
   instagram: 'Instagram',

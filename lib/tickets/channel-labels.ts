@@ -19,5 +19,9 @@ export const CHANNEL_LABELS: Record<ConversationChannel, string> = {
   instagram: 'Instagram',
   instagram_comment: 'Instagram comment',
   portal: 'Portal',
-  api: 'API',
+  // The `api` channel has one caller, the myBlu app, named in code
+  // (`plans/myblu-ticket-api.md`). "API" told an agent nothing about who wrote
+  // in, and could not tell a myBlu ticket from a later caller's; a second
+  // caller is a decision of its own, with its own name.
+  api: 'myBlu app',
 };

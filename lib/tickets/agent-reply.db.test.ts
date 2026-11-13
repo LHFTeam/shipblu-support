@@ -33,8 +33,8 @@ import { storeAgentReply } from './agent-reply';
  * The sequence both console senders share once their checks have passed. What
  * it must get right is what separates an agent's reply from an automated one:
  * the ticket leaves the unanswered queue and the response clock stops, and the
- * send is queued exactly once — or not at all on web chat, whose row is its
- * delivery.
+ * send is queued exactly once — or not at all on web chat and the myBlu app,
+ * whose row is their delivery (`rowIsDelivery`).
  */
 
 withCleanDatabase();
@@ -43,7 +43,7 @@ withCleanDatabase();
 // reply moved.
 const LAST_MESSAGE_AT = new Date('2026-09-01T09:00:00Z');
 
-async function ticket(channel: 'email' | 'whatsapp' | 'webchat' | 'facebook') {
+async function ticket(channel: 'email' | 'whatsapp' | 'webchat' | 'api' | 'facebook') {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [agent] = await db
     .insert(agents)
@@ -127,23 +127,28 @@ describe('storeAgentReply', () => {
     ).toEqual([{ type: carrier }]);
   });
 
-  it('queues nothing on web chat, whose row is its delivery', async () => {
-    const { id, agentId } = await ticket('webchat');
+  // `carrierFor` answers `send_email` for both, so `storeAgentReply` setting web
+  // chat aside by name queued every reply to a myBlu ticket as an email.
+  it.each(['webchat', 'api'] as const)(
+    'queues nothing on %s, whose row is its delivery',
+    async (channel) => {
+      const { id, agentId } = await ticket(channel);
 
-    await storeAgentReply(id, 'webchat', {
-      authorAgentId: agentId,
-      bodyText: 'Hello!',
-      deliveryStatus: 'delivered',
-      deliveredAt: new Date(),
-    });
+      await storeAgentReply(id, channel, {
+        authorAgentId: agentId,
+        bodyText: 'Hello!',
+        deliveryStatus: 'delivered',
+        deliveredAt: new Date(),
+      });
 
-    expect(await db.select({ id: jobs.id }).from(jobs)).toEqual([]);
-    const [row] = await db
-      .select({ lastAgentMessageAt: conversations.lastAgentMessageAt })
-      .from(conversations)
-      .where(eq(conversations.id, id));
-    expect(row!.lastAgentMessageAt).toBeInstanceOf(Date);
-  });
+      expect(await db.select({ id: jobs.id }).from(jobs)).toEqual([]);
+      const [row] = await db
+        .select({ lastAgentMessageAt: conversations.lastAgentMessageAt })
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      expect(row!.lastAgentMessageAt).toBeInstanceOf(Date);
+    },
+  );
 });
 
 /**
