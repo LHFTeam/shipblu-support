@@ -2421,6 +2421,32 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   which removes the objects with them. This writes to production. Way back:
   revert; the attachment rows and their objects stay on their messages, and
   the console goes on drawing them.
+- **The myBlu app's survey arrives with stage 8 of `plans/myblu-ticket-api.md`**
+  (`plans/csat.md` stage 6), inert while surveys are off or the app's switch
+  is: read on production on 2026-11-14, `csat_settings.enabled` and
+  `survey_api` were both false, and no `api` row or ticket existed. One
+  migration, `0064_csat_api_pull`, adds `api_pull` to `csat_delivery` and
+  `api` to `csat_answer_source` with `ALTER TYPE … ADD VALUE` and nothing
+  else, as `0037` and `0038` added theirs; nothing uses either value in a
+  migration. No variable and no shape: both survey routes, the ticket's
+  `survey` and `survey.created` were published in stage 0b. With the switch
+  on, a resolved or closed `api` ticket is surveyed `api_pull` — the survey
+  row and a `csat_sent` line, no message and never an email — the app reads it
+  through `GET /tickets/{id}/survey` and answers through `POST`, recorded with
+  `answer_source = 'api'`, and a `notify_myblu` job (`survey.created`, keyed
+  `notify_myblu:survey:<id>`) is queued with the survey while
+  `MYBLU_WEBHOOK_URL` is set. `/admin/csat` says what the app's switch does,
+  where it said it changed nothing yet. After the release is on `main`, by the
+  owner, with the test phone and session of stage 4 and the request bin of
+  stage 6: turn surveys and the app's switch on, open a test ticket from the
+  app and resolve it from the console, then once the delay has passed check
+  the survey from `curl`, answer it, add a comment, and check the ticket's
+  timeline reads the survey as sent and rated "in the myBlu app", and that one
+  `survey.created` reached the bin; then purge the ticket and the contact, and
+  put both switches back. This writes to production. The SDK's 1.0 follows.
+  Way back: `survey_api` off on `/admin/csat`, which surveys no further app
+  ticket and leaves those sent readable; a revert also leaves the enum values,
+  which nothing then writes.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and

@@ -72,6 +72,11 @@ function dedupeKeyFor(messageId: string): string {
   return `notify_myblu:message:${messageId}`;
 }
 
+/** And once ever for a survey: a survey is written once, and superseded rather than resent. */
+function surveyKeyFor(surveyId: string): string {
+  return `notify_myblu:survey:${surveyId}`;
+}
+
 /**
  * Queues `message.created` for a message the team wrote, from the two doors
  * every outbound reply passes: `storeAgentReply`, a person's, and
@@ -121,4 +126,28 @@ export async function enqueueMessageCreated(
   } catch (error) {
     log.error(`not queued: the reply is stored, with no push messageId=${messageId}`, error);
   }
+}
+
+/**
+ * Queues `survey.created` for a survey the app is to fetch (`api_pull`), on the
+ * transaction that writes the survey (`sendSurvey`), so the job exists exactly
+ * when the survey does and the worker cannot see it a moment before. Nothing
+ * while the webhook is switched off; and a survey is the app's only while
+ * `survey_api` is on, since nothing else writes an `api_pull` survey
+ * (`decideSurvey`), so turning that off stops these too.
+ *
+ * On a transaction, a failure throws, as `enqueueMessageCreated` does there:
+ * the statement has already aborted the transaction, and the survey rolls back
+ * with it, for the queue to try the whole decision again.
+ */
+export async function enqueueSurveyCreated(
+  surveyId: string,
+  { priority, on }: Pick<EnqueueOptions, 'priority'> & Required<Pick<EnqueueOptions, 'on'>>,
+): Promise<void> {
+  if (!mybluWebhookConfigured()) return;
+  await enqueue(
+    'notify_myblu',
+    { event: 'survey.created', surveyId },
+    { priority, on, dedupeKey: surveyKeyFor(surveyId), maxAttempts: NOTIFY_MAX_ATTEMPTS },
+  );
 }

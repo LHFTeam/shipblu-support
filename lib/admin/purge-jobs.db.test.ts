@@ -49,15 +49,40 @@ const messageJobs = [
   'download_media',
   'classify_priority',
   'classify_category',
+  'notify_myblu',
 ] as const;
 
-function subjects(scope: Scope) {
+/**
+ * Each subject a job type is scoped by, named by its type — and, for the one
+ * type with two payloads, by which: `notify_myblu` names a message for a reply
+ * and a survey for a survey the app pulls.
+ */
+function subjects(
+  scope: Scope,
+): { name: string; type: string; payload: Record<string, unknown> }[] {
   return [
-    ...messageJobs.map((type) => ({ type, payload: { messageId: scope.messageId } })),
-    { type: 'send_side_email', payload: { messageId: scope.sideMessageId } },
-    { type: 'send_csat', payload: { conversationId: scope.conversationId } },
-    { type: 'notify_low_rating', payload: { surveyId: scope.surveyId } },
-    { type: 'fetch_meta_profile', payload: { contactId: scope.contactId } },
+    ...messageJobs.map((type) => ({
+      name: type,
+      type,
+      payload: { messageId: scope.messageId },
+    })),
+    {
+      name: 'send_side_email',
+      type: 'send_side_email',
+      payload: { messageId: scope.sideMessageId },
+    },
+    { name: 'send_csat', type: 'send_csat', payload: { conversationId: scope.conversationId } },
+    { name: 'notify_low_rating', type: 'notify_low_rating', payload: { surveyId: scope.surveyId } },
+    {
+      name: 'notify_myblu (survey)',
+      type: 'notify_myblu',
+      payload: { event: 'survey.created', surveyId: scope.surveyId },
+    },
+    {
+      name: 'fetch_meta_profile',
+      type: 'fetch_meta_profile',
+      payload: { contactId: scope.contactId },
+    },
   ];
 }
 
@@ -171,11 +196,11 @@ describe('purgeJobs against Postgres', () => {
         ['unrelated', unrelated],
         ['merged', merged],
       ] as const) {
-        for (const subject of subjects(scope)) {
+        for (const { name: subjectName, ...subject } of subjects(scope)) {
           // Every status the queue actually writes; `failed` is in the enum but
           // nothing sets it.
           for (const status of ['pending', 'processing', 'completed', 'dead'] as const) {
-            const label = `${name}/${subject.type}/${status}`;
+            const label = `${name}/${subjectName}/${status}`;
             specs.push({ label, status, ...subject });
             if (name === 'unrelated' || status !== 'pending') {
               expected.push(label);

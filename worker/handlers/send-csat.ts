@@ -7,7 +7,7 @@ import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
 import { surveyText } from '@/lib/csat/wording';
 import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
-import { carriesLink } from '@/lib/csat/delivery';
+import { carriesLink, PULLED } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { isCommentTicket, isMetaChannel, isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
@@ -156,25 +156,35 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     locale,
   );
 
-  const sent = await sendSurvey({
+  const common = {
     conversationId,
     locale,
-    delivery: decision.delivery,
     snapshot,
     resurveyAfterDays: settings.resurveyAfterDays,
     ruleId,
     requesterEmail: ticket.contactEmail,
-    body: (url) => {
-      const delivery = decision.delivery;
-      if (!carriesLink(delivery)) return metaSurveyMessage(wording, locale, delivery, settings);
-      if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
-      if (delivery === 'email_link') {
-        const email = surveyEmail(wording, locale, url);
-        return { text: email.text, html: email.html };
-      }
-      return { text: surveyText(wording, url), html: null };
-    },
-  });
+  };
+  const delivery = decision.delivery;
+  // The myBlu app pulls its survey and words it from the row's rule and
+  // locale when it asks (`lib/api/survey.ts`), so it is sent no body.
+  const sent =
+    delivery === PULLED
+      ? await sendSurvey({ ...common, delivery })
+      : await sendSurvey({
+          ...common,
+          delivery,
+          body: (url) => {
+            if (!carriesLink(delivery)) {
+              return metaSurveyMessage(wording, locale, delivery, settings);
+            }
+            if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
+            if (delivery === 'email_link') {
+              const email = surveyEmail(wording, locale, url);
+              return { text: email.text, html: email.html };
+            }
+            return { text: surveyText(wording, url), html: null };
+          },
+        });
 
   if (sent.kind === 'drop') return;
 

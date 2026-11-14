@@ -7,6 +7,7 @@ import { decodeCursor } from './cursor';
 import { invalidBody, invalidRequest, jsonBody, rateLimited } from './errors';
 import { apiError, apiJson } from './respond';
 import {
+  AnswerSurveyRequest,
   CreateTicketMultipart,
   CreateTicketRequest,
   ListMessagesQuery,
@@ -272,6 +273,30 @@ function invalidCursor(requestId: string): Response {
 /** The `404` every route answers for a ticket that is not the caller's, for whatever reason. */
 export function ticketNotFound(requestId: string): Response {
   return apiError('not_found', 'No ticket of this user has that id.', { requestId });
+}
+
+/**
+ * The `404` for a ticket with no survey the caller may see: none yet, one the
+ * team decided not to send, or a ticket that is not theirs. One answer, as a
+ * ticket's is; the SDK reads it as "no survey", never as a ticket gone.
+ */
+export function surveyNotFound(requestId: string): Response {
+  return apiError('not_found', 'No survey on a ticket of this user has that id.', { requestId });
+}
+
+/**
+ * The survey's answer, `{ rating, comment? }`, read with its schema: a rating
+ * of 1 to 5, and a comment within the survey's `commentMaxChars` and holding
+ * no U+0000, or `400 invalid_request` naming the field. A comment over the
+ * limit is refused, never cut short, as a message's text never is.
+ */
+export async function surveyAnswerBody(
+  request: Request,
+  requestId: string,
+): Promise<{ rating: number; comment: string | null } | { refusal: Response }> {
+  const parsed = AnswerSurveyRequest.safeParse(await jsonBody(request));
+  if (!parsed.success) return { refusal: invalidBody(requestId, parsed.error) };
+  return { rating: parsed.data.rating, comment: parsed.data.comment ?? null };
 }
 
 /** The `404` for a file that is not on one of the caller's tickets, for whatever reason. */

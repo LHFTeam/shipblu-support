@@ -47,6 +47,7 @@ import { messageFrom } from './from';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
+import { surveyStatusSql } from './survey';
 import type { AttachmentLink, Message, Ticket } from './schemas';
 import { ownedTicket, ownedTicketNow } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -319,6 +320,7 @@ const ticketColumns = {
   lastMessageAt: conversations.lastMessageAt,
   unreadCount: unreadCountSql,
   preview: previewSql,
+  survey: surveyStatusSql,
 };
 
 type TicketRow = {
@@ -332,6 +334,7 @@ type TicketRow = {
   lastMessageAt: Date;
   unreadCount: number;
   preview: PreviewRow | null;
+  survey: 'sent' | 'answered' | 'expired' | null;
 };
 
 function ticketView(row: TicketRow): TicketView {
@@ -358,8 +361,9 @@ function ticketView(row: TicketRow): TicketView {
           hasAttachments: previewFiles.length > 0,
         }
       : null,
-    // The survey's stage (stage 8) fills this in.
-    survey: null,
+    // The survey the app sees, by the rule its route reads it by
+    // (`lib/api/survey.ts`), so a list never prompts for one it cannot open.
+    survey: row.survey ? { status: row.survey } : null,
   };
 }
 

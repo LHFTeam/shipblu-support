@@ -1616,6 +1616,27 @@ message of files alone is stored with the widget's stand-in and
 `meta.webchatFiles`, so the console draws the files in its place (`api` is in
 `drawsMediaInline`'s list) and the API answers its `text` as `""`.
 
+**The myBlu app's survey is pulled, never sent.** An `api` ticket's survey is
+`api_pull` (`decideSurvey`, while `survey_api` is on, a closed ticket
+included): `sendSurvey` writes the row and a `csat_sent` line with no message,
+no token and no link, and the app reads it through
+`GET /tickets/{id}/survey` and answers through `POST` (`lib/api/survey.ts`),
+which goes through `recordAnswer(…, 'api')` like every other door: the first
+rating wins, a comment attaches once, and the route answers the survey as it
+stands. It is never emailed, because the contact's address can be a previous
+holder's of the phone (`api_email_fallback`, not built). `PULLED` is kept out
+of `MessageDelivery` (`lib/csat/delivery.ts`), so a function about a message's
+body or link does not compile with it. A ticket's survey is its newest that is
+not `skipped` — `surveyOrder` and `notSkipped`, read by the route and by the
+ticket's `survey` summary (`surveyStatusSql`) alike, so a list never prompts
+for a survey the route does not serve — and an `expired` one is answered
+unchanged, as the widget's card answers it, though `recordAnswer` alone would
+take its rating. `survey.created` is queued by `enqueueSurveyCreated` in the
+transaction that writes the survey, keyed `notify_myblu:survey:<id>`, so it
+exists exactly when the survey does; the job judges the ticket with
+`message.created`'s own `inApp`, so the two events cannot disagree about
+whether the app could open it, and sends nothing for a survey no longer `sent`.
+
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
 console's answer — an ⓘ that opens on hover, focus _and_ tap, portalled to

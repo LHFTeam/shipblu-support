@@ -122,8 +122,7 @@ export type Decision =
 /**
  * Which admin switch a channel is behind, or null for a channel no survey is
  * sent on. `portal` rides email's switch because it rides email's carrier;
- * WhatsApp and the bot have none, for the reason `plans/csat.md` gives; and the
- * myBlu app has none until it can pull its survey.
+ * WhatsApp and the bot have none, for the reason `plans/csat.md` gives.
  */
 export function channelSwitch(channel: string): keyof CsatChannels | null {
   switch (channel) {
@@ -133,17 +132,13 @@ export function channelSwitch(channel: string): keyof CsatChannels | null {
     case 'webchat':
     case 'facebook':
     case 'instagram':
-      return channel;
-    // The app draws its own survey, fetched from the API (`api_pull`), which
-    // `plans/myblu-ticket-api.md` stage 8 builds. Until then nothing can carry
-    // one. Behind its switch, an `api` ticket stopped being written as email
-    // when its row became its delivery (`rowIsDelivery`), and `decideSurvey`
-    // fell to its last line: `widget_card`, for a widget the app does not
-    // have. Null here is one answer for the decision (`channel_unsupported`)
-    // and the sidebar (`surveyAvailability`); `survey_api` keeps its stored
-    // value for stage 8 to answer to again.
+    // The myBlu app pulls its survey from the API and draws it itself
+    // (`api_pull`, stage 8 of `plans/myblu-ticket-api.md`). Until that stage
+    // this answered null, since nothing could carry one: one answer for the
+    // decision (`channel_unsupported`) and the sidebar (`surveyAvailability`),
+    // while `survey_api` kept its stored value for this to answer to again.
     case 'api':
-      return null;
+      return channel;
     // A comment channel is behind its platform's switch, as its tickets were
     // while they carried the platform's channel. So the survey is still queued,
     // and the decision records why it skipped (`comment_thread`) rather than
@@ -198,10 +193,10 @@ export function channelSurveyed(settings: CsatSettings, channel: string): boolea
  * Whether any channel a ticket can carry is surveyed, for the report's
  * sentence about why nothing has gone out. Asked of every channel through
  * `channelSurveyed`, never of the stored switches themselves: `survey_api`
- * keeps its value while `channelSwitch('api')` answers null, so with it the
- * only switch on, the columns said a channel was surveyed and the decision
- * surveyed none. Read through the channels, the two give one answer, and
- * stage 8 of `plans/myblu-ticket-api.md` changes `channelSwitch` alone.
+ * kept its value while `channelSwitch('api')` answered null, before stage 8 of
+ * `plans/myblu-ticket-api.md`, so with it the only switch on, the columns said
+ * a channel was surveyed and the decision surveyed none. Read through the
+ * channels, the two give one answer whatever `channelSwitch` says.
  */
 export function anyChannelSurveyed(settings: CsatSettings): boolean {
   return CONVERSATION_CHANNELS.some((channel) => channelSurveyed(settings, channel));
@@ -270,6 +265,14 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
       : { kind: 'send', delivery: 'email_link' };
   }
 
+  // The myBlu app fetches its survey and draws it itself, so nothing is sent
+  // and nothing can fail to arrive: no window, no address, no closed chat. A
+  // closed ticket is still the app's to read (`ownedTicket`), so it is still
+  // surveyed. Never by email (`api_email_fallback` is not built): the address
+  // on an app ticket's contact can be a previous holder of the phone's, and
+  // the mail would name the ticket to them and let them answer its survey.
+  if (input.channel === 'api') return { kind: 'send', delivery: 'api_pull' };
+
   if (isMetaChannel(input.channel)) {
     // Before the window: a comment thread has no window, which is exactly why
     // `automatedReplyBlocked` lets it through — and why it must not be here.
@@ -320,8 +323,7 @@ export function decideSurvey(input: DecisionInput, settings: CsatSettings): Deci
   // visitor answers without leaving the chat. The message keeps the link, for
   // the console's timeline and for a widget loaded before the card existed.
   // Web chat is the only channel left here: the myBlu app's row is its
-  // delivery too, but it has no switch until it can pull its survey
-  // (`channelSwitch`), so it never reaches this line. A closed chat is a
+  // delivery too, but it pulls its survey (above). A closed chat is a
   // delivery that cannot happen, like an address that is not there or a
   // window that has shut, so it is said here with them — after the agent's and
   // the rule's reasons, which say more about the ticket than which

@@ -96,9 +96,7 @@ export async function saveSurveySettings(
       webchat: on('surveyWebchat'),
       facebook: on('surveyFacebook'),
       instagram: on('surveyInstagram'),
-      // No `api`: its switch is off the page until stage 8, and a value read
-      // from a field nobody posts would be `false`, switching the app off on
-      // every save. Left out, `saveCsatSettings` keeps what is stored.
+      api: on('surveyApi'),
     },
     surveyRuleResolved: on('surveyRuleResolved'),
     lowRatingAlerts: on('lowRatingAlerts'),

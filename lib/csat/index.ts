@@ -7,6 +7,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { enqueueSurveyCreated } from '@/lib/api/notify';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
@@ -21,7 +22,13 @@ import {
   type SurveyAvailability,
   type SurveyTrigger,
 } from './decision';
-import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
+import {
+  carriesLink,
+  PULLED,
+  type AnswerSource,
+  type MessageDelivery,
+  type SurveyDelivery,
+} from './delivery';
 import type { SurveyMessageMeta } from './meta-survey';
 import { LOW_RATING_MAX, MAX_COMMENT } from './limits';
 import { ALERT_PRIORITY } from './low-rating';
@@ -252,7 +259,6 @@ export type SurveySend = {
   conversationId: string;
   /** `ar` or `en`: what it goes out in. */
   locale: 'ar' | 'en';
-  delivery: SurveyDelivery;
   snapshot: SurveySnapshot;
   /** `csat_settings.resurvey_after_days`, read by the job. */
   resurveyAfterDays: number;
@@ -260,20 +266,31 @@ export type SurveySend = {
   ruleId: string | null;
   /** The requester's address, where the carrier is email. */
   requesterEmail: string | null;
-  /**
-   * The message, given the link it will carry — none on Meta's two
-   * deliveries (`carriesLink`), whose answer comes back on Meta's own
-   * webhook — and anything its carrier needs on the row besides the text.
-   */
-  body: (url: string | null) => {
-    text: string;
-    html: string | null;
-    meta?: Record<string, unknown>;
-  };
-};
+} & (
+  | {
+      delivery: MessageDelivery;
+      /**
+       * The message, given the link it will carry — none on Meta's two
+       * deliveries (`carriesLink`), whose answer comes back on Meta's own
+       * webhook — and anything its carrier needs on the row besides the text.
+       */
+      body: (url: string | null) => {
+        text: string;
+        html: string | null;
+        meta?: Record<string, unknown>;
+      };
+    }
+  /** The myBlu app's: no message and no link, since the app pulls its survey. */
+  | { delivery: typeof PULLED }
+);
 
-export type SendOutcome =
-  | { kind: 'sent'; surveyId: string; messageId: string }
+/**
+ * What a send answers, by the delivery it was asked for: the message's id for
+ * every delivery that writes one, and null for the one that writes none
+ * (`api_pull`), so a caller sending a message is never handed a null to check.
+ */
+export type SendOutcome<D extends SurveyDelivery = SurveyDelivery> =
+  | { kind: 'sent'; surveyId: string; messageId: D extends typeof PULLED ? null : string }
   /** The ticket already carries a survey inside the window; nothing was written. */
   | { kind: 'surveyed' }
   /** The ticket changed under the job since it decided; the reason is the job's to record. */
@@ -311,10 +328,12 @@ export type SendOutcome =
  * database and never recoverable — so a survey link that gets lost cannot be
  * looked up and resent, only reissued.
  */
-export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
+export async function sendSurvey<S extends SurveySend>(
+  send: S,
+): Promise<SendOutcome<S['delivery']>> {
   // No link where nothing would carry it: a token nobody holds is a hash
   // with no door, and `token_hash` is nullable for exactly this.
-  const token = carriesLink(send.delivery) ? generateToken() : null;
+  const token = send.delivery !== PULLED && carriesLink(send.delivery) ? generateToken() : null;
   const url = token ? `${publicBaseUrl()}/${send.locale}/csat/${token}` : null;
 
   return db.transaction(async (tx) => {
@@ -377,6 +396,26 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
       .returning({ id: csatSurveys.id });
     const surveyId = rows[0]!.id;
 
+    // The myBlu app pulls its survey (`GET /api/v1/tickets/{id}/survey`) and
+    // draws it itself, so the row is the delivery and nothing carries it: no
+    // message, no link, no carrier job. The timeline's line is written here
+    // instead of by `writeAutomatedReply`, with the same data less the
+    // message. And myBlu's backend is told, so the app can prompt the user
+    // with a push, on this transaction, so the job exists exactly when the
+    // survey does (`survey.created`, `lib/api/notify.ts`).
+    if (send.delivery === PULLED) {
+      await tx.insert(conversationEvents).values({
+        conversationId: send.conversationId,
+        type: 'csat_sent',
+        actorLabel: ACTOR,
+        data: { surveyId, delivery: send.delivery, locale: send.locale },
+      });
+      await enqueueSurveyCreated(surveyId, { priority: CARRIER_PRIORITY, on: tx });
+      // The one delivery whose outcome carries no message; the type says so
+      // by the delivery the caller asked for.
+      return { kind: 'sent', surveyId, messageId: null } as SendOutcome<S['delivery']>;
+    }
+
     const body = send.body(url);
     const messageId = await writeAutomatedReply(
       tx,
@@ -403,7 +442,7 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     await tx.update(csatSurveys).set({ messageId }).where(eq(csatSurveys.id, surveyId));
     await enqueueAutomatedDelivery(send.snapshot.channel, messageId, CARRIER_PRIORITY, tx);
 
-    return { kind: 'sent', surveyId, messageId };
+    return { kind: 'sent', surveyId, messageId } as SendOutcome<S['delivery']>;
   });
 }
 
