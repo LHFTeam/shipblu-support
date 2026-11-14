@@ -43,6 +43,18 @@ function mybluIdentifier(externalUserId: string): string {
   return `${IDENTIFIER_PREFIX}${externalUserId}`;
 }
 
+/**
+ * The `externalUserId` an identity's identifier names, or null for one that is
+ * not myBlu's. The session lookup reads who is asking with it, and the webhook
+ * whom a ticket's push is for (`lib/api/webhook.ts`), each off the identity the
+ * row it trusts names — never off a contact, which after a merge has two.
+ */
+export function externalUserIdOf(identifier: string): string | null {
+  return identifier.startsWith(IDENTIFIER_PREFIX)
+    ? identifier.slice(IDENTIFIER_PREFIX.length)
+    : null;
+}
+
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
@@ -138,7 +150,7 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
       .where(eq(contactIdentities.id, identityId))
       .limit(1);
     if (!contact) throw new Error('The account was purged while its session was minted');
-    if (refused(contact)) return { kind: 'blocked', identityId };
+    if (contactRefused(contact)) return { kind: 'blocked', identityId };
 
     const token = `${TOKEN_PREFIX}${generateToken()}`;
     const expiresAt = new Date(input.now.getTime() + SESSION_TTL_SECONDS * 1000);
@@ -162,9 +174,11 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
  * the identity — a merge re-points it to the survivor, a purge takes it with
  * the contact — so, read through the identity as both readers here read it,
  * the second is a guard on a row edited by hand, answered as the first is, so
- * the app stops rather than minting again on every foreground.
+ * the app stops rather than minting again on every foreground. The webhook
+ * asks it too (`lib/api/webhook.ts`): a push to a user the API would refuse is
+ * a notification they cannot open.
  */
-function refused(contact: { isBlocked: boolean; deletedAt: Date | null }): boolean {
+export function contactRefused(contact: { isBlocked: boolean; deletedAt: Date | null }): boolean {
   return contact.isBlocked || contact.deletedAt !== null;
 }
 
@@ -212,15 +226,16 @@ export async function lookupSession(token: string, now: Date): Promise<SessionLo
   // Revoked before expired: a row somebody ended says so whatever its age.
   if (!row || row.revokedAt) return { kind: 'unauthenticated' };
   if (row.expiresAt.getTime() <= now.getTime()) return { kind: 'expired' };
-  if (!row.identifier.startsWith(IDENTIFIER_PREFIX)) return { kind: 'unauthenticated' };
-  if (refused(row)) return { kind: 'blocked', identityId: row.identityId, tokenHash };
+  const externalUserId = externalUserIdOf(row.identifier);
+  if (externalUserId === null) return { kind: 'unauthenticated' };
+  if (contactRefused(row)) return { kind: 'blocked', identityId: row.identityId, tokenHash };
 
   return {
     kind: 'live',
     caller: {
       identityId: row.identityId,
       contactId: row.contactId,
-      externalUserId: row.identifier.slice(IDENTIFIER_PREFIX.length),
+      externalUserId,
       tokenHash,
       platform: row.platform,
       appVersion: row.appVersion,

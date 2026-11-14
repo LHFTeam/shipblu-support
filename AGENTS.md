@@ -558,6 +558,19 @@ per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
 
+**A job that tells another system something keeps its retries inside what the
+receiver remembers.** `notify_myblu` posts the myBlu webhook, and the receiver
+dedupes on the event's `id` for a day because the worker runs a job at least
+once. A retry after that day can meet an `id` the receiver has forgotten and
+push twice, so the job is queued with `maxAttempts: 30`, whose last attempt
+falls about seventeen hours in on the queue's backoff (`NOTIFY_MAX_ATTEMPTS` in
+`lib/api/notify.ts`, added up from `retryDelaySeconds` in its test), and it
+refuses an event older than twenty-three hours (`MAX_EVENT_AGE_MS`), which holds
+the bound when the queue itself is late. The default of five would give up five
+minutes in, inside a receiver's own deploy. Each attempt has a ten-second
+deadline and follows no redirect. A receiver that refuses is a plain error and
+the queue's retry, never `PermanentJobError`.
+
 **A Facebook or Instagram batch is retried whole when any item in it fails**
 (`process-meta-webhook.ts`), so the items that worked run again on every retry,
 and the one that failed lands after siblings newer than it. Every item type
@@ -749,7 +762,10 @@ by email. `carrierFor` answers `send_email` for web chat and the myBlu app
 delivery, written `delivered` with no HTML part and no address and queued
 nowhere, and `rowIsDelivery` and `sendsByEmail` are what say so, at every sender
 — never a test naming one channel, which is how the code queued an `api` reply
-as an email at every place that set web chat aside by name.
+as an email at every place that set web chat aside by name. And queue its
+carrier through `enqueueAutomatedDelivery`, which is also where the myBlu app's
+push is queued in a carrier's place: a sender queueing its own job tells the
+app's user nothing.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and
@@ -1485,6 +1501,33 @@ failure keeps its receipt. Its transaction holds the requester first
 (`holdRequester`), as the sends do. The API changes by addition, and what
 `docs/myblu-api.md` says a field means is fixed once an app build depends on
 it.
+
+**The myBlu webhook is a hint, and the poll is the truth.** A reply on an `api`
+ticket is delivered when its row is written (`rowIsDelivery`); what is queued in
+a carrier's place is `notify_myblu`, which tells myBlu's backend so it can push
+to the user's phone. `enqueueMessageCreated` (`lib/api/notify.ts`) queues it,
+called from the two doors every outbound reply passes — `storeAgentReply` and
+`enqueueAutomatedDelivery` — so a new writer of a team's reply on `api` goes
+through one of them or the user is never told. It queues only on `api` and only
+while `MYBLU_WEBHOOK_URL` is set, keyed `notify_myblu:message:<id>`, once ever.
+On the pool it is best-effort and logs a failure rather than throwing: the
+reply is stored, and a throw would read to the agent as a reply that failed.
+**A failed push never marks a reply failed**, which differs from every carrier:
+nothing in the job writes to the message. The job carries ids only and rebuilds
+the body from the rows on every attempt (`lib/api/webhook.ts`), with
+`user.externalId` read off the ticket's ownership row and never the contact,
+and it sends nothing — and completes — for a ticket the app could not open now:
+withdrawn, released by a revoke, a requester that is not the owner's contact, a
+blocked user, or an event past its day. A payload naming a note, an inbound
+message or another channel's reply is `PermanentJobError`: only a hand-written
+one can. The URL must be `https` with no userinfo and no query string, and the
+secret at least 32 characters; both are judged when a job runs
+(`webhookTarget`), never in `lib/env.ts`, and an unusable value fails every job
+by name, retried, so a value corrected within the day still sends. The URL
+unset completes the jobs already queued with nothing sent, which is the way
+back. `webhook.test.ts` reads the guide's test vector and its JavaScript
+`verify` and runs both against what the job signs and sends, so the guide and
+the sender cannot drift apart.
 
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST

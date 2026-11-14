@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Where an agent's reply goes, decided by its channel, from the console's
@@ -26,7 +26,8 @@ const { db } = await import('@/db/client');
 const { agents, contacts, conversations, jobs, messages, ticketStatuses } =
   await import('@/db/schema');
 const { withCleanDatabase } = await import('@/lib/testing/db');
-const { sendReply } = await import('./reply-actions');
+const { resetEnvCache } = await import('@/lib/env');
+const { addNote, sendReply } = await import('./reply-actions');
 
 withCleanDatabase();
 
@@ -115,5 +116,59 @@ describe('sendReply, by where the reply goes', () => {
         .from(jobs)
         .where(eq(jobs.dedupeKey, `send:${stored.id}`)),
     ).toEqual([{ type: 'send_email', payload: { messageId: stored.id } }]);
+  });
+});
+
+describe('the push to the myBlu app, with the webhook on', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetEnvCache();
+  });
+
+  function webhookOn() {
+    vi.stubEnv('MYBLU_WEBHOOK_URL', 'https://myblu.example.test/support/webhook/');
+    vi.stubEnv('MYBLU_WEBHOOK_SECRET', 'db-test-webhook-secret-0123456789-abcdef');
+    resetEnvCache();
+  }
+
+  // The reply is still the delivery; what is queued is the backend being
+  // told, so it can push (`plans/myblu-ticket-api.md`, _The webhook_).
+  it('queues one notify_myblu for a reply on an app ticket, and no carrier', async () => {
+    webhookOn();
+    const conversationId = await ticket('api');
+
+    const stored = await reply(conversationId);
+
+    expect(stored.deliveryStatus).toBe('delivered');
+    expect(
+      await db
+        .select({ type: jobs.type, payload: jobs.payload, dedupeKey: jobs.dedupeKey })
+        .from(jobs),
+    ).toEqual([
+      {
+        type: 'notify_myblu',
+        payload: { event: 'message.created', messageId: stored.id },
+        dedupeKey: `notify_myblu:message:${stored.id}`,
+      },
+    ]);
+  });
+
+  it('queues nothing for a note on an app ticket', async () => {
+    webhookOn();
+    const note = new FormData();
+    note.set('conversationId', await ticket('api'));
+    note.set('body', 'Courier says the address is wrong.');
+
+    expect((await addNote({ error: null }, note)).error).toBeNull();
+
+    expect(await db.select({ type: jobs.type }).from(jobs)).toEqual([]);
+  });
+
+  it('queues nothing for a reply on web chat', async () => {
+    webhookOn();
+
+    await reply(await ticket('webchat'));
+
+    expect(await db.select({ type: jobs.type }).from(jobs)).toEqual([]);
   });
 });

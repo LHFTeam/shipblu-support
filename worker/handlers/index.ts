@@ -16,6 +16,7 @@ import { importFreshdeskKb } from './import-freshdesk-kb';
 import { moderateMetaComment } from './moderate-meta-comment';
 import { normaliseKbFormatting } from './normalise-kb-formatting';
 import { notifyLowRating } from './notify-low-rating';
+import { notifyMyblu } from './notify-myblu';
 import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rehostKbImages } from './rehost-kb-images';
@@ -73,6 +74,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   normalise_kb_formatting: (job) => normaliseKbFormatting(job),
   rehost_kb_images: (job) => rehostKbImages(job),
   notify_low_rating: notifyLowRating,
+  notify_myblu: notifyMyblu,
   presence_sweep: () => presenceSweep(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),

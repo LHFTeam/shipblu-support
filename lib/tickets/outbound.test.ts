@@ -18,6 +18,7 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   automatedReplyBlocked,
   carrierFor,
@@ -28,6 +29,9 @@ import {
 } from './outbound';
 
 describe('deliverAutomatedReply', () => {
+  // The myBlu app's door reads whether its webhook is on.
+  withTestEnv();
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -118,6 +122,29 @@ describe('deliverAutomatedReply', () => {
       expect(mocks.enqueue).not.toHaveBeenCalled();
     },
   );
+
+  // No carrier still, but the backend is told, so it can push: the door the
+  // automated senders share is where the app's push is queued.
+  it('queues the push for an automated message on api while the webhook is on, and no carrier', async () => {
+    setTestEnv({ MYBLU_WEBHOOK_URL: 'https://myblu.example.test/support/webhook/' });
+
+    await reply('api');
+
+    expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      'notify_myblu',
+      { event: 'message.created', messageId: 'message-1' },
+      expect.objectContaining({ dedupeKey: 'notify_myblu:message:message-1', priority: 20 }),
+    );
+  });
+
+  it('queues nothing for web chat with the webhook on', async () => {
+    setTestEnv({ MYBLU_WEBHOOK_URL: 'https://myblu.example.test/support/webhook/' });
+
+    await reply('webchat');
+
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
 
   it('still writes an email as one, and queues its carrier', async () => {
     await reply('email');

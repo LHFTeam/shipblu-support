@@ -1656,6 +1656,69 @@ a request bin the owner controls, one reply to a test ticket, the delivery
 verified by hand; then the URL is myBlu's. Way back: unset the URL. **The
 launch waits for this.**
 
+As built: `enqueueMessageCreated` and `NOTIFY_MAX_ATTEMPTS` in
+`lib/api/notify.ts`, the half the web service runs; `webhookTarget`,
+`signatureHeader`, `readMessageSubject`, `decideMessageCreated` and
+`deliverWebhook` in `lib/api/webhook.ts`, the half the worker runs;
+`worker/handlers/notify-myblu.ts` between them. No shape changed, so the
+document, the changelog and the SDK's pin are as stage 4 left them. The
+choices it made where this plan left a question:
+
+- **Both doors call one function, which asks the channel itself.**
+  `storeAgentReply` after its carrier, and `enqueueAutomatedDelivery` in the
+  branch where the row is the delivery, so web chat, which shares that branch,
+  queues nothing by the function's own test rather than the caller's. On the
+  pool it is best-effort and logs: the reply is stored and delivered, and a
+  throw would read to the agent as a reply that failed, and be sent twice. On
+  a transaction (the survey's, stage 8) it throws, since a failed statement has
+  already aborted it. The job takes the priority of the reply it is for: ten
+  for a person's, twenty for software's.
+- **The switch is the URL's presence on the web service; whether it is usable
+  is the worker's to say.** Queueing asks only that the URL is set. The worker
+  judges `https`, userinfo, a query string and a secret of 32 characters when
+  each job runs (`webhookTarget`), and an unusable value fails the attempt by
+  name, a plain error: retried, so a value corrected within the day still
+  sends, and loud, where queueing nothing would have been silent. Unset at run
+  time completes the job with nothing sent, which is the way back. The reasons
+  never repeat the value, since the one with a password in it must not reach
+  a log. The secret's rule is `MYBLU_API_TOKEN`'s, and the previous secret only
+  ever signs beside a usable current one.
+- **The job refuses only what a hand-written payload could name**: a
+  message that is not an outbound `reply`, or one on another channel, is
+  `PermanentJobError`. A ticket the app could not open now is not an error: it
+  completes with nothing sent and a line naming why — deleted, spam or merged
+  (`withdrawn`); no ownership row, or a requester that is not the owner's
+  contact (`not_in_app`); a blocked or deleted owner (`refused`,
+  `contactRefused`, the session lookup's own test); the same states, in the
+  same order, `ownedTicket` refuses the app.
+- **An age bound beside the attempt count.** Thirty attempts put the last about
+  seventeen hours in, but only when the queue is on time. The job also sends
+  nothing for an event more than twenty-three hours old (`MAX_EVENT_AGE_MS`),
+  so a worker down for a day cannot start a retry the receiver's day of
+  dedupe no longer covers. The hour short of a day is for the two clocks.
+- **Which user, read off the ownership row's identity**, and the push's
+  `message.from` through one function the thread reads too (`messageFrom` in
+  `lib/api/from.ts`), so a push cannot call a reply `agent` that the thread
+  then draws as `system`. `externalUserIdOf` reads the identifier for the
+  session lookup and the webhook alike.
+- **The answer is read for its status alone**, and its body cancelled unread,
+  so a receiver's error page never reaches a log or `jobs.last_error`.
+
+Tested beside each: `webhook.test.ts` reads the guide's test vector and
+recomputes its signature with `signatureHeader`, rebuilds its body byte for
+byte with `messageCreatedEvent`, and imports the guide's JavaScript `verify`
+and runs it against an attempt the job makes, under either secret during a
+rotation; every branch of `decideMessageCreated`, the URL rules, and the
+failures that are retried. `notify.test.ts` adds the schedule up from
+`retryDelaySeconds`. `webhook.db.test.ts` runs the handler's statement on
+Postgres: one job per reply on `api` and none for a second call, for web chat
+or with the URL unset; the signed body naming the ownership row's user after a
+merge gave the contact a second app identity; a note's, an inbound message's
+and a web chat reply's ids refused; nothing sent after an `account_deleted`
+revoke, on a spam ticket, to a blocked user or a day late; and a refused
+delivery leaving the reply `delivered`. The console's own door is in
+`reply-actions-delivery.db.test.ts`: a reply queues one, a note none.
+
 **7. Files.** No schema. Multipart on the two POSTs, the download route, `api`
 in the chat channels that draw media inline. Verified by tests (the attachment
 rows are in the message's transaction; a failed one removes the objects;

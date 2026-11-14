@@ -1394,6 +1394,23 @@ plan's _Risks_ has the order (replace, revoke every live row, read the kept
 rows for what was minted). Both are plain `z.string().optional()` in
 `lib/env.ts`, for the reason the WhatsApp keys above are.
 
+Three more arrive with stage 6, the same way and also set nowhere yet.
+`MYBLU_WEBHOOK_URL` is myBlu's backend's receiver, told when the team writes on
+an app ticket so it can push to the user's phone; `MYBLU_WEBHOOK_SECRET` signs
+each delivery (HMAC-SHA256 over `<timestamp>.<raw body>`), `openssl rand -hex
+32`, handed to the backend once and its own value per environment; and
+`MYBLU_WEBHOOK_SECRET_PREVIOUS` signs beside it only while the receiver moves to
+a new one. **Unset URL is the webhook switched off**: no `notify_myblu` job is
+queued, and one already queued completes with nothing sent
+(`[notify_myblu] MYBLU_WEBHOOK_URL is unset — nothing sent`), so unsetting it
+is the way back. The URL must be `https` with no userinfo and no query string,
+posted to exactly as set with no redirect followed, and the secret at least 32
+characters; the worker judges both when a job runs and fails every job by name
+while either is wrong (`notify_myblu: MYBLU_WEBHOOK_URL is not https — nothing
+sent`), retried, so a value corrected within the job's day still sends. Every
+service that writes a reply reads the URL to queue — the web service, the
+worker and the crons, all linked to the group — and the worker alone posts.
+
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
@@ -2349,6 +2366,35 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   conversation's answer moves an `api` ticket's `lastMessageAt`, so the app's
   list can show the ticket move with nothing new to read, and the tracking
   number rides in the list's query string (the plan's _Risks_).
+- **The myBlu webhook arrives with stage 6 of `plans/myblu-ticket-api.md`,
+  inert until `MYBLU_WEBHOOK_URL` is set** (§2). No schema, no migration and no
+  shape: the webhook's `message.created` and the push keys were published in
+  stage 0b, so the document, its changelog and the SDK's pin are as stage 4
+  left them. A new job type, `notify_myblu`, queued in a carrier's place for
+  every reply the team writes on an `api` ticket — an agent's
+  (`storeAgentReply`) and software's (`enqueueAutomatedDelivery`) — once ever
+  per message (`notify_myblu:message:<id>`), at the reply's priority, with
+  thirty attempts so the last falls about seventeen hours in, inside the day
+  the receiver dedupes for. It posts ids only, rebuilt from the rows on every
+  attempt, signed, with a ten-second deadline and no redirect followed, and
+  sends nothing for a ticket the app could not open now (deleted, spam,
+  merged, its account deleted or number released, its user blocked) or a
+  reply more than twenty-three hours old. A push that never lands leaves the
+  reply delivered: the app's poll reads it either way. Once the release is on
+  `main`, by the owner: set the URL to a request bin the owner controls (an
+  `https` one with no query string) and the secret to a throwaway, on the
+  environment group, so the web service, the worker and the crons all restart
+  with them; mint and open a test ticket as in stage 4, answer it from the
+  console, and check by hand that one delivery arrived with the four
+  `X-ShipBlu-*` headers, a body naming the ticket and the message by id with
+  no text and no phone, and a signature the guide's `verify` accepts under the
+  throwaway; then purge the ticket and the contact, and unset the URL (or set
+  it to myBlu's receiver, with a fresh secret handed to the backend, once that
+  receiver exists and verifies). **The launch waits for this.** The SDK's 0.3
+  follows. Way back: unset the URL, which stops new jobs at once on the web
+  service and makes the queued ones send nothing once the worker restarts; a
+  revert leaves any `notify_myblu` row queued without a handler, failing until
+  it is `dead`, which is harmless.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
