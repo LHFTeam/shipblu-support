@@ -507,15 +507,15 @@ Only replies are returned: never an agent's note, an event or a forward.
 
 ### `GET /config`
 
-| Field               | Meaning                                                                                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.         |
-| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                         |
-| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                |
-| `tickets.maxOpen`   | Open or pending tickets one user may have at once.                                                                                                                                                  |
-| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_). |
-| `support`           | `{ online, opensAt, timezone }`, the team's hours. Absent until stage 5; `opensAt` and `timezone` are null when no hours are set.                                                                   |
-| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                       |
+| Field               | Meaning                                                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.                    |
+| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                                    |
+| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                           |
+| `tickets.maxOpen`   | Open or pending tickets one user may have when opening another; past it, `POST /tickets` is `409 too_many_open`. A reply never counts against it: replying on a resolved ticket reopens it whatever the count. |
+| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_).            |
+| `support`           | `{ online, opensAt, timezone }`, the team's hours. Absent until stage 5; `opensAt` and `timezone` are null when no hours are set.                                                                              |
+| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                                  |
 
 ### The survey
 

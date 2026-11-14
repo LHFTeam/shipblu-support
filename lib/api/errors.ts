@@ -98,9 +98,13 @@ export async function answering(
 /**
  * The failure's kind, its SQLSTATE when it has one, the first line of the
  * underlying message and the stack frames: what a reader needs to find the
- * fault, and none of the query, its parameters or Postgres's `detail`.
+ * fault, and none of the query, its parameters or Postgres's `detail`. Every
+ * `/api/v1` line that logs a caught failure logs it through this, the work
+ * after a route has answered included: a tracking number in a failed query's
+ * parameters is the one credential guarding a parcel's recipient (AGENTS.md,
+ * _The delivery platform_).
  */
-function scrubbed(error: unknown): Error {
+export function scrubbed(error: unknown): Error {
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
   const name = cause instanceof Error ? cause.name : typeof cause;
   const code =

@@ -86,7 +86,13 @@ describe('describeEvent', () => {
   // The myBlu app's provenance: who vouched for the phone, never "verified",
   // and the build an agent needs to reproduce what the customer saw.
   it('says a ticket opened in the myBlu app, who vouched for it and from which build', () => {
-    const data = { app: 'myblu', platform: 'ios', appVersion: '5.4.1', sdkVersion: 'sdk-ts/0.1.0' };
+    const data = {
+      app: 'myblu',
+      platform: 'ios',
+      appVersion: '5.4.1',
+      sdk: 'sdk-ts',
+      sdkVersion: '0.1.0',
+    };
     expect(describeEvent('opened_from_app', data)).toBe(
       'opened this ticket in the myBlu app, phone vouched for by the app (iOS 5.4.1)',
     );

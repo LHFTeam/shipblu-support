@@ -292,7 +292,8 @@ For the support lead and the repo's owner:
   name safely («عبد الله أحمد»).
 - **How many tickets may one user open?** Default: ten open or pending at
   once and ten new ones an hour. Nothing caps tickets per contact anywhere
-  today.
+  today. The ten bounds opening a ticket, not replying: a reply reopens a
+  resolved ticket whatever the count, rather than cutting a conversation off.
 - **How long does `/api/v1` live once there is a `/api/v2`?** Default: twelve
   months, with `Deprecation` and `Sunset` headers six months ahead on any
   operation being retired.
@@ -570,7 +571,8 @@ portal's words for the four.
   mid-conversation.
 - **Provenance is an event.** `opened_from_app`, written in the creating
   transaction so the on-create rules and the header see it:
-  `{ app: 'myblu', platform, appVersion, sdkVersion, identityId }`. Nothing
+  `{ app: 'myblu', platform, appVersion, sdk, sdkVersion, identityId }`, the
+  SDK's name and version apart (`sdk-ts`, `0.3.0`). Nothing
   draws `meta.pageUrl`, which is why web chat's page is on every message and
   on no screen. `messages.meta` carries `{ locale, client }`, and
   `webchatFiles` on a message sent with files; `requesterLocale` gains an

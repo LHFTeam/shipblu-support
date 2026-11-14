@@ -4102,7 +4102,7 @@
               "maxOpen": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "How many open or pending tickets one user may have at once."
+                "description": "How many open or pending tickets one user may have when opening another: `POST /tickets` past it is `409 too_many_open`. A reply never counts against it, so replying on a resolved ticket reopens it whatever the count."
               }
             },
             "required": ["canCreate", "maxOpen"],

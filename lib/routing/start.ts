@@ -2,7 +2,6 @@ import type { db } from '@/db/client';
 import { routingDecisions } from '@/db/schema';
 import { loadCategoryAiSettings } from '@/lib/category-ai/settings';
 import { enqueue } from '@/lib/queue';
-import { filedYet } from './filing';
 import { windowEndsAt } from './hold';
 import { routingModeOf, routingStartFor, type RoutingStart } from './mode';
 
@@ -63,11 +62,6 @@ export type RoutingChannel = {
  */
 export async function planRouting(channel: RoutingChannel | null): Promise<RoutingPlan | null> {
   if (!channel?.id) return null;
-  // The list the readiness panel and the report read (`filedYet`), asked here
-  // too, so what they say about a type no ingest path files yet is what the
-  // router does: nothing starts. Left on the list after its path ships, the
-  // type would start no routing, which that stage's routing test catches.
-  if (!filedYet(channel.type)) return null;
   const mode = routingModeOf(channel);
   if (mode === 'default_group') return null;
   const settings = await loadCategoryAiSettings();

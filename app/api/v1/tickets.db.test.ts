@@ -46,6 +46,27 @@ import { POST as postTicket } from './tickets/route';
  * error logged that it did not ask for.
  */
 
+/**
+ * The tracking-number link, passed through but for one call a test makes fail,
+ * as drizzle fails a query: the number among its parameters and in Postgres's
+ * `detail`, which the log line must carry neither of.
+ */
+const linkFailure = vi.hoisted(() => ({ next: null as Error | null }));
+vi.mock('@/lib/shipments/links', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/shipments/links')>();
+  return {
+    ...actual,
+    linkClaimedTrackingNumber: async (
+      ...args: Parameters<typeof actual.linkClaimedTrackingNumber>
+    ) => {
+      const failure = linkFailure.next;
+      linkFailure.next = null;
+      if (failure) throw failure;
+      return actual.linkClaimedTrackingNumber(...args);
+    },
+  };
+});
+
 withCleanDatabase();
 
 const TOKEN = 'db-test-myblu-api-token-0123456789-abcdef';
@@ -339,7 +360,8 @@ describe('POST /tickets', () => {
           app: 'myblu',
           platform: 'ios',
           appVersion: '5.4.1',
-          sdkVersion: 'sdk-ts/0.1.0',
+          sdk: 'sdk-ts',
+          sdkVersion: '0.1.0',
           identityId: me.identityId,
         },
       },
@@ -389,6 +411,39 @@ describe('POST /tickets', () => {
     ).toEqual([]);
   });
 
+  it('opens the ticket when the link fails, and logs the failure without the number', async () => {
+    await appRow();
+    const token = await minted();
+    const number = '1755021358719';
+    linkFailure.next = new Error(
+      `Failed query: select 1 from "shipments" where "tracking_number" = $1\nparams: ${number}`,
+      {
+        cause: Object.assign(new Error('duplicate key value violates unique constraint'), {
+          code: '23505',
+          detail: `Key (tracking_number)=(${number}) already exists.`,
+        }),
+      },
+    );
+
+    const ticket = await opened(token, {
+      text: 'Late again',
+      locale: 'en',
+      trackingNumber: number,
+    });
+
+    expect(ticket.ticket.trackingNumber).toBe(number);
+    const lines = errors.mock.calls.map((call) =>
+      call
+        .map((part) => (part instanceof Error ? `${part.message}\n${part.stack}` : String(part)))
+        .join(' '),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not link a claimed tracking number');
+    expect(lines[0]).toContain('23505');
+    expect(lines[0]).not.toContain(number);
+    errors.mockClear();
+  });
+
   it('answers one key sent twice with one ticket, the second time as a replay', async () => {
     await appRow();
     const token = await minted();
@@ -420,6 +475,61 @@ describe('POST /tickets', () => {
     }
     expect((await create(token, { text: 'Another parcel', locale: 'en' })).status).toBe(201);
     expect(await db.select({ id: conversations.id }).from(conversations)).toHaveLength(2);
+  });
+
+  // An outbox resends a refused create on every foreground. Charged for each
+  // refusal, ten foregrounds with the app's row off or at the open cap ran the
+  // hour out, and the first create that could open was refused 429.
+  it('never spends the new-ticket bucket on a create that opens nothing', async () => {
+    const token = await minted();
+    for (let attempt = 0; attempt < 11; attempt++) {
+      expect((await refusal(await create(token))).code).toBe('not_configured');
+    }
+    await appRow();
+    expect((await create(token)).status).toBe(201);
+
+    const me = await caller(token);
+    const open = await statusId('Open');
+    const rows = await db
+      .insert(conversations)
+      .values(
+        Array.from({ length: 9 }, () => ({
+          channel: 'api' as const,
+          statusId: open,
+          requesterContactId: me.contactId,
+        })),
+      )
+      .returning({ id: conversations.id });
+    await db
+      .insert(apiTickets)
+      .values(rows.map((row) => ({ conversationId: row.id, identityId: me.identityId })));
+    // Seven more fill the minute's send bucket short of its twenty.
+    for (let attempt = 0; attempt < 7; attempt++) {
+      expect((await refusal(await create(token))).code).toBe('too_many_open');
+    }
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Resolved') })
+      .where(eq(conversations.channel, 'api'));
+    expect((await create(token)).status).toBe(201);
+  });
+
+  it('refuses an eleventh ticket opened in the hour as rate_limited, with when to come back', async () => {
+    await appRow();
+    const token = await minted();
+    for (let n = 0; n < 10; n++) {
+      expect((await create(token, { text: `Parcel ${n}`, locale: 'en' })).status).toBe(201);
+      // Resolved, so the open cap is never what refuses.
+      await db
+        .update(conversations)
+        .set({ statusId: await statusId('Resolved') })
+        .where(eq(conversations.channel, 'api'));
+    }
+
+    const refused = await create(token);
+    expect(await refusal(refused)).toMatchObject({ status: 429, code: 'rate_limited' });
+    expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(await db.select({ id: conversations.id }).from(conversations)).toHaveLength(10);
   });
 
   it('answers two creates racing on one key with the same ids, and opens one ticket', async () => {
@@ -570,6 +680,42 @@ describe('POST /tickets', () => {
       .set({ statusId: await statusId('Resolved') })
       .where(eq(conversations.id, rows[0]!.id));
     expect((await create(token)).status).toBe(201);
+  });
+
+  // The cap bounds opening a ticket (`tickets.maxOpen`); a reply is a ticket
+  // going on, and refusing it would cut a conversation off in the middle.
+  it('lets a reply reopen a resolved ticket past the open cap', async () => {
+    await appRow();
+    const token = await minted();
+    const me = await caller(token);
+    const { ticket: opening } = await opened(token);
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Resolved') })
+      .where(eq(conversations.id, opening.id));
+    const open = await statusId('Open');
+    const rows = await db
+      .insert(conversations)
+      .values(
+        Array.from({ length: 10 }, () => ({
+          channel: 'api' as const,
+          statusId: open,
+          requesterContactId: me.contactId,
+        })),
+      )
+      .returning({ id: conversations.id });
+    await db
+      .insert(apiTickets)
+      .values(rows.map((row) => ({ conversationId: row.id, identityId: me.identityId })));
+
+    expect((await send(token, opening.id, 'It came back again')).status).toBe(201);
+    expect((await ticket(token, opening.id)).status).toBe(200);
+    const [row] = await db
+      .select({ category: ticketStatuses.category })
+      .from(conversations)
+      .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+      .where(eq(conversations.id, opening.id));
+    expect(row!.category).toBe('open');
   });
 
   it('holds a ticket on a row in category mode: its window, its decision row and one settle_routing job', async () => {
@@ -772,6 +918,16 @@ describe('reading a thread', () => {
         bodyText: '[reacted 🙏]',
         meta: { whatsappType: 'reaction' },
         createdAt: at(6),
+      },
+      // The team's own reaction: a row no read returns, so one the app could
+      // never mark read, and never in the badge.
+      {
+        conversationId: opening.id,
+        direction: 'outbound',
+        kind: 'reply',
+        bodyText: '[reacted 👍]',
+        meta: { whatsappType: 'reaction' },
+        createdAt: at(7),
       },
     ]);
 
@@ -1323,5 +1479,53 @@ describe('a revoke', () => {
       await db.select().from(apiTickets).where(eq(apiTickets.identityId, me.identityId)),
     ).toEqual([]);
     expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
+  });
+
+  // The reply's own race with the revoke: without the account lock, its locked
+  // read still saw the ownership row the uncommitted revoke had deleted, and a
+  // deleted account reopened its resolved ticket and was then answered 404.
+  it('refuses a reply whose session was revoked while it waited, and reopens nothing', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: opening } = await opened(token);
+    const resolved = await statusId('Resolved');
+    await db
+      .update(conversations)
+      .set({ statusId: resolved })
+      .where(eq(conversations.id, opening.id));
+
+    const hold = holdNextTransaction('after');
+    const revoking = revoke(user, 'account_deleted');
+    await hold.atHold;
+    const replying = send(token, opening.id, 'Is anybody there?');
+    expect(await untilWaitingOnALock(db)).toBe(true);
+    hold.release();
+    await revoking;
+
+    expect(await refusal(await replying)).toMatchObject({ status: 401, code: 'unauthenticated' });
+    expect(await messagesOf(opening.id)).toHaveLength(1);
+    const [row] = await db
+      .select({ statusId: conversations.statusId })
+      .from(conversations)
+      .where(eq(conversations.id, opening.id));
+    expect(row!.statusId).toBe(resolved);
+  });
+
+  it('refuses a reply on a session signed out while it waited, though the ticket stays in the app', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: opening } = await opened(token);
+
+    const hold = holdNextTransaction('after');
+    const revoking = revoke(user, 'signed_out');
+    await hold.atHold;
+    const replying = send(token, opening.id, 'Still there?');
+    expect(await untilWaitingOnALock(db)).toBe(true);
+    hold.release();
+    await revoking;
+
+    expect(await refusal(await replying)).toMatchObject({ status: 401, code: 'unauthenticated' });
+    expect(await messagesOf(opening.id)).toHaveLength(1);
+    expect((await ticket(await minted(), opening.id)).status).toBe(200);
   });
 });

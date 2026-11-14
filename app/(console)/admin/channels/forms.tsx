@@ -540,11 +540,10 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
 
   // Name, default group and routing mode, and nothing else: the app reaches us
   // with a session, not at anything a row could hold, and `saveChannel` stores
-  // an empty config for it. The mode is offered from the first day, because the
-  // path that opens an app's ticket reads it through `planRouting` and so needs
-  // no change the day the support lead sets it to category; until that path
-  // ships nothing files under the row, the setting waits for it, and the
-  // readiness panel says so (`filedYet`). `routingModeOf` needs no `api` case:
+  // an empty config for it. The mode is offered as on any row, because the path
+  // that opens an app's ticket (`createApiTicket`) reads it through
+  // `planRouting` and so needs no change the day the support lead sets it to
+  // category. `routingModeOf` needs no `api` case:
   // it honours the column on any row that is neither the bot nor a number on
   // the Business app, and the panel judges the filing row by
   // `filingRowOfType`, the oldest active row of the type — the rule

@@ -27,13 +27,15 @@ import { reopenResolved } from '@/lib/tickets/reopen';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import { isUuid } from '@/lib/http/uuid';
+import { afterPage } from './after-page';
 import { apiChannel } from './channel';
 import { encodeCursor, THREAD_START, type Cursor } from './cursor';
-import { admitNewTicket, MAX_OPEN_TICKETS } from './limits';
+import { scrubbed } from './errors';
+import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
 import type { Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
-import { holdAccount, holdRequester, type Caller } from './sessions';
+import { holdAccount, type Caller } from './sessions';
 
 /**
  * The myBlu app's tickets (`plans/myblu-ticket-api.md`, _What the app can
@@ -125,6 +127,8 @@ type MessageRow = {
   createdAt: Date;
   /** Postgres's own text for `created_at`, which a cursor carries (`lib/api/cursor.ts`). */
   cursorTime: string;
+  /** `created_at` as digits that sort as it does (`AfterRow` in `./after-page`). */
+  placeTime: string;
   files: StoredFile[] | null;
 };
 
@@ -137,6 +141,7 @@ const messageColumns = {
   channelMessageId: messages.channelMessageId,
   createdAt: messages.createdAt,
   cursorTime: sql<string>`${messages.createdAt}::text`,
+  placeTime: sql<string>`to_char(${messages.createdAt} at time zone 'UTC', 'YYYYMMDDHH24MISSUS')`,
   files: messageFiles,
 };
 
@@ -230,14 +235,18 @@ const previewSql = sql<PreviewRow | null>`(
 
 /**
  * The team's replies on a ticket the user has not marked read: outbound and
- * `reply` — a note is an outbound row too — with no `read_at`. Kept on the
- * server, so two devices and a reinstall show one badge.
+ * `reply` — a note is an outbound row too — not a reaction, with no
+ * `read_at`. Kept on the server, so two devices and a reinstall show one
+ * badge. Exactly the rows a thread read can return, `notReaction()` included:
+ * a row the app can never be shown is a row it can never mark read, and would
+ * hold the badge above zero for good.
  */
 const unreadCountSql = sql<number>`(
   select count(*)::int from ${messages}
   where ${messages.conversationId} = ${conversations.id}
     and ${messages.direction} = 'outbound'
     and ${messages.kind} = 'reply'
+    and ${notReaction()}
     and ${messages.readAt} is null
 )`;
 
@@ -258,6 +267,7 @@ function unreadTotalSql(caller: Caller): SQL<number> {
         ownedTicket(caller, owned),
         eq(messages.direction, 'outbound'),
         eq(messages.kind, 'reply'),
+        notReaction(),
         isNull(messages.readAt),
       ),
     );
@@ -419,7 +429,8 @@ export function backStatement(
  * A poll after a cursor, in one statement of two halves: the rows after the
  * cursor, oldest first, up to the page; and the newest of those at or before it
  * within `AFTER_OVERLAP_SECONDS`, which `readMessages` lets fill only what the
- * page leaves.
+ * page leaves. Each half's `ORDER BY` chooses the rows its `LIMIT` keeps, and
+ * nothing more: the order they arrive in is `afterPage`'s to decide.
  */
 export function afterStatement(
   caller: Caller,
@@ -476,24 +487,11 @@ export async function readMessages(
 
   if (asked.kind === 'after') {
     const rows = await afterStatement(caller, ticketId, asked);
-
-    const fresh = rows.filter((row) => row.fresh);
-    const room = Math.max(asked.limit - 1 - fresh.length, 0);
-    // Each half arrives in its own order, and every overlap row is at or before
-    // the cursor, every fresh one after it: the newest of the overlap, turned
-    // ascending, then the fresh rows, is the page in order.
-    const page = [
-      ...rows
-        .filter((row) => !row.fresh)
-        .slice(0, room)
-        .reverse(),
-      ...fresh,
-    ];
-    const last = fresh.at(-1);
+    const { page, newest } = afterPage(rows, asked.limit);
     return answer({
       messages: page.map((row) => messageView(caller, row)),
       olderCursor: page[0] ? cursorOf(page[0]) : asked.text,
-      newerCursor: last ? cursorOf(last) : asked.text,
+      newerCursor: newest ? cursorOf(newest) : asked.text,
     });
   }
 
@@ -553,8 +551,9 @@ export type SendOutcome =
   /** `POST /tickets` with an unspent key, past the identity's new-ticket bucket. */
   | { kind: 'rate_limited'; admission: Admission }
   /**
-   * A write whose session was revoked while it waited for the account, or
-   * whose identity names no live contact any more (`holdRequester`).
+   * A write whose session was no longer live once it held the account — revoked
+   * or expired while it waited — or whose identity names no live contact any
+   * more (`holdAccount`).
    */
   | { kind: 'revoked' };
 
@@ -639,22 +638,26 @@ function metaFor(sent: Sent, operation: Operation): Record<string, unknown> {
  * ticket, and through which identity. Read off the request's `ShipBlu-Client`
  * — `sdk-ts/0.3.0 app/5.4.1 ios/18.1`, the SDK first — which is the build that
  * is asking now, and off the session's mint where the header does not name the
- * platform or the app: labels for an agent to read, never a credential.
+ * platform or the app: labels for an agent to read, never a credential. The
+ * SDK is stored as its name and its version apart (`sdk-ts`, `0.3.0`), so a
+ * reader comparing versions has a version to compare. A token with no `/` is
+ * passed over rather than split: the gate refuses one today, and split, it
+ * would be keyed on all but its last character.
  */
 function provenance(caller: Caller, client: string) {
-  const tokens = client.split(' ');
-  const named = new Map(
-    tokens.map((token) => {
-      const slash = token.indexOf('/');
-      return [token.slice(0, slash), token.slice(slash + 1)] as const;
-    }),
-  );
+  const tokens = client.split(' ').flatMap((token) => {
+    const slash = token.indexOf('/');
+    return slash > 0 ? [[token.slice(0, slash), token.slice(slash + 1)] as const] : [];
+  });
+  const named = new Map(tokens);
+  const [sdk] = tokens;
   const platform = named.has('ios') ? 'ios' : named.has('android') ? 'android' : caller.platform;
   return {
     app: 'myblu',
     platform,
     appVersion: named.get('app') ?? caller.appVersion,
-    sdkVersion: tokens[0] ?? null,
+    sdk: sdk?.[0] ?? null,
+    sdkVersion: sdk?.[1] ?? null,
     identityId: caller.identityId,
   };
 }
@@ -683,12 +686,17 @@ async function openTickets(tx: Executor, caller: Caller): Promise<number> {
  * `beginRouting`, assignment and the out-of-hours reply in the order every
  * other path runs them.
  *
- * The new-ticket bucket is spent only once the key is known to be unspent, so
- * a retry of a ticket the first attempt opened is answered its replay however
- * many times it comes: spent by replays, the bucket refused the eleventh retry
- * of one ticket `429`, and the user's next real ticket with it, for an hour.
- * Two creates racing on one key both find it unspent on the pool and both
- * spend, the one place a replay costs a token.
+ * The new-ticket bucket is charged only for a ticket opened. Asked on the pool
+ * once the key is known to be unspent (`newTicketFits`, which spends nothing),
+ * so a create past it is refused before the channel is read or a lock taken;
+ * spent in the transaction once it has decided to insert, under the account
+ * lock, so one account's creates spend it one at a time. A replay never
+ * spends it — spent by replays, the bucket refused the eleventh retry of one
+ * ticket `429`, and the user's next real ticket with it, for an hour — and
+ * nor does a create refused `not_configured`, `too_many_open` or for a revoked
+ * session, which an outbox resends on every foreground. A transaction that
+ * spends and then rolls back on the key's unique index, a create racing
+ * another under one key, is the one way a token goes on nothing opened.
  *
  * The transaction takes the caller's account lock first (`holdAccount`), so a
  * create and a revoke for one account are ordered, and one account's creates
@@ -717,8 +725,8 @@ export async function createApiTicket(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'createTicket');
 
-  const admission = admitNewTicket(caller.identityId);
-  if (!admission.allowed) return { kind: 'rate_limited', admission };
+  const ahead = newTicketFits(caller.identityId);
+  if (!ahead.allowed) return { kind: 'rate_limited', admission: ahead };
 
   const channel = await apiChannel();
   if (!channel) return { kind: 'not_configured' };
@@ -732,6 +740,7 @@ export async function createApiTicket(
   let written:
     | { kind: 'created'; as: Caller }
     | { kind: 'revoked' | 'too_many_open' }
+    | { kind: 'rate_limited'; admission: Admission }
     | { kind: 'spent'; keyed: Keyed; as: Caller };
   try {
     written = await db.transaction(async (tx) => {
@@ -742,6 +751,10 @@ export async function createApiTicket(
       if ((await openTickets(tx, holder)) >= MAX_OPEN_TICKETS) {
         return { kind: 'too_many_open' as const };
       }
+      // Decided: spent here, and refused only by a create that spent the last
+      // token between the pool's question and this lock.
+      const admission = admitNewTicket(holder.identityId);
+      if (!admission.allowed) return { kind: 'rate_limited' as const, admission };
 
       const statusId = await requireDefaultOpenStatusId(tx);
       await tx.insert(conversations).values({
@@ -805,6 +818,7 @@ export async function createApiTicket(
   }
 
   if (written.kind === 'spent') return replay(written.as, written.keyed, 'createTicket');
+  if (written.kind === 'rate_limited') return written;
   if (written.kind !== 'created') return { kind: written.kind };
   const holder = written.as;
 
@@ -819,9 +833,10 @@ export async function createApiTicket(
         trackingNumber: sent.trackingNumber,
       });
     } catch (error) {
+      // Scrubbed: the number is a parameter of every query the link runs.
       log.error(
         `could not link a claimed tracking number conversation_id=${conversationId}`,
-        error,
+        scrubbed(error),
       );
     }
   }
@@ -861,12 +876,27 @@ export function customerWrote(now: Date) {
  * (`statusCategoryOf`). `FOR NO KEY UPDATE`, taken before any write, so a
  * message inserted on the ticket meanwhile is not held up by it.
  *
- * Before the ticket, the requester (`holdRequester`): the contact the identity
- * names now, held, which the ticket is looked for under and the message
- * authored as. A contact merge moves the ticket's requester, so the gate's
- * contact, after a merge committed since, answered `404` for the user's own
- * ticket; and locking the ticket first waited on a merge that was waiting for
- * it, since the message's author is the contact the merge has locked.
+ * Before the ticket, the caller's account lock and the requester
+ * (`holdAccount`), as a create takes them. The lock orders the reply against
+ * a revoke: without it, a revoke for `account_deleted` or `number_released`
+ * committing between the gate and this transaction deleted the ownership rows
+ * a statement already under way could still read, and a deleted account, or a
+ * number's previous holder, wrote to the team — reopening a resolved ticket —
+ * and was then answered `404` for a message stored. Under it, a reply that
+ * comes first commits before the revoke reads, and one that comes after finds
+ * its session no longer live and writes nothing (`revoked`), whatever ended
+ * it, a sign-out included. The requester is the contact the identity names
+ * now, held, which the ticket is looked for under and the message authored
+ * as: a contact merge moves the ticket's requester, so the gate's contact,
+ * after a merge committed since, answered `404` for the user's own ticket; and
+ * locking the ticket first waited on a merge that was waiting for it, since
+ * the message's author is the contact the merge has locked. It also puts one
+ * account's replies one after another, which costs a user nothing a person
+ * typing can notice.
+ *
+ * The open cap is not counted here: it bounds the tickets a user opens, and a
+ * reply reopening one they already have is that ticket going on, not a new
+ * one (`maxOpen`, `GET /config`).
  *
  * A reply to a `resolved` ticket reopens it through `reopenResolved`, as every
  * customer's reopen does; one to a `closed` ticket is refused, and the app
@@ -887,7 +917,7 @@ export async function sendApiMessage(
   let stored: { kind: 'stored'; as: Caller } | { kind: 'not_found' | 'ticket_closed' | 'revoked' };
   try {
     stored = await db.transaction(async (tx) => {
-      const holder = await holdRequester(tx, caller);
+      const holder = await holdAccount(tx, caller, now);
       if (!holder) return { kind: 'revoked' as const };
 
       const [ticket] = await tx

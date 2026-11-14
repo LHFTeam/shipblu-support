@@ -418,7 +418,9 @@ export const Config = z
         canCreate: z
           .boolean()
           .describe('Whether `POST /tickets` is open now; when false, hide the new-ticket button.'),
-        maxOpen: count('How many open or pending tickets one user may have at once.'),
+        maxOpen: count(
+          'How many open or pending tickets one user may have when opening another: `POST /tickets` past it is `409 too_many_open`. A reply never counts against it, so replying on a resolved ticket reopens it whatever the count.',
+        ),
       })
       .describe('Creating tickets.'),
     limits: z
