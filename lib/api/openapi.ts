@@ -1342,18 +1342,35 @@ function document(): Json {
   };
 }
 
-let built: Json | undefined;
-let serialised: string | undefined;
+/**
+ * `build`, run at most once: its value, or the error it threw, kept and
+ * thrown again. A memo that keeps only a success builds again on every call
+ * after a failure — and the document's build is the costly half of a public,
+ * unauthenticated route: a worked example that no longer passes its schema
+ * would cost a whole `z.toJSONSchema` and every example's validation per
+ * request, 1,200 a minute per address, each answering `500`.
+ */
+export function once<T>(build: () => T): () => T {
+  let outcome: { value: T } | { error: unknown } | undefined;
+  return () => {
+    if (outcome === undefined) {
+      try {
+        outcome = { value: build() };
+      } catch (error) {
+        outcome = { error };
+      }
+    }
+    if ('error' in outcome) throw outcome.error;
+    return outcome.value;
+  };
+}
 
 /**
  * The document, built once per process on first use. Lazily, never at module
  * scope: `next build` imports the route that serves it, and a build should not
  * pay for a document nobody asked for.
  */
-export function openApiDocument(): Json {
-  built ??= document();
-  return built;
-}
+export const openApiDocument: () => Json = once(document);
 
 /**
  * The document as the route sends it, serialised once beside the object. It
@@ -1361,7 +1378,4 @@ export function openApiDocument(): Json {
  * deploy, so stringifying it per request spent an instance's CPU on a route
  * whose only limit is the address bucket's 1,200 a minute.
  */
-export function openApiDocumentJson(): string {
-  serialised ??= JSON.stringify(openApiDocument());
-  return serialised;
-}
+export const openApiDocumentJson: () => string = once(() => JSON.stringify(openApiDocument()));

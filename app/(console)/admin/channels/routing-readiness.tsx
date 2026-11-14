@@ -318,6 +318,13 @@ function WarningText({ warning }: { warning: ChannelWarning }) {
           held under it before it went off is still decided by this mode.
         </>
       );
+    case 'not_filed_yet':
+      return (
+        <>
+          Nothing opens tickets on this row yet: the myBlu app&rsquo;s tickets arrive with a later
+          release, and its mode applies from then.
+        </>
+      );
     case 'not_filing_row':
       return (
         <>

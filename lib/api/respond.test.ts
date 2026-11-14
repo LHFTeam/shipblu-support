@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ErrorCode } from './schemas';
+import { admit } from '@/lib/http/rate-limit';
 import { apiError, apiJsonText } from './respond';
 
 /**
@@ -10,18 +11,17 @@ import { apiError, apiJsonText } from './respond';
  */
 
 describe('apiError', () => {
-  it('sends Retry-After on a 429, in whole seconds and at least one', () => {
+  // Whole seconds and at least one is `admit`'s rounding, held in
+  // `lib/http/rate-limit.test.ts`; this sends what an admission counted.
+  it('sends Retry-After on a 429, as the refusing bucket counted it', () => {
+    const refused = admit(`respond-test:${Math.random()}`, 0, 6_100);
+    expect(refused.resetInSeconds).toBe(7);
     const answer = apiError('rate_limited', 'Too many.', {
       requestId: 'r',
-      retryAfterSeconds: 0.2,
+      retryAfterSeconds: refused.resetInSeconds,
     });
     expect(answer.status).toBe(429);
-    expect(answer.headers.get('retry-after')).toBe('1');
-    expect(
-      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 6.1 }).headers.get(
-        'retry-after',
-      ),
-    ).toBe('7');
+    expect(answer.headers.get('retry-after')).toBe('7');
   });
 
   it('sends none on any other code', () => {

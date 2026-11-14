@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { openApiDocumentJson } from './openapi';
+import { once, openApiDocumentJson } from './openapi';
 import { ERROR_STATUS, ErrorCode } from './schemas';
 
 /**
@@ -103,6 +103,26 @@ function answerRoots(): unknown[] {
     .map((ref) => ({ $ref: ref }));
   return [...answers, ...unreferenced];
 }
+
+describe('once', () => {
+  // The document's memo: a failed build is kept as well, so a broken document
+  // costs one build per process, not one per request.
+  it('runs its build once, success or failure, and throws a kept failure again', () => {
+    let builds = 0;
+    const broken = once(() => {
+      builds += 1;
+      throw new Error('an example no longer passes its schema');
+    });
+    expect(broken).toThrow('an example no longer passes its schema');
+    expect(broken).toThrow('an example no longer passes its schema');
+    expect(builds).toBe(1);
+
+    let made = 0;
+    const fine = once(() => ({ n: (made += 1) }));
+    expect(fine()).toBe(fine());
+    expect(made).toBe(1);
+  });
+});
 
 describe('the committed document', () => {
   it('is what lib/api/openapi.ts builds', () => {

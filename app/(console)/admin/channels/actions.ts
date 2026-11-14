@@ -41,8 +41,7 @@ import {
   refresh,
   type SettingsState,
   type AdminState,
-  type ApiSwitchState,
-  type WebchatSwitchState,
+  type RowSwitchState,
 } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -588,9 +587,9 @@ export async function setNumberOwner(_state: AdminState, formData: FormData): Pr
  * it refuses is the widget's last active row.
  */
 export async function setWebchatActive(
-  _state: WebchatSwitchState,
+  _state: RowSwitchState,
   formData: FormData,
-): Promise<WebchatSwitchState> {
+): Promise<RowSwitchState> {
   await requirePermission('admin.channels');
 
   // Canonical, not as given: the switch finds its row among the ones it reads
@@ -639,9 +638,9 @@ export async function setWebchatActive(
  * type.
  */
 export async function setApiChannelActive(
-  _state: ApiSwitchState,
+  _state: RowSwitchState,
   formData: FormData,
-): Promise<ApiSwitchState> {
+): Promise<RowSwitchState> {
   await requirePermission('admin.channels');
 
   // Canonical, not as given: the switch finds its row among the ones it reads

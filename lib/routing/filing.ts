@@ -54,12 +54,29 @@ export function ownedByActiveAgent(channel: FilingInput): boolean {
   return channel.type === 'whatsapp' && channel.ownerActive === true;
 }
 
+/**
+ * Types a row can be made for before any ingest path files a ticket under it.
+ * The myBlu app's row is made ahead of the release that opens its tickets
+ * (`plans/myblu-ticket-api.md`, stage 2), and until that path ships its mode
+ * routes nothing: the panel said "held and routed" of a row that filed no
+ * ticket. Emptied by the stage whose path files under the type.
+ */
+const NOT_FILED_YET: readonly string[] = ['api'];
+
+/** Whether an ingest path files tickets under a row of this type yet. */
+export function filedYet(type: string): boolean {
+  return !NOT_FILED_YET.includes(type);
+}
+
 /** True when a new ticket on `channel` reaches the question of its mode. `rows` as `filingRowFor` takes them. */
 export function filesRoutableTickets<T extends FilingInput>(
   channel: T,
   rows: readonly T[],
 ): boolean {
   return (
-    channel.isActive && filingRowFor(channel, rows) === channel && !ownedByActiveAgent(channel)
+    channel.isActive &&
+    filedYet(channel.type) &&
+    filingRowFor(channel, rows) === channel &&
+    !ownedByActiveAgent(channel)
   );
 }

@@ -17,7 +17,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured } from '@/lib/typesafe/client';
-import { filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
+import { filedYet, filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
 import { routingModeOf, routingStartFor, type RoutingMode, type RoutingStart } from './mode';
 import { routingLock, type RoutingLock } from './mode-copy';
 
@@ -94,6 +94,8 @@ export type ChannelWarning =
   /** The column names a category mode the router never acts on. */
   | { kind: 'never_routes'; reason: RoutingLock }
   | { kind: 'inactive' }
+  /** No ingest path files a ticket under its type yet (`filedYet`). */
+  | { kind: 'not_filed_yet' }
   /** Another row of its type is the one new tickets are filed under. */
   | { kind: 'not_filing_row'; filingRow: string }
   /** An owned number's tickets are its owner's from the insert, and never held. */
@@ -307,6 +309,7 @@ function assessReadiness(input: {
       return { ...base, warnings };
     }
     if (!channel.isActive) warnings.push({ kind: 'inactive' });
+    else if (!filedYet(channel.type)) warnings.push({ kind: 'not_filed_yet' });
     else if (filingRow && filingRow !== channel) {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }

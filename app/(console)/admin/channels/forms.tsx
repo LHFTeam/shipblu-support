@@ -21,7 +21,7 @@ import {
   metaPlatformOf,
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
-import type { AdminState, ApiSwitchState, WebchatSwitchState } from '../settings-shared';
+import type { AdminState, RowSwitchState } from '../settings-shared';
 import { saveChannel, setApiChannelActive, setNumberOwner, setWebchatActive } from './actions';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { InfoTip } from '@/components/tooltip';
@@ -30,8 +30,7 @@ import { useActionForm } from '@/components/use-action-form';
 import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
 
 const INITIAL: AdminState = { error: null };
-const SWITCH_INITIAL: WebchatSwitchState = { error: null };
-const API_SWITCH_INITIAL: ApiSwitchState = { error: null };
+const ROW_SWITCH_INITIAL: RowSwitchState = { error: null };
 
 /**
  * A row as the column stores it, which is a wider set than a form can save.
@@ -544,11 +543,12 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
   // an empty config for it. The mode is offered from the first day, because the
   // path that opens an app's ticket reads it through `planRouting` and so needs
   // no change the day the support lead sets it to category; until that path
-  // ships nothing files under the row, and the setting waits for it. Neither
-  // `routingModeOf` nor the readiness panel needs an `api` case: the first
-  // honours the column on any row that is neither the bot nor a number on the
-  // Business app, and the second judges the filing row by `filingRowOfType`,
-  // the oldest active row of the type — the rule `apiChannel` reads by.
+  // ships nothing files under the row, the setting waits for it, and the
+  // readiness panel says so (`filedYet`). `routingModeOf` needs no `api` case:
+  // it honours the column on any row that is neither the bot nor a number on
+  // the Business app, and the panel judges the filing row by
+  // `filingRowOfType`, the oldest active row of the type — the rule
+  // `apiChannel` reads by.
   if (type === 'api') {
     return (
       <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
@@ -894,6 +894,93 @@ export type WebchatSwitchView =
   | { kind: 'switch_off'; widgetMovesTo: string | null }
   | { kind: 'switch_on'; takesWidget: boolean };
 
+/** A row switch's answer, shown only while the page's rows are as the action left them. */
+type RowSwitchAnswer = {
+  form: ReturnType<typeof useActionForm<RowSwitchState>>['form'];
+  notice: string | null;
+  error: string | null;
+};
+
+function useRowSwitch(
+  action: (state: RowSwitchState, formData: FormData) => Promise<RowSwitchState>,
+  stateKey: string,
+): RowSwitchAnswer {
+  const { state, form } = useActionForm(action, ROW_SWITCH_INITIAL);
+  const current = state.stateKey === undefined || state.stateKey === stateKey;
+  return {
+    form,
+    notice: current ? (state.notice ?? null) : null,
+    error: current ? state.error : null,
+  };
+}
+
+/**
+ * The notice outlives the form's place in the row, on a line of its own as the
+ * owner handover's does: it says where the widget or the app went, which is
+ * the sentence the admin needs, and inside the form it squeezed the button off
+ * its line.
+ */
+function NoticeLine({ notice }: { notice: string | null }) {
+  return notice ? (
+    <div className="w-full">
+      <SuccessText>{notice}</SuccessText>
+    </div>
+  ) : null;
+}
+
+/**
+ * One row switch, web chat's or the myBlu app's: its own form, holding nothing
+ * but the row and the direction, so `ConfirmSubmit` may sit in it beside a row
+ * editor that holds a text box (§6.90); the error under the button; the notice
+ * on its own line. One copy, so a fix to the confirm's wiring or the stale
+ * answer reaches both rows: they were near line-for-line copies.
+ *
+ * An `info` ⓘ shares a centred line with the button, inside the form and above
+ * the error, so it sits on the button's middle whatever the button's height
+ * and stays beside it when an error wraps underneath. It is a `type="button"`
+ * that carries no field, so the form still posts only the row and the
+ * direction.
+ */
+function RowSwitchForm({
+  answer,
+  channelId,
+  on,
+  confirmLabel,
+  info,
+}: {
+  answer: RowSwitchAnswer;
+  channelId: string;
+  on: boolean;
+  confirmLabel: string;
+  info?: React.ReactNode;
+}) {
+  const submit = (
+    <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
+  );
+  return (
+    <>
+      <form {...answer.form} className="inline-flex flex-col items-end gap-1">
+        <input type="hidden" name="id" value={channelId} />
+        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
+        {info ? (
+          <span className="inline-flex items-center gap-1">
+            {submit}
+            {info}
+          </span>
+        ) : (
+          submit
+        )}
+        {answer.error ? (
+          <span className="max-w-xs text-end">
+            <ErrorText inline>{answer.error}</ErrorText>
+          </span>
+        ) : null}
+      </form>
+      <NoticeLine notice={answer.notice} />
+    </>
+  );
+}
+
 /**
  * A web chat row's active switch.
  *
@@ -924,20 +1011,8 @@ export function WebchatActiveSwitch({
   plan: WebchatSwitchView;
   stateKey: string;
 }) {
-  const { state, form } = useActionForm(setWebchatActive, SWITCH_INITIAL);
-  const current = state.stateKey === undefined || state.stateKey === stateKey;
-  const notice = current ? state.notice : null;
-  const error = current ? state.error : null;
-
-  // The notice outlives the form's place in the row, on a line of its own as
-  // the owner handover's does: it says where the widget went, which is the
-  // sentence the admin needs, and inside the form it squeezed the button off
-  // its line.
-  const noticeLine = notice ? (
-    <div className="w-full">
-      <SuccessText>{notice}</SuccessText>
-    </div>
-  ) : null;
+  const answer = useRowSwitch(setWebchatActive, stateKey);
+  const { error } = answer;
 
   // A page drawn before another row went off is drawn again with the refusal
   // its click earned, and the button that was pressed is then this line, so
@@ -960,34 +1035,27 @@ export function WebchatActiveSwitch({
             </span>
           ) : null}
         </span>
-        {noticeLine}
+        <NoticeLine notice={answer.notice} />
       </>
     );
   }
 
   const on = plan.kind === 'switch_on';
-  const confirmLabel = on
-    ? plan.takesWidget
-      ? 'Move the widget to this row?'
-      : 'Really switch on?'
-    : plan.widgetMovesTo
-      ? `Move the widget to “${plan.widgetMovesTo}”?`
-      : 'Really switch off?';
-
   return (
-    <>
-      <form {...form} className="inline-flex flex-col items-end gap-1">
-        <input type="hidden" name="id" value={channelId} />
-        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
-        <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
-        {error ? (
-          <span className="max-w-xs text-end">
-            <ErrorText inline>{error}</ErrorText>
-          </span>
-        ) : null}
-      </form>
-      {noticeLine}
-    </>
+    <RowSwitchForm
+      answer={answer}
+      channelId={channelId}
+      on={on}
+      confirmLabel={
+        on
+          ? plan.takesWidget
+            ? 'Move the widget to this row?'
+            : 'Really switch on?'
+          : plan.widgetMovesTo
+            ? `Move the widget to “${plan.widgetMovesTo}”?`
+            : 'Really switch off?'
+      }
+    />
   );
 }
 
@@ -1021,52 +1089,30 @@ export function ApiActiveSwitch({
   plan: ApiSwitchView;
   stateKey: string;
 }) {
-  const { state, form } = useActionForm(setApiChannelActive, API_SWITCH_INITIAL);
-  const current = state.stateKey === undefined || state.stateKey === stateKey;
-  const notice = current ? state.notice : null;
-  const error = current ? state.error : null;
-
   const on = plan.kind === 'switch_on';
-  const confirmLabel = on
-    ? plan.takesApp
-      ? 'Open the app’s new tickets here?'
-      : 'Really switch on?'
-    : plan.last
-      ? 'Stop new tickets from the app?'
-      : plan.appMovesTo
-        ? `Move the app to “${plan.appMovesTo}”?`
-        : 'Really switch off?';
-
-  // The ⓘ shares a centred line with the button, inside the form and above the
-  // error, so it sits on the button's middle whatever the button's height and
-  // stays beside it when an error wraps underneath. Outside the form, beside
-  // it and top-aligned, it sat 6px above the 26px button's centre. It is a
-  // `type="button"` that carries no field, so the form still posts only the
-  // row and the direction.
   return (
-    <>
-      <form {...form} className="inline-flex flex-col items-end gap-1">
-        <input type="hidden" name="id" value={channelId} />
-        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
-        <span className="inline-flex items-center gap-1">
-          <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
-          <InfoTip label="switching the myBlu app row">
-            The app opens its new tickets under the oldest active myBlu app row. With none on, it
-            cannot open a ticket, while customers keep reading and replying on the tickets they
-            already have, and agents answer them here as before.
-          </InfoTip>
-        </span>
-        {error ? (
-          <span className="max-w-xs text-end">
-            <ErrorText inline>{error}</ErrorText>
-          </span>
-        ) : null}
-      </form>
-      {notice ? (
-        <div className="w-full">
-          <SuccessText>{notice}</SuccessText>
-        </div>
-      ) : null}
-    </>
+    <RowSwitchForm
+      answer={useRowSwitch(setApiChannelActive, stateKey)}
+      channelId={channelId}
+      on={on}
+      confirmLabel={
+        on
+          ? plan.takesApp
+            ? 'Open the app’s new tickets here?'
+            : 'Really switch on?'
+          : plan.last
+            ? 'Stop new tickets from the app?'
+            : plan.appMovesTo
+              ? `Move the app to “${plan.appMovesTo}”?`
+              : 'Really switch off?'
+      }
+      info={
+        <InfoTip label="switching the myBlu app row">
+          The app opens its new tickets under the oldest active myBlu app row. With none on, it
+          cannot open a ticket, while customers keep reading and replying on the tickets they
+          already have, and agents answer them here as before.
+        </InfoTip>
+      }
+    />
   );
 }

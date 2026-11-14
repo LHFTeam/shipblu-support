@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels } from '@/db/schema';
+import { switchRow, type RowSwitchOutcome } from '@/lib/admin/row-switch';
 import { logger } from '@/lib/log';
 import { apiStateKey, apiSwitchNotice, type ApiRow } from './channel-rows';
 
@@ -54,15 +55,6 @@ export async function apiChannel() {
 }
 
 /**
- * What a switch did, or why it did nothing, with the `api` rows as it left
- * them (`apiStateKey`): the page shows the answer only while its rows agree. A
- * refusal for a row that is not `api` carries none, since the page drew no
- * switch for it.
- */
-export type ApiSwitchOutcome =
-  { ok: true; notice: string; stateKey: string } | { ok: false; error: string; stateKey?: string };
-
-/**
  * Serialise the switches, so the sentence each one answers with — which row
  * the app now uses, or that none is on — is about the rows as they are. A
  * transaction lock, as `lockWebchatRows` takes, because under READ COMMITTED a
@@ -105,38 +97,19 @@ async function apiRowsIn(tx: Tx): Promise<ApiRow[]> {
  * ticket by its own rows, and a ticket held for the router on it is still
  * decided by its mode. Only new tickets move, or stop.
  */
-export async function switchApiChannel(id: string, active: boolean): Promise<ApiSwitchOutcome> {
-  return db.transaction(async (tx) => {
-    await lockApiRows(tx);
-
-    const [target] = await tx
-      .select({ type: channels.type })
-      .from(channels)
-      .where(eq(channels.id, id))
-      .limit(1);
-    if (target && target.type !== 'api') {
-      return { ok: false, error: 'Only a myBlu app channel is switched on and off here' };
-    }
-
-    const rows = await apiRowsIn(tx);
-    const stateKey = apiStateKey(rows);
-    const row = rows.find((candidate) => candidate.id === id);
-    if (!row) {
-      return { ok: false, error: 'That channel no longer exists — reload the page', stateKey };
-    }
-    if (row.isActive === active) {
-      return { ok: true, notice: `“${row.name}” is already ${active ? 'on' : 'off'}.`, stateKey };
-    }
-
-    await tx
-      .update(channels)
-      .set({ isActive: active, updatedAt: new Date() })
-      .where(eq(channels.id, id));
-    log.info('myBlu app row switched', { channel: id, active });
-
-    const after = rows.map((candidate) =>
-      candidate.id === id ? { ...candidate, isActive: active } : candidate,
-    );
-    return { ok: true, notice: apiSwitchNotice(rows, id, active), stateKey: apiStateKey(after) };
-  });
+export async function switchApiChannel(id: string, active: boolean): Promise<RowSwitchOutcome> {
+  return switchRow(
+    {
+      type: 'api',
+      wrongType: 'Only a myBlu app channel is switched on and off here',
+      lock: lockApiRows,
+      rowsIn: apiRowsIn,
+      stateKey: apiStateKey,
+      notice: apiSwitchNotice,
+      log,
+      logLine: 'myBlu app row switched',
+    },
+    id,
+    active,
+  );
 }

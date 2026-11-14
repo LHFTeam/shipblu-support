@@ -6,6 +6,7 @@ import {
   type FileRefusalReason,
 } from '@/lib/api/schemas';
 import type { z } from 'zod';
+import type { Admission } from '@/lib/http/rate-limit';
 
 /**
  * How every `/api/v1` route answers, success or refusal, so none spells it out
@@ -80,7 +81,13 @@ type ErrorExtras = {
  * publishes it on every `429` — and refused on any other code, where the
  * document publishes no `Retry-After` for a client to read.
  */
-type RateLimitedExtras = ErrorExtras & { retryAfterSeconds: number };
+/**
+ * `Retry-After` is an `Admission`'s `resetInSeconds`, which `admit` already
+ * rounds up to a whole number of at least one, and is written as it is: the
+ * rule lived here too, under a second comment, and one of the two could have
+ * changed while the other quietly overrode it.
+ */
+type RateLimitedExtras = ErrorExtras & { retryAfterSeconds: Admission['resetInSeconds'] };
 type OtherExtras = ErrorExtras & { retryAfterSeconds?: never };
 
 /**
@@ -125,7 +132,7 @@ export function apiError(
 
   const headers: Record<string, string> = {};
   if (extras.retryAfterSeconds !== undefined) {
-    headers['Retry-After'] = String(Math.max(1, Math.ceil(extras.retryAfterSeconds)));
+    headers['Retry-After'] = String(extras.retryAfterSeconds);
   }
 
   return apiJson(body, { requestId: extras.requestId, status: ERROR_STATUS[code], headers });
