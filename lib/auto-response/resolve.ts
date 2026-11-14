@@ -276,8 +276,8 @@ export const PLACEHOLDERS = [
   { token: '{{ticket_number}}', describes: 'the ticket number' },
   {
     token: '{{customer_name}}',
-    // The two blanks are the sender's (`lib/auto-response/index.ts`), which
-    // says why each one is withheld.
+    // The two blanks are `withholdsCustomerName`'s
+    // (`lib/tickets/channel-policy.ts`), which says why each one is withheld.
     describes:
       'the customer’s name; blank if we do not know it, in a reply to a public comment, and in the myBlu app, where the name we hold can belong to whoever had the number before',
   },

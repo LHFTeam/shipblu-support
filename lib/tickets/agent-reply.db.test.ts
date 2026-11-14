@@ -127,8 +127,8 @@ describe('storeAgentReply', () => {
     ).toEqual([{ type: carrier }]);
   });
 
-  // `carrierFor` answers `send_email` for both, so `storeAgentReply` setting web
-  // chat aside by name queued every reply to a myBlu ticket as an email.
+  // `carrierFor` answered `send_email` for both, so `storeAgentReply` setting
+  // web chat aside by name queued every reply to a myBlu ticket as an email.
   it.each(['webchat', 'api'] as const)(
     'queues nothing on %s, whose row is its delivery',
     async (channel) => {

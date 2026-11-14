@@ -39,21 +39,24 @@ import { deleteWordingRule, saveWordingRule, sendTestSurvey } from './actions';
 type Group = { id: string; name: string };
 
 /**
- * The channels a survey goes out on. Matches the list the action validates
+ * The channels a survey goes out on, named as the rest of the console names
+ * them (`CHANNEL_LABELS`). Every one is in the list the action validates
  * against — an option here the action rejects is a form that fails on save
  * for no reason the admin can see.
+ *
+ * The myBlu app is accepted there and not offered here: no survey reaches the
+ * app before its stage (`plans/myblu-ticket-api.md`, stage 8;
+ * `channelSwitch('api')` answers null), so a wording scoped to it would be a
+ * rule nothing ever reads. It joins this list with that stage.
  */
-const CHANNELS: { value: string; label: string }[] = [
-  { value: 'email', label: 'Email' },
-  { value: 'webchat', label: 'Web chat' },
-  { value: 'facebook', label: 'Facebook' },
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'portal', label: 'Customer portal' },
-  { value: 'api', label: CHANNEL_LABELS.api },
-];
+const CHANNELS = (['email', 'webchat', 'facebook', 'instagram', 'portal'] as const).map(
+  (value) => ({ value, label: CHANNEL_LABELS[value] }),
+);
 
 function channelLabel(value: string | null): string {
-  return CHANNELS.find((channel) => channel.value === value)?.label ?? 'Every channel';
+  return value && value in CHANNEL_LABELS
+    ? CHANNEL_LABELS[value as keyof typeof CHANNEL_LABELS]
+    : 'Every channel';
 }
 
 const PLACEHOLDERS: Record<WordingLocale, Record<WordingField, string>> = {

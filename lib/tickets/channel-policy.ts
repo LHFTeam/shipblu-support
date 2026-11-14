@@ -162,6 +162,26 @@ export function isCommentTicket(channel: string, externalId: string | null): boo
   return isCommentChannel(channel) || rootCommentId(externalId) !== null;
 }
 
+/**
+ * Whether anything the software writes on this ticket must leave the
+ * customer's name out, wherever a template would put it (`{{customer_name}}`).
+ *
+ * Two reasons, one answer, so a sender that greets by name asks once and
+ * cannot remember one reason and forget the other:
+ *
+ * - **A public comment thread** (`isCommentTicket`). The reply is published
+ *   under the post, and the contact's name can have come from another channel
+ *   — a merge with the customer's email contact, an agent's edit — that the
+ *   commenter never used in public.
+ * - **The myBlu app** (`api`). Its contact is found by the phone the app
+ *   vouched for (`plans/myblu-ticket-api.md`, _Identity_), and the name on that
+ *   contact can be a previous holder of the number's: greeting the new one by
+ *   it tells them whose number they now have.
+ */
+export function withholdsCustomerName(channel: string, externalId: string | null): boolean {
+  return channel === 'api' || isCommentTicket(channel, externalId);
+}
+
 /** The channel a platform's public comments are filed on. */
 export function commentChannelOf(platform: MetaPlatform): CommentChannel {
   switch (platform) {

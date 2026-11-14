@@ -284,12 +284,9 @@ export async function enqueueAutomatedDelivery(
   priority = 20,
   on?: Executor,
 ): Promise<void> {
-  if (rowIsDelivery(channel)) return;
-  await enqueue(
-    carrierFor(channel),
-    { messageId },
-    { priority, dedupeKey: `send:${messageId}`, on },
-  );
+  const carrier = carrierFor(channel);
+  if (!carrier) return;
+  await enqueue(carrier, { messageId }, { priority, dedupeKey: `send:${messageId}`, on });
 }
 
 /**
@@ -321,26 +318,23 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * Exhaustive over the enum, with no default arm. This used to send anything it
  * did not recognise to email, which is how a new channel would have mailed its
  * replies to contacts with no address; now a channel added to the enum does not
- * compile until somebody says what carries it. Web chat, the myBlu app (`api`)
- * and the customer bot answer `send_email` because the return type has no
- * answer meaning "nothing carries it", and none of the three is carried by it.
- * A web chat or myBlu message is never queued, because its row is its
- * delivery: every sender asks `rowIsDelivery` before it queues and for the
- * status it writes, and `sendsByEmail` — which decides whether an HTML part and
- * an address are stored — sets both aside. Until `api` was set aside with web
- * chat, an agent's reply to a myBlu ticket was queued here as an email: never
- * sent to a contact with no address, and mailed to one with an address about a
- * conversation they had in the app.
- * The bot's conversations are answered by nobody: the console offers no reply
- * there, every automated sender turns the bot away before it writes, and
+ * compile until somebody says what carries it.
+ *
+ * **Null where nothing carries a message**, so a caller cannot queue one
+ * without saying what happens then: `enqueue(carrierFor(c), …)` does not
+ * compile. Web chat and the myBlu app (`api`) have no carrier because their row
+ * is their delivery (`rowIsDelivery`). The customer bot has none because its
+ * conversations are answered by nobody: the console offers no reply there,
+ * every automated sender turns the bot away before it writes, and
  * `writeAutomatedReply` throws for one that did not (its docstring says who
- * refuses where). So `whatsapp_bot` never reaches this. Until the guard refused
- * it, an `on_update` rule's `send_reply` on a bot ticket was queued here as an
- * email.
+ * refuses where). The three answered `send_email` once, because the return
+ * type had no "nothing carries it", and each sender had to remember to ask
+ * first: an agent's reply to a myBlu ticket was queued as an email, and an
+ * `on_update` rule's `send_reply` on a bot ticket too.
  */
 export function carrierFor(
   channel: ConversationChannel,
-): 'send_whatsapp' | 'send_meta' | 'send_email' {
+): 'send_whatsapp' | 'send_meta' | 'send_email' | null {
   switch (channel) {
     case 'whatsapp':
       return 'send_whatsapp';
@@ -351,12 +345,11 @@ export function carrierFor(
       return 'send_meta';
     case 'email':
     case 'portal':
-    // None of the three is carried by it; the docstring says why they answer it
-    // anyway.
+      return 'send_email';
     case 'webchat':
     case 'api':
     case 'whatsapp_bot':
-      return 'send_email';
+      return null;
   }
 }
 
@@ -370,21 +363,14 @@ export function carrierFor(
  * then fell back to the contact's address at send time and rebuilt the body
  * from plain text.
  *
- * `carrierFor` answers `send_email` for two kinds of channel that do not send
- * by email, so they are excluded by what they are rather than by carrier. Web
- * chat and the myBlu app have no carrier at all: writing the row is the
- * delivery (`rowIsDelivery`). An HTML part stored there would be what the
- * console draws in place of the text the customer's client shows, and an
- * address would name somebody the message never went to. A read-only channel
- * (`whatsapp_bot`) is answered by nobody: the console offers no reply there,
- * and every automated sender is refused it before the row exists
- * (`writeAutomatedReply` says by what). Answering "email" for either would only
- * be true by accident.
+ * Web chat, the myBlu app and the customer bot have no carrier (`carrierFor`
+ * answers null), so none of them is written as an email. On web chat and the
+ * app an HTML part would be what the console draws in place of the text the
+ * customer's client shows, and an address would name somebody the message
+ * never went to — on the app, possibly a previous holder of the phone.
  */
 export function sendsByEmail(channel: ConversationChannel): boolean {
-  return (
-    !rowIsDelivery(channel) && !isReadOnlyChannel(channel) && carrierFor(channel) === 'send_email'
-  );
+  return carrierFor(channel) === 'send_email';
 }
 
 /**

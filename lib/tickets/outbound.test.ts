@@ -100,8 +100,8 @@ describe('deliverAutomatedReply', () => {
       eventType: 'auto_replied',
     });
 
-  // Asked of the carrier, `isEmail` was true here: `carrierFor` answers
-  // `send_email` for both, so an automated message on the myBlu app was
+  // Asked of the carrier when it answered `send_email` for both, `isEmail`
+  // was true here, so an automated message on the myBlu app was
   // stored with an HTML part and the contact's address — which can be a
   // previous holder of the phone's — and only the queueing was skipped.
   it.each(['webchat', 'api'] as const)(
@@ -293,14 +293,34 @@ describe('carrierFor', () => {
     expect(carrierFor('instagram_comment')).toBe('send_meta');
   });
 
-  // The return type has no "nothing carries it", so the two channels whose row
-  // is their delivery answer `send_email`, and only `rowIsDelivery` keeps them
-  // from being queued on it. Pinned so that a reader of this answer is pointed
-  // at the predicate rather than at the carrier.
-  it('answers send_email for the channels nothing carries, which rowIsDelivery sets aside', () => {
+  // Null, so `enqueue(carrierFor(c), …)` does not compile: a caller says
+  // what happens where nothing carries a message, rather than remembering to
+  // ask `rowIsDelivery` first.
+  it('answers null for the channels nothing carries: the two whose row is their delivery, and the bot', () => {
     for (const channel of ['webchat', 'api'] as const) {
-      expect(carrierFor(channel)).toBe('send_email');
+      expect(carrierFor(channel)).toBeNull();
       expect(rowIsDelivery(channel)).toBe(true);
+    }
+    expect(carrierFor('whatsapp_bot')).toBeNull();
+  });
+
+  // The one rule the two predicates keep between them, over every channel: a
+  // row that is its delivery has no carrier, and one with a carrier is not.
+  it('agrees with rowIsDelivery on every channel', () => {
+    for (const channel of [
+      'email',
+      'portal',
+      'whatsapp',
+      'whatsapp_bot',
+      'webchat',
+      'api',
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ] as const) {
+      if (rowIsDelivery(channel)) expect(carrierFor(channel), channel).toBeNull();
+      if (carrierFor(channel) !== null) expect(rowIsDelivery(channel), channel).toBe(false);
     }
   });
 });

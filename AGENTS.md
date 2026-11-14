@@ -744,12 +744,18 @@ delivery refuses it too, but by then the customer's timeline carries a reply
 that permanently failed. Route a new automated sender through it, through
 `carrierFor` and through `rowIsDelivery`, which is the same lesson three times —
 `send_csat` kept private copies of the first two and so surveyed Facebook tickets
-by email. `carrierFor` answers `send_email` for web chat and the myBlu app
-(`api`) because its return type has no "nothing carries it"; their row is the
-delivery, written `delivered` with no HTML part and no address and queued
-nowhere, and `rowIsDelivery` and `sendsByEmail` are what say so, at every sender
-— never a test naming one channel, which is how the code queued an `api` reply
-as an email at every place that set web chat aside by name.
+by email. `carrierFor` answers null for web chat and the myBlu app (`api`),
+whose row is the delivery — written `delivered` with no HTML part and no
+address and queued nowhere — and for the bot, which nobody answers, so
+`enqueue(carrierFor(c), …)` does not compile until a caller says what happens
+then. `rowIsDelivery` says what status the row is written with, and
+`sendsByEmail` whether it carries an HTML part and an address, at every sender —
+never a test naming one channel, which is how the code queued an `api` reply as
+an email at every place that set web chat aside by name, back when
+`carrierFor` answered `send_email` for both. A sender that greets the customer
+by name asks `withholdsCustomerName` (`lib/tickets/channel-policy.ts`) first:
+never under a public comment, and never into the app, whose contact's name can
+be a previous holder of the phone's.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and
