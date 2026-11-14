@@ -1,9 +1,9 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { apiSessions, contactIdentities, contacts } from '@/db/schema';
 import { mintSession } from '@/lib/api/sessions';
-import { mergeCandidates } from '@/lib/contacts/merge';
+import { mergeCandidates, mergeContacts } from '@/lib/contacts/merge';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { pendingApiContact, resolveApiContactIn, resolveContact } from './contacts';
@@ -255,6 +255,29 @@ describe('two mints at once', () => {
 });
 
 describe('resolveApiContactIn', () => {
+  // The number's WhatsApp contact read before the transaction, then merged
+  // away: the account joins the contact that holds the number now, rather than
+  // a second, phoneless contact nothing suggests merging.
+  it('joins the contact a merge moved the number to between the read and the transaction', async () => {
+    const before = await whatsappContact();
+    const pending = await pendingApiContact({ identifier: 'myblu:u_1', phone: PHONE, name: null });
+    const [kept] = await db
+      .insert(contacts)
+      .values({ name: 'Amira, kept' })
+      .returning({ id: contacts.id });
+    const merged = await mergeContacts({ survivorId: kept!.id, loserId: before, agentId: null });
+    expect(merged.ok).toBe(true);
+
+    const resolved = await db.transaction((tx) => resolveApiContactIn(tx, pending));
+
+    expect(resolved).toMatchObject({ contactId: kept!.id, how: 'joined' });
+    const live = await db
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(isNull(contacts.deletedAt));
+    expect(live).toEqual([{ id: kept!.id }]);
+  });
+
   it('writes nothing outside the transaction it is handed', async () => {
     const pending = await pendingApiContact({ identifier: 'myblu:u_1', phone: PHONE, name: null });
     await expect(

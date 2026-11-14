@@ -28,8 +28,12 @@ export function hashToken(token: string): string {
  * wrote it out by hand, and each had to remember the same two things: compare
  * bytes rather than characters, because `timingSafeEqual` throws on a length
  * mismatch and `'é'` is one character but two bytes; and check the lengths
- * first, which gives away only how long the secret is. A fourth copy that
- * forgot either one would read as correct.
+ * first. A fourth copy that forgot either one would read as correct.
+ *
+ * It compares SHA-256 digests of the two, which are always 32 bytes, so
+ * nothing about the time it takes depends on either length. It checked the
+ * lengths first once, which answered a mismatch at once and so gave away how
+ * long the secret is to anybody timing wrong guesses of varying length.
  *
  * Not for the hex HMAC in `lib/whatsapp/verify.ts`, which compares the decoded
  * digests rather than the strings. The signed reply tokens and subject tags in
@@ -37,8 +41,9 @@ export function hashToken(token: string): string {
  * lowercased first, so they come here.
  */
 export function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
+  return timingSafeEqual(sha256(a), sha256(b));
+}
+
+function sha256(value: string): Buffer {
+  return createHash('sha256').update(value, 'utf8').digest();
 }

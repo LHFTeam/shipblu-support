@@ -127,8 +127,9 @@ function refusedBearer(
  * and the plane under its limit. Null when the request may go on, the refusal
  * otherwise.
  *
- * Every accepted value is compared, matched or not, with `safeEqual`, so the
- * time an answer takes says nothing about which value came close.
+ * Every accepted value is compared, matched or not, with `safeEqual`, which
+ * compares digests of a fixed length, so the time an answer takes says nothing
+ * about which value came close, nor how long either is.
  *
  * A wrong bearer spends the address's bad-bearer budget, and past it is
  * answered `429` rather than `401`; the right one is never refused for it
@@ -204,7 +205,7 @@ export type Ending = { tokenHash: string; identityId: string };
 /**
  * `DELETE /session`'s gate: the client plane's, steps 1 to 4, except that a
  * blocked or deleted contact's session is handed back to be ended rather than
- * refused. Ending a session takes nothing from anybody, and the SDK's
+ * refused, and a build below `MINIMUM_VERSIONS` is not answered `426`. Ending a session takes nothing from anybody, and the SDK's
  * `reset()` wipes the device whatever this answers, so a `403` here would
  * leave alive a token its app has already let go of — for the rest of its
  * day, and usable again the moment the block is lifted.
@@ -217,7 +218,7 @@ export async function endingPlane(
   request: Request,
   input: GateInput,
 ): Promise<{ ending: Ending } | { refusal: Response }> {
-  const gate = await presentedSession(request, input);
+  const gate = await presentedSession(request, input, { ending: true });
   if ('refusal' in gate) return gate;
   const { session } = gate;
   return session.kind === 'live'
@@ -229,6 +230,7 @@ export async function endingPlane(
 async function presentedSession(
   request: Request,
   { requestId, now }: GateInput,
+  { ending = false }: { ending?: boolean } = {},
 ): Promise<Presented> {
   const address = admitAddress(request);
   if (!address.allowed) {
@@ -250,7 +252,10 @@ async function presentedSession(
       ),
     };
   }
-  const stale = belowMinimum(client.data);
+  // Never on the way out: a build too old to be served still ends its
+  // session, or the app's sign-out wipes the device and leaves the row live
+  // for the rest of its day — the outcome `endingPlane` exists to prevent.
+  const stale = ending ? null : belowMinimum(client.data);
   if (stale) {
     return {
       refusal: apiError('client_upgrade_required', `${stale} is no longer served; update it.`, {
@@ -300,7 +305,7 @@ async function presentedSession(
  * a server can answer is a fact about its code, and a value set in the
  * dashboard could refuse every installed app on one typo.
  */
-const MINIMUM_VERSIONS: ReadonlyMap<string, string> = new Map();
+export const MINIMUM_VERSIONS: ReadonlyMap<string, string> = new Map();
 
 /**
  * The first token in a `ShipBlu-Client` header older than its minimum, as the

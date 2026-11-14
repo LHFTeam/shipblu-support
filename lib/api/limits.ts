@@ -1,4 +1,4 @@
-import { admit, clientIp, type Admission } from '@/lib/http/rate-limit';
+import { admit, admitVouched, clientIp, type Admission } from '@/lib/http/rate-limit';
 
 /**
  * The myBlu API's limits, in memory and per instance (`lib/http/rate-limit.ts`):
@@ -13,6 +13,13 @@ import { admit, clientIp, type Admission } from '@/lib/http/rate-limit';
  * The buckets here are `plans/myblu-ticket-api.md`'s first five. Sends, new
  * tickets and uploaded megabytes arrive with the routes that spend them
  * (stages 4 and 7), each on the session's identity.
+ *
+ * Two stores. The address and bad-bearer buckets are keyed on a header the
+ * caller writes, and live in the shared one every public endpoint uses, which
+ * a spray of forged addresses can fill and make evict. The plane, mint and
+ * identity buckets are keyed on nothing an unauthenticated caller can choose,
+ * and live in the vouched store (`admitVouched`), which that spray cannot
+ * reach: in the shared one, it reset the mint cap.
  */
 
 const MINUTE_MS = 60_000;
@@ -54,7 +61,7 @@ export function spendBadBearer(request: Request): Admission {
 const SERVER_PLANE_LIMIT = 600;
 
 export function admitServerPlane(): Admission {
-  return admit('api-v1:server-plane', SERVER_PLANE_LIMIT, MINUTE_MS);
+  return admitVouched('api-v1:server-plane', SERVER_PLANE_LIMIT, MINUTE_MS);
 }
 
 /**
@@ -66,14 +73,14 @@ const MINT_LIMIT = 10;
 const MINT_WINDOW_MS = 10 * MINUTE_MS;
 
 export function admitMint(externalUserId: string): Admission {
-  return admit(`api-v1:mint:${externalUserId}`, MINT_LIMIT, MINT_WINDOW_MS);
+  return admitVouched(`api-v1:mint:${externalUserId}`, MINT_LIMIT, MINT_WINDOW_MS);
 }
 
 /** Reads, on the session's identity: what a polling app spends. */
 const READ_LIMIT = 240;
 
 export function admitRead(identityId: string): Admission {
-  return admit(`api-v1:read:${identityId}`, READ_LIMIT, MINUTE_MS);
+  return admitVouched(`api-v1:read:${identityId}`, READ_LIMIT, MINUTE_MS);
 }
 
 /**

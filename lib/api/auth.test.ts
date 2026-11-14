@@ -29,7 +29,7 @@ vi.mock('./sessions', () => ({
     return Promise.resolve({ kind: 'unauthenticated' });
   },
 }));
-const { belowMinimum, clientPlane, endingPlane, serverPlane, serverPlaneTokens } =
+const { belowMinimum, clientPlane, endingPlane, MINIMUM_VERSIONS, serverPlane, serverPlaneTokens } =
   await import('./auth');
 
 const TOKEN = 'server-plane-token-0123456789-abcdefghij';
@@ -320,6 +320,28 @@ describe('endingPlane', () => {
     expect(await ending({ ...CLIENT, Authorization: `Bearer ${lookup.blocked}` })).toEqual({
       ending: { tokenHash: 'hb', identityId: 'ib' },
     });
+  });
+
+  // A refusal here would leave the session live for the rest of its day: the
+  // app's sign-out wipes the device whatever it is answered.
+  it('ends the session of a build too old to be served, which every other route answers 426', async () => {
+    const minimums = MINIMUM_VERSIONS as Map<string, string>;
+    minimums.set('sdk-ts', '9.0.0');
+    try {
+      const gate = await clientPlane(
+        request({ ...CLIENT, Authorization: `Bearer ${lookup.live}` }),
+        { requestId: 'r', route: 'GET /config', now: new Date() },
+      );
+      expect('refusal' in gate ? await codeOf(gate.refusal) : null).toMatchObject({
+        status: 426,
+        code: 'client_upgrade_required',
+      });
+      expect(await ending({ ...CLIENT, Authorization: `Bearer ${lookup.live}` })).toEqual({
+        ending: { tokenHash: 'h', identityId: 'i' },
+      });
+    } finally {
+      minimums.delete('sdk-ts');
+    }
   });
 
   it('refuses everything else as the client plane does', async () => {

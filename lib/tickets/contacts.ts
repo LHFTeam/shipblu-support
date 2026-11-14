@@ -332,10 +332,13 @@ export async function pendingApiContact(input: ApiContactInput): Promise<Pending
  * The row lock is only ever taken first and the number's lock only after it, so
  * two mints cannot wait on each other in opposite orders.
  *
- * The same account minting twice at once — two devices, or a retry — meets on
- * the identity's unique index: the second insert does nothing, the contact it
- * made for itself is deleted, and it adopts the first one's identity, as
- * `resolveContactIn` does.
+ * The same account minting twice at once — two devices, or a retry — is
+ * serialised by the account's lock, which the caller holds (`lockAccount` in
+ * `mintSession`, the one caller): the second re-reads the identity under it
+ * and finds the first one's. Not the unique index, which stays a backstop: a
+ * second mint that met it once inserted a contact for itself, conflicted,
+ * deleted the contact and read the winner — four writes and two locks for an
+ * answer one read under the lock gives.
  */
 export async function resolveApiContactIn(
   tx: Tx,
@@ -344,11 +347,14 @@ export async function resolveApiContactIn(
   if (!('create' in pending)) return { ...pending, how: 'existing' };
 
   const { identifier, phone, name, whatsappContactId } = pending.create;
+  const committed = await findIdentity('api', identifier, tx);
+  if (committed) return { ...committed, how: 'existing' };
 
   let contactId: string;
   let how: 'joined' | 'created';
-  if (whatsappContactId && (await joinable(tx, whatsappContactId, phone))) {
-    contactId = whatsappContactId;
+  const joined = await joinNumber(tx, whatsappContactId, phone);
+  if (joined) {
+    contactId = joined;
     how = 'joined';
   } else {
     await lockNumber(tx, phone);
@@ -364,19 +370,28 @@ export async function resolveApiContactIn(
   const [identity] = await tx
     .insert(contactIdentities)
     .values({ contactId, channel: 'api', identifier, displayName: name, isVerified: true })
-    .onConflictDoNothing({ target: [contactIdentities.channel, contactIdentities.identifier] })
     .returning({ id: contactIdentities.id });
+  return { identityId: identity!.id, contactId, how };
+}
 
-  if (identity) return { identityId: identity.id, contactId, how };
-
-  if (how === 'created') await tx.delete(contacts).where(eq(contacts.id, contactId));
-  const [winner] = await tx
-    .select({ identityId: contactIdentities.id, contactId: contactIdentities.contactId })
-    .from(contactIdentities)
-    .where(and(eq(contactIdentities.channel, 'api'), eq(contactIdentities.identifier, identifier)))
-    .limit(1);
-  if (!winner) throw new Error('Contact identity conflict could not be resolved');
-  return { ...winner, how: 'existing' };
+/**
+ * The number's WhatsApp contact, joined if it is free: the one read before the
+ * transaction, or, when a merge has moved the number since, the contact that
+ * holds it now, asked once inside the transaction and judged under its own row
+ * lock. Null when neither may be joined. Without the second look, a merge
+ * landing between the read and the transaction gave the account a second,
+ * phoneless contact beside the one its user writes from on WhatsApp, which
+ * nothing suggests merging.
+ */
+async function joinNumber(tx: Tx, candidate: string | null, phone: string): Promise<string | null> {
+  if (candidate) {
+    const verdict = await joinable(tx, candidate, phone);
+    if (verdict === 'free') return candidate;
+    if (verdict === 'taken') return null;
+  }
+  const holder = await findIdentity('whatsapp', phone, tx);
+  if (!holder || holder.contactId === candidate) return null;
+  return (await joinable(tx, holder.contactId, phone)) === 'free' ? holder.contactId : null;
 }
 
 /** The number's advisory lock, for the rest of the transaction. */
@@ -388,17 +403,22 @@ async function lockNumber(tx: Tx, phone: string): Promise<void> {
 
 /**
  * Whether the number's WhatsApp contact is free to join, decided under its row
- * lock: still a live contact, still the number's owner — a merge can have moved
- * the number since it was read — and with no `api` identity on it; and then,
- * under the number's lock, with no other account's contact holding the number.
+ * lock: `moved` when it is no longer a live contact holding the number — a
+ * merge can have moved the number since it was read, which `joinNumber` asks
+ * about once more — and `taken` when it has an `api` identity already, or,
+ * under the number's lock, another account's contact holds the number.
  */
-async function joinable(tx: Tx, contactId: string, phone: string): Promise<boolean> {
+async function joinable(
+  tx: Tx,
+  contactId: string,
+  phone: string,
+): Promise<'free' | 'moved' | 'taken'> {
   const [locked] = await tx
     .select({ deletedAt: contacts.deletedAt })
     .from(contacts)
     .where(eq(contacts.id, contactId))
     .for('no key update');
-  if (!locked || locked.deletedAt) return false;
+  if (!locked || locked.deletedAt) return 'moved';
 
   const identities = await tx
     .select({ channel: contactIdentities.channel, identifier: contactIdentities.identifier })
@@ -410,12 +430,11 @@ async function joinable(tx: Tx, contactId: string, phone: string): Promise<boole
       ),
     );
 
-  const ownsNumber = identities.some((i) => i.channel === 'whatsapp' && i.identifier === phone);
-  const joinedAlready = identities.some((i) => i.channel === 'api');
-  if (!ownsNumber || joinedAlready) return false;
+  if (!identities.some((i) => i.channel === 'whatsapp' && i.identifier === phone)) return 'moved';
+  if (identities.some((i) => i.channel === 'api')) return 'taken';
 
   await lockNumber(tx, phone);
-  return !(await anotherAccountHolds(tx, phone, contactId));
+  return (await anotherAccountHolds(tx, phone, contactId)) ? 'taken' : 'free';
 }
 
 /**

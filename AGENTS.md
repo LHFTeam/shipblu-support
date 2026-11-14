@@ -3152,8 +3152,12 @@ deleting it, and drop the sections that genuinely do not apply.
   first `X-Forwarded-For` value, which a caller writes, so no address bucket
   stands between a good bearer and its answer except the generous one before
   auth: refused bearers are counted only to turn the next refusal's `401` into
-  a `429`. A row that records who asked keeps the whole chain
-  (`forwardedChain`), never that first value.
+  a `429`. That also means a forged address can fill the store every public
+  endpoint shares, which then drops its oldest buckets, so a bucket keyed on
+  something no unauthenticated caller can choose — a plane, an account the
+  server plane vouched for, a session's identity — goes in the store of its
+  own (`admitVouched`), where the spray cannot evict it. A row that records
+  who asked keeps the whole chain (`forwardedChain`), never that first value.
 - **A host page telling the widget who its visitor is makes a claim, not a
   statement of fact.** It arrives from a browser. An unsigned identity may only
   decorate the contact the visitor's token already resolved to — it never adopts
