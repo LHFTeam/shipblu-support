@@ -174,6 +174,17 @@ export const JOB_PAYLOADS = {
   // The survey, not the ticket: one alert per answer, and the handler's
   // once-only check keys on it. Strict because CI runs it by hand.
   notify_low_rating: z.strictObject({ surveyId: z.uuid() }),
+  // The myBlu webhook: one arm per event, told apart by `event`, so the
+  // survey's (`survey.created`, stage 8 of `plans/myblu-ticket-api.md`) arrives
+  // as a second arm rather than a changed shape this strict schema would send
+  // every queued job of the first to `dead`. Ids only: a dead job's payload is
+  // kept for good, and the body is rebuilt from the rows when it is sent.
+  // Strict because a delivery that died is sent again by hand, as
+  // `npm run job -- notify_myblu event=message.created messageId=…`; a uuid
+  // because the id goes straight into a query, where a malformed one is 22P02.
+  notify_myblu: z.discriminatedUnion('event', [
+    z.strictObject({ event: z.literal('message.created'), messageId: z.uuid() }),
+  ]),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
   // matches neither half rather than being read as WhatsApp media.

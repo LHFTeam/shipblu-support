@@ -18,11 +18,17 @@
  * have been the first row to carry the value, and rolling 1.1 back would have
  * put it in front of an editor that lists it as company-wide and saves it back
  * as every channel.
+ *
+ * `api`, the myBlu app, joined with the stage that writes its first ticket
+ * (`plans/myblu-ticket-api.md`, stage 4), for the same reason. A rule with no
+ * channel already matches it; naming it is how the team words the app's own
+ * acknowledgement, which is delivered in the app rather than mailed.
  */
 export const AUTO_RESPONSE_CHANNELS = [
   { value: 'email', label: 'Email' },
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'webchat', label: 'Web chat' },
+  { value: 'api', label: 'myBlu app' },
   { value: 'facebook', label: 'Facebook messages' },
   { value: 'facebook_comment', label: 'Facebook comments' },
   { value: 'instagram', label: 'Instagram messages' },

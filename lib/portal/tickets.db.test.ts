@@ -601,6 +601,25 @@ describe('getTicket', () => {
   });
 });
 
+describe('a myBlu app ticket', () => {
+  // `plans/myblu-ticket-api.md`, _What the app can read_: the portal stops
+  // reaching `api` tickets in the stage that writes the first one, through one
+  // list for the three reads, so the list cannot hide one the page still opens.
+  it('is neither listed nor opened on the portal, while the contact’s other tickets are', async () => {
+    const contactId = await customer();
+    const app = await createTicket(contactId, { subject: 'App', body: 'From the app.' });
+    const mail = await createTicket(contactId, { subject: 'Portal', body: 'From here.' });
+    await db
+      .update(conversations)
+      .set({ channel: 'api' })
+      .where(eq(conversations.id, app.conversationId));
+
+    expect((await listTickets(contactId)).map((ticket) => ticket.number)).toEqual([mail.number]);
+    expect(await getTicket(contactId, app.number)).toBeNull();
+    expect((await getTicket(contactId, mail.number))?.number).toBe(mail.number);
+  });
+});
+
 describe('the status label a customer sees', () => {
   // The statuses page says what a customer sees through `shownLabel`, and the
   // portal decides it in SQL; each would otherwise be free to drift from the
@@ -780,6 +799,20 @@ describe('appendReply', () => {
       await db
         .update(conversations)
         .set({ deletedAt: new Date() })
+        .where(eq(conversations.id, created.conversationId));
+
+      await refused(contactId, created.number, created.conversationId);
+    });
+
+    // The myBlu app's tickets belong to the app identity that opened them, and
+    // a number is guessable: from here, a previous holder of the phone could
+    // write into the new holder's myBlu ticket as the customer.
+    it('a myBlu app ticket, which only the app reaches', async () => {
+      const contactId = await customer();
+      const created = await createTicket(contactId, { subject: 'App', body: 'From the app.' });
+      await db
+        .update(conversations)
+        .set({ channel: 'api' })
         .where(eq(conversations.id, created.conversationId));
 
       await refused(contactId, created.number, created.conversationId);

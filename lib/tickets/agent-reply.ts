@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
+import { enqueueMessageCreated } from '@/lib/api/notify';
 import { enqueue } from '@/lib/queue';
 import { runAutomations } from '@/lib/automations';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
@@ -8,7 +9,7 @@ import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
-import { carrierFor } from '@/lib/tickets/outbound';
+import { carrierFor, rowIsDelivery } from '@/lib/tickets/outbound';
 
 /** The row an agent's reply is stored as, less what every reply shares. */
 export type AgentReplyMessage = Omit<
@@ -84,9 +85,10 @@ export async function storeAgentReply(
     });
   }
 
-  // Web chat has no outbound provider: writing the row *is* delivery, because
-  // the visitor's open stream reads the same table.
-  if (channel !== 'webchat') {
+  // Web chat and the myBlu app have no outbound provider: writing the row *is*
+  // delivery, because the customer's client — the widget's open stream, the
+  // app's poll — reads the same table (`rowIsDelivery`).
+  if (!rowIsDelivery(channel)) {
     await enqueue(
       carrierFor(channel),
       { messageId },
@@ -95,6 +97,13 @@ export async function storeAgentReply(
       { priority: 10, dedupeKey: `send:${messageId}` },
     );
   }
+
+  // On the myBlu app, the push that tells the user's phone the reply is
+  // there: myBlu's backend is told, and pushes. Nothing on any other channel,
+  // and nothing while the webhook is off. Best-effort: the reply above is
+  // already the delivery, and a push that cannot be queued is logged, never
+  // answered to the agent as a reply that failed.
+  await enqueueMessageCreated(channel, messageId, { priority: 10 });
 
   // An agent looks a parcel up on the shipping platform and pastes the number
   // into their answer, which is why this runs on outbound as well as inbound.

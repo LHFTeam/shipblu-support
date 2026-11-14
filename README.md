@@ -503,6 +503,58 @@ its link is never kept in a payload.
 public KB queries do not yet take the viewer into account, and an unevaluated visibility
 rule is treated as deny.
 
+## The myBlu ticket API
+
+The myBlu recipient app reaches support through `/api/v1`, an HTTP API with a contract
+published before its routes (`docs/myblu-api.openapi.json`, built from
+`lib/api/schemas.ts`), a guide for myBlu's teams (`docs/myblu-api.md`) and a TypeScript
+SDK in a repository of its own. `plans/myblu-ticket-api.md` is the reasoning and the
+stages; the routes land one stage at a time.
+
+```
+GET    /api/v1/openapi.json      the contract, no credential                 (stage 0b)
+POST   /api/v1/sessions          server plane: mint a session for one user   (stage 3)
+POST   /api/v1/sessions/revoke   server plane: end every session of a user   (stage 3)
+DELETE /api/v1/session           client plane: end this session             (stage 3)
+GET    /api/v1/config            client plane: who is signed in, the limits  (stage 3)
+                                 ... and the team's hours                    (stage 5)
+POST   /api/v1/tickets           client plane: open a ticket                 (stage 4)
+GET    /api/v1/tickets           client plane: the user's tickets            (stage 5)
+GET    /api/v1/tickets/{id}      client plane: one ticket                    (stage 4)
+GET    /api/v1/tickets/{id}/messages   a page of a thread, by cursor         (stage 4)
+POST   /api/v1/tickets/{id}/messages   the user's reply                      (stage 4)
+POST   /api/v1/tickets/{id}/read client plane: mark the team's replies read  (stage 5)
+POST   <MYBLU_WEBHOOK_URL>       to myBlu's backend: the team wrote; push    (stage 6)
+```
+
+Two planes, and neither takes a cookie. **myBlu's backend** holds `MYBLU_API_TOKEN` and
+does two things with it: mints a session for a user it has verified by SMS, and ends one.
+**The app** holds that session — `sbu_…`, stored here only as its hash, twenty-four hours
+with no refresh — and does everything else as that one user. Who is asking comes from the
+session and never from a request body, and the phone the backend vouches for joins the
+account to that number's WhatsApp contact, so an agent sees one customer with one history
+while the app sees only what its own identity opened. With `MYBLU_API_TOKEN` unset the
+whole API answers `503 not_configured`, which is how it ships ahead of anybody holding a
+value and how it is switched off.
+
+A ticket the app opens is an ordinary `api` ticket to the team — filed under the `api`
+channel row's group, routed, timed and answered from the console like any other — and
+belongs, to the app, only to the identity that opened it: every statement the API runs
+about a ticket names that identity, the session's contact and the channel in the same
+`WHERE` as the id (`ownedTicket` in `lib/api/scope.ts`), so a contact merge or a shared
+phone changes what an agent sees and never what another app user reads. There is no
+stream: the app polls a cursor and obeys the `pollAfterSeconds` each answer carries.
+Unread is the team's replies with no `read_at`, kept on the server so two devices show one
+badge; marking them read from the app is what the console then draws as Read.
+
+The push is myBlu's to send, so the app is told of an answer while it is closed through
+its own backend: for every reply the team writes on an `api` ticket the worker posts one
+signed webhook, `message.created`, carrying ids and no text (`notify_myblu`,
+`lib/api/webhook.ts`), and the backend pushes to that user's devices. It is a hint, not
+the delivery — the reply is in the app on its next poll whether or not the push lands, so
+a failed webhook never marks a reply failed — and with `MYBLU_WEBHOOK_URL` unset nothing is
+queued or sent.
+
 ## Deployment
 
 `render.yaml` is a Render Blueprint defining one project with two environments: the web

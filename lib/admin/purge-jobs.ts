@@ -70,6 +70,7 @@ export async function purgeJobs(
       'download_media',
       'classify_priority',
       'classify_category',
+      'notify_myblu',
     ] satisfies JobType[];
 
     scopes.push(

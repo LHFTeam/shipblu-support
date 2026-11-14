@@ -3,9 +3,9 @@
  * mode and the classifier are asked (`routingStartFor`). Two things stop one
  * whatever the mode says, and both are decided by ingest, not by the row:
  *
- * - **another row files them.** Email, the Meta rows and web chat each file
- *   under the oldest active row of their type, so a second one's mode does
- *   nothing.
+ * - **another row files them.** Email, the Meta rows, web chat and the myBlu
+ *   app (`apiChannel`) each file under the oldest active row of their type,
+ *   so a second one's mode does nothing.
  * - **an active owner.** An owned number's ticket is stamped with its owner in
  *   the insert, and a ticket with an assignee is never held
  *   (`lib/routing/start.ts`).
@@ -29,7 +29,7 @@ export type FilingInput = {
  * row, while none is active, is stood in for by its platform's row — that is
  * not this one. `rows` oldest first, ties by id: the order every ingest path
  * picks "the row of this type" by (`defaultEmailChannel`, `channelFor`,
- * `webchatChannel`).
+ * `webchatChannel`), and `apiChannel` for the myBlu app's.
  */
 export function filingRowFor<T extends FilingInput>(channel: T, rows: readonly T[]): T | null {
   if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;

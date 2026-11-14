@@ -183,26 +183,28 @@ _Fixed by PR 3 (#502), live on 2026-11-10. On 2026-11-11 all six shapes
 answered 301 on the Render host and on `support.shipblu.com`. The 4
 agents-only articles answer 404 (#504). See PR 3 below._
 
-Every legacy shape `proxy.ts` sends to `/help/legacy` answers **404**:
-`/support/solutions/articles/<id>`, the same with a `-title` suffix,
-`/a/solutions/articles/<id>`, `/solutions/articles/<id>`,
-`/<locale>/support/solutions/articles/<id>` and `/support/solutions/folders/<id>`.
-The same route called directly answers the correct 301:
+What follows is the record of 2026-11-07. Every legacy shape `proxy.ts` sent
+to `/help/legacy` answered **404**: `/support/solutions/articles/<id>`, the
+same with a `-title` suffix, `/a/solutions/articles/<id>`,
+`/solutions/articles/<id>`, `/<locale>/support/solutions/articles/<id>` and
+`/support/solutions/folders/<id>`. The same route called directly answered the
+correct 301:
 
 ```text
 GET /support/solutions/articles/154000189336                      → 404
 GET /help/legacy?path=%2Fsupport%2Fsolutions%2Farticles%2F154000189336 → 301 /ar/a/إرشادات-التعبئة-والتغليف
 ```
 
-The route reads `new URL(request.url).searchParams.get('path')`, and through the
-proxy's rewrite it apparently does not see the `path` the rewrite added. That
-is observed, not yet diagnosed. `kb_redirects` (174 rows: 58 ids under each of
-the three prefixes, every `to_path` null) and the importer's stored ids are the
-mapping, and nothing reaches it this way. This is the inbound side, not a link
-we publish, but it decides what happens to every Freshdesk URL in the next
-section once `support.shipblu.com` points here: today they would all 404.
-`docs/PROJECT-STATE.md` §5.2 said none of these redirects had been "followed in
-anger"; now one has, and it failed.
+The route read `new URL(request.url).searchParams.get('path')`, and through the
+proxy's rewrite it never saw the `path` the rewrite added: a query a proxy
+rewrite adds never reaches a route handler (diagnosed on 2026-11-08,
+`docs/PROJECT-STATE.md` §6.115). `kb_redirects` (174 rows: 58 ids under each of
+the three prefixes, every `to_path` null) and the importer's stored ids were
+the mapping, and nothing reached it that way. This is the inbound side, not a
+link we publish, but it decided what would happen to every Freshdesk URL in the
+next section once `support.shipblu.com` pointed here: that day they would all
+have answered 404. `docs/PROJECT-STATE.md` §5.2 said none of these redirects
+had been "followed in anger"; that day one was, and it failed.
 
 ### Outside this repository: what still sends people to Freshdesk
 

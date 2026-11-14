@@ -220,6 +220,36 @@ projects:
             #                            value per environment: a signature minted
             #                            against one deployment would otherwise
             #                            be replayable at the other.
+            #   MYBLU_API_TOKEN          the myBlu API's server-plane bearer,
+            #                            held by myBlu's backend: it mints a
+            #                            session for any user and ends them.
+            #                            Unset, or under 32 characters, is the
+            #                            API switched off (503 on both planes);
+            #                            unsetting it is the way back. Read by
+            #                            the web service alone. `openssl rand
+            #                            -base64 48`, never staging's value.
+            #   MYBLU_API_TOKEN_PREVIOUS
+            #                            the value being retired, set only while
+            #                            the backend moves to a new one; never a
+            #                            value suspected of leaking
+            #   MYBLU_WEBHOOK_URL        myBlu's backend's receiver, told when the
+            #                            team writes on an app ticket so it can
+            #                            push. https, no userinfo, no query
+            #                            string, exactly as the receiver serves
+            #                            it (a redirect is a failed delivery).
+            #                            Unset is the webhook switched off and
+            #                            the way back: nothing is queued, and a
+            #                            job already queued sends nothing. Every
+            #                            service that writes a reply reads it to
+            #                            queue; only the worker posts
+            #   MYBLU_WEBHOOK_SECRET     signs each delivery (HMAC-SHA256); under
+            #                            32 characters counts as unset, and a URL
+            #                            with no secret sends nothing. `openssl
+            #                            rand -hex 32`, handed to the backend once,
+            #                            never staging's value
+            #   MYBLU_WEBHOOK_SECRET_PREVIOUS
+            #                            signs beside it only while the receiver
+            #                            moves to a new secret
             #   KB_NOTICE_EN             service notice, English
             #   KB_NOTICE_AR             service notice, Arabic
             #   KB_NOTICE_HREF           optional "read the update" link
@@ -623,6 +653,20 @@ projects:
             #                              a configuration on staging's own
             #                              Meta app, and a v4 one, as in
             #                              production's group
+            #   MYBLU_API_TOKEN            staging's own minting token, held by
+            #                              myBlu's staging backend for a named
+            #                              test window, never production's:
+            #                              whoever holds it mints any user here
+            #   MYBLU_API_TOKEN_PREVIOUS
+            #                              only during a rotation
+            #   MYBLU_WEBHOOK_URL          myBlu's staging receiver, or a request
+            #                              bin the owner controls, for a named
+            #                              test window
+            #   MYBLU_WEBHOOK_SECRET       staging's own, never production's: a
+            #                              delivery signed here must not verify
+            #                              at production's receiver
+            #   MYBLU_WEBHOOK_SECRET_PREVIOUS
+            #                              only during a rotation
             envVars: []
 
         services:
