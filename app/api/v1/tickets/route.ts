@@ -3,15 +3,9 @@ import { clientPlane } from '@/lib/api/auth';
 import { POLL_LIST_SECONDS } from '@/lib/api/config';
 import { answering, rateLimited } from '@/lib/api/errors';
 import { admitRead, admitSend } from '@/lib/api/limits';
-import {
-  answerSend,
-  idempotencyKey,
-  listAsked,
-  refuseMultipart,
-  sendBody,
-} from '@/lib/api/requests';
+import { answerSend, idempotencyKey, listAsked, sendFields } from '@/lib/api/requests';
 import { apiJson, newRequestId } from '@/lib/api/respond';
-import { CreateTicketRequest, type TicketsPage } from '@/lib/api/schemas';
+import type { TicketsPage } from '@/lib/api/schemas';
 import { createApiTicket, listTickets } from '@/lib/api/tickets';
 import { logger } from '@/lib/log';
 
@@ -59,12 +53,13 @@ export async function GET(request: Request): Promise<Response> {
  * `Idempotency-Key` is required: the first request is `201`, and a retry under
  * the same key `200` with `Idempotent-Replayed: true` and what the first
  * stored, creating nothing (`createApiTicket`). Spends the identity's send
- * bucket, as both message-writing routes do; its new-ticket bucket is spent by
- * `createApiTicket` once the key is known to be unspent, so a retry is never
- * refused it. Files are stage 7's: until then a multipart body is
- * `400 invalid_request`.
+ * bucket, as both message-writing routes do; its new-ticket and upload buckets
+ * are asked by `createApiTicket` once the key is known to be unspent, so a
+ * retry is never refused either. The body is JSON, or multipart with files
+ * (`sendFields`): a message with words, files, or both.
  *
- * The log line names the route, the identity and the outcome, never the body.
+ * The log line names the route, the identity, the outcome and how many files,
+ * never the body or a filename.
  */
 export async function POST(request: Request): Promise<Response> {
   const requestId = newRequestId();
@@ -78,15 +73,14 @@ export async function POST(request: Request): Promise<Response> {
 
     const keyed = idempotencyKey(request, requestId);
     if ('refusal' in keyed) return keyed.refusal;
-    const multipart = refuseMultipart(request, requestId);
-    if (multipart) return multipart;
-    const read = await sendBody(request, requestId, CreateTicketRequest);
+    const read = await sendFields(request, requestId, 'createTicket');
     if ('refusal' in read) return read.refusal;
 
     const outcome = await createApiTicket(caller, {
-      text: read.body.text,
-      locale: read.body.locale,
-      trackingNumber: read.body.trackingNumber ?? null,
+      text: read.text,
+      locale: read.locale,
+      trackingNumber: read.trackingNumber ?? null,
+      uploads: read.uploads,
       key: keyed.key,
       // Present and parsed: the gate refuses a request without it.
       client: request.headers.get('shipblu-client') ?? '',
@@ -95,6 +89,7 @@ export async function POST(request: Request): Promise<Response> {
       route: ROUTE,
       identity: caller.identityId,
       outcome: outcome.kind === 'sent' && outcome.replayed ? 'replayed' : outcome.kind,
+      files: read.uploads.length,
       requestId,
     });
     return answerSend(outcome, requestId);

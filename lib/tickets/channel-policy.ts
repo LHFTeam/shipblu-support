@@ -371,6 +371,11 @@ export function hasWrittenSubject(channel: string): boolean {
  * mail at a photo's size; and a camera photo attached to a mail runs to
  * megabytes. A named list, as `WRITTEN_SUBJECT` is, so a channel added later
  * keeps the cautious behaviour until somebody decides otherwise.
+ *
+ * The myBlu app (`api`) joined with its files (stage 7 of
+ * `plans/myblu-ticket-api.md`): a chat on a phone, whose files are a photo of a
+ * parcel or a voice note typed by the bytes as the widget's are
+ * (`sniffWidgetFile`), never a mail's signature logos.
  */
 const CHAT_MEDIA: readonly ConversationChannel[] = [
   'whatsapp',
@@ -380,6 +385,7 @@ const CHAT_MEDIA: readonly ConversationChannel[] = [
   'instagram',
   'instagram_comment',
   'webchat',
+  'api',
 ];
 
 export function drawsMediaInline(channel: string): boolean {

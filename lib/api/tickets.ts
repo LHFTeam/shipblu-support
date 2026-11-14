@@ -11,12 +11,15 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { ATTACHMENT_URL_TTL_SECONDS } from '@/lib/attachments/signed-url';
+import { webchatFilesStandIn } from '@/lib/chat/stand-ins';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { preview } from '@/lib/html/sanitize';
 import type { Admission } from '@/lib/http/rate-limit';
 import { shownLabelSql } from '@/lib/portal/tickets';
 import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
+import { signedUrl } from '@/lib/storage';
 import { subjectWords, UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { latest } from '@/lib/tickets/latest';
 import { isMediaStandIn } from '@/lib/tickets/message-media';
@@ -25,15 +28,23 @@ import { reopenResolved } from '@/lib/tickets/reopen';
 import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-category';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import { isUuid } from '@/lib/http/uuid';
+import {
+  releaseUnlessStored,
+  storeVisitorFiles,
+  VisitorUploadFailed,
+  type StoredUpload,
+  type VisitorUpload,
+} from '@/lib/widget/conversation';
+import { megabytesOf } from '@/lib/widget/uploads';
 import { afterPage } from './after-page';
 import { apiChannel } from './channel';
 import { encodeCursor, THREAD_START, type Cursor } from './cursor';
 import { finishInRequest, oweFinish } from './finish';
 import { messageFrom } from './from';
-import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
+import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
-import type { Message, Ticket } from './schemas';
+import type { AttachmentLink, Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
 
@@ -803,19 +814,67 @@ export async function markTicketRead(
   }
 }
 
+/**
+ * `GET /attachments/{id}`: a short-lived link to one file's bytes, or null for
+ * every reason the caller may not have it — not on one of their tickets, on a
+ * note, a reaction or a ticket the team took out of the queue, inline in a body
+ * this API never sends, or no file at all. One `404` from one statement, as a
+ * ticket's is: the file is reached through its message and the message through
+ * `ownedTicket(caller)`, in the same `WHERE`, so it is exactly the files a
+ * thread lists (`messageFiles`, `threadWhere`) and no other. A file on a side
+ * conversation hangs off no message and is never reached.
+ *
+ * The link is Storage's, signed for `ATTACHMENT_URL_TTL_SECONDS`, the console's
+ * five minutes, and answered as JSON rather than a redirect, so no HTTP library
+ * has to decide whether to forward the session's bearer to another host. It is
+ * used at once and never logged or stored here; expiry is not revocation
+ * (`lib/attachments/signed-url.ts` says why), so a `403` from Storage means ask
+ * again.
+ */
+export async function attachmentLink(
+  caller: Caller,
+  attachmentId: string,
+): Promise<z.input<typeof AttachmentLink> | null> {
+  const [row] = await db
+    .select({ path: attachments.storagePath })
+    .from(attachments)
+    .innerJoin(messages, eq(messages.id, attachments.messageId))
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(
+      and(
+        eq(attachments.id, attachmentId),
+        eq(attachments.isInline, false),
+        eq(messages.kind, 'reply'),
+        notReaction(),
+        ownedTicket(caller),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return {
+    url: await signedUrl(row.path, ATTACHMENT_URL_TTL_SECONDS),
+    expiresInSeconds: ATTACHMENT_URL_TTL_SECONDS,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
 
-/** What the user sent, read and judged by the route. */
+/** What the user sent, read and judged by the route (`sendFields`). */
 export type Sent = {
-  /** Trimmed, and not blank: a blank one is `400 empty_message` before this. */
+  /**
+   * Trimmed. Blank only beside files: neither is `400 empty_message` before
+   * this, and a message of files alone is stored with their stand-in.
+   */
   text: string;
   locale: 'ar' | 'en';
   /** The `Idempotency-Key`, a UUID, as the client sent it. */
   key: string;
   /** The request's `ShipBlu-Client`, which the gate has already parsed. */
   client: string;
+  /** The files, in the order sent, each typed by its bytes; none for a JSON body. */
+  uploads: readonly VisitorUpload[];
 };
 
 export type SendOutcome =
@@ -830,8 +889,13 @@ export type SendOutcome =
   | { kind: 'not_configured' }
   /** `POST /tickets` past `MAX_OPEN_TICKETS` open or pending. */
   | { kind: 'too_many_open' }
-  /** `POST /tickets` with an unspent key, past the identity's new-ticket bucket. */
-  | { kind: 'rate_limited'; admission: Admission }
+  /**
+   * An unspent key past one of the identity's buckets: `POST /tickets`'s new
+   * tickets, or either send's uploaded megabytes.
+   */
+  | { kind: 'rate_limited'; admission: Admission; bucket: 'new_tickets' | 'uploads' }
+  /** A file could not be stored, so nothing was: the SDK sends again under the same key. */
+  | { kind: 'upload_failed' }
   /**
    * A write whose session was no longer live once it held the account — revoked
    * or expired while it waited — or whose identity names no live contact any
@@ -919,7 +983,107 @@ function metaFor(sent: Sent, operation: Operation): Record<string, unknown> {
     // What `426` is decided on, kept as the build that wrote the message.
     client: sent.client,
     apiOperation: operation,
+    // What was sent, under the widget's key, for the stand-in's rebuild
+    // (`isMediaStandIn`): the console's thread leaves the stand-in out where
+    // the files are drawn, and this API answers its `text` as `""`.
+    ...(sent.uploads.length > 0
+      ? { webchatFiles: sent.uploads.map(({ kind, filename }) => ({ kind, filename })) }
+      : {}),
   };
+}
+
+/**
+ * What a message is stored as saying: the user's words, or for files sent
+ * with none, the stand-in every chat's media gets (`webchatFilesStandIn`), so
+ * the subject, the inbox card and search have something to read. The threads
+ * and this API leave it out (`standsIn`); `subjectWords` reads the subject it
+ * makes as null.
+ */
+function storedText(sent: Sent): string {
+  return sent.text || webchatFilesStandIn(sent.uploads);
+}
+
+/**
+ * The upload budget's refusal for this send, or null: asked before anything is
+ * stored and spent only once the message is (`spendUpload`), so a send whose
+ * files failed costs nothing to retry (`uploadFits` in `lib/api/limits.ts`).
+ */
+function uploadAdmission(caller: Caller, sent: Sent): SendOutcome | null {
+  if (sent.uploads.length === 0) return null;
+  const admission = uploadFits(caller.identityId, megabytesOf(sent.uploads));
+  return admission.allowed ? null : { kind: 'rate_limited', admission, bucket: 'uploads' };
+}
+
+/**
+ * The message's files in Storage, under the ticket it is for and the id the
+ * message will be written with, before the transaction that writes it — the
+ * widget's order (`appendVisitorMessage`), for the widget's reason: the user is
+ * still there, so a file that cannot be stored refuses the send and nothing is
+ * kept, where a message stored without its photo would leave an agent reading
+ * about a picture that is not there. `storeVisitorFiles` is the widget's own,
+ * so the keys, the deadline and the clean-up after a failure are one code path
+ * for every customer's upload. Null when a file could not be stored, with
+ * everything tried removed.
+ */
+async function storeFiles(
+  conversationId: string,
+  messageId: string,
+  uploads: readonly VisitorUpload[],
+): Promise<StoredUpload[] | null> {
+  if (uploads.length === 0) return [];
+  try {
+    return await storeVisitorFiles(conversationId, messageId, uploads);
+  } catch (error) {
+    if (error instanceof VisitorUploadFailed) return null;
+    throw error;
+  }
+}
+
+/**
+ * The files' rows, in the message's own transaction, so the live update that
+ * tells the console about the message finds its files, and a message is never
+ * stored without them. A millisecond apart, in the order sent, as the widget's
+ * are: one statement would give them one `now()`, and the console's thread
+ * breaks that tie by a random id.
+ */
+async function insertFiles(
+  tx: Executor,
+  messageId: string,
+  stored: readonly StoredUpload[],
+  now: Date,
+): Promise<void> {
+  if (stored.length === 0) return;
+  await tx.insert(attachments).values(
+    stored.map((file, index) => ({
+      messageId,
+      storagePath: file.path,
+      // Display only, never a path segment: the key is derived from ids.
+      filename: file.filename,
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+      checksum: file.checksum,
+      createdAt: new Date(now.getTime() + index),
+    })),
+  );
+}
+
+/**
+ * The files a write stored ahead of a message it then did not store — a
+ * refusal under the lock, a replay, a transaction that failed — removed,
+ * unless the message was stored after all (`releaseUnlessStored`, the widget's
+ * own judgement of a COMMIT whose answer was lost).
+ */
+async function releaseFiles(
+  stored: readonly StoredUpload[],
+  messageId: string,
+  conversationId: string,
+): Promise<void> {
+  if (stored.length === 0) return;
+  await releaseUnlessStored(
+    messageId,
+    stored.map((file) => file.path),
+    conversationId,
+  );
 }
 
 /**
@@ -1017,24 +1181,31 @@ export async function createApiTicket(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'createTicket');
 
+  const upload = uploadAdmission(caller, sent);
+  if (upload) return upload;
   const ahead = newTicketFits(caller.identityId);
-  if (!ahead.allowed) return { kind: 'rate_limited', admission: ahead };
+  if (!ahead.allowed) return { kind: 'rate_limited', admission: ahead, bucket: 'new_tickets' };
 
   const channel = await apiChannel();
   if (!channel) return { kind: 'not_configured' };
   // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
   const routing = await planRouting(channel);
 
-  // When the session must still be live: the request's own moment. The rows
-  // are stamped later, once the transaction holds what it waits on.
-  const asked = new Date();
   const conversationId = randomUUID();
   const messageId = randomUUID();
+  const stored = await storeFiles(conversationId, messageId, sent.uploads);
+  if (!stored) return { kind: 'upload_failed' };
+  // After the files, which can take seconds: the session is judged when the
+  // upload is done, and the rows are stamped later still, once the transaction
+  // holds what it waits on — when the message was stored, not when its upload
+  // began (`appendVisitorMessage`).
+  const asked = new Date();
+  const text = storedText(sent);
 
   let written:
     | { kind: 'created'; as: Caller; now: Date }
     | { kind: 'revoked' | 'too_many_open' }
-    | { kind: 'rate_limited'; admission: Admission }
+    | { kind: 'rate_limited'; admission: Admission; bucket: 'new_tickets' }
     | { kind: 'spent'; keyed: Keyed };
   try {
     written = await db.transaction(async (tx) => {
@@ -1048,7 +1219,8 @@ export async function createApiTicket(
       // Decided: spent here, and refused only by a create that spent the last
       // token between the pool's question and this lock.
       const admission = admitNewTicket(holder.identityId);
-      if (!admission.allowed) return { kind: 'rate_limited' as const, admission };
+      if (!admission.allowed)
+        return { kind: 'rate_limited' as const, admission, bucket: 'new_tickets' as const };
       // Once the account and the requester are held, so the ticket's and the
       // message's instants are not older than their commit by a lock's wait
       // (`AFTER_OVERLAP_SECONDS`); the routing window counts from it too.
@@ -1060,8 +1232,9 @@ export async function createApiTicket(
         channel: 'api',
         channelId: channel.id,
         statusId,
-        // An app ticket has no subject line: the opening words, as a chat's.
-        subject: preview(sent.text, 80) || UNNAMED_SUBJECT.api,
+        // An app ticket has no subject line: the opening words, as a chat's,
+        // or its files' stand-in, which `subjectWords` answers as null.
+        subject: preview(text, 80) || UNNAMED_SUBJECT.api,
         requesterContactId: holder.contactId,
         groupId: channel.defaultGroupId,
         createdAt: now,
@@ -1077,13 +1250,14 @@ export async function createApiTicket(
         direction: 'inbound',
         kind: 'reply',
         authorContactId: holder.contactId,
-        bodyText: sent.text,
+        bodyText: text,
         channelMessageId: keyOf(holder, sent.key),
         deliveryStatus: 'delivered',
         deliveredAt: now,
         meta: metaFor(sent, 'createTicket'),
         createdAt: now,
       });
+      await insertFiles(tx, messageId, stored, now);
 
       await tx.insert(apiTickets).values({
         conversationId,
@@ -1112,20 +1286,23 @@ export async function createApiTicket(
       return { kind: 'created' as const, as: holder, now };
     });
   } catch (error) {
+    await releaseFiles(stored, messageId, conversationId);
     const first = await keyedAfterConflict(error, caller, sent.key);
     if (!first) throw error;
     return replay(caller, first, 'createTicket');
   }
 
+  if (written.kind !== 'created') await releaseFiles(stored, messageId, conversationId);
   if (written.kind === 'spent') return replay(caller, written.keyed, 'createTicket');
   if (written.kind === 'rate_limited') return written;
   if (written.kind !== 'created') return { kind: written.kind };
   const { as: holder, now } = written;
+  if (sent.uploads.length > 0) spendUpload(caller.identityId, megabytesOf(sent.uploads));
 
   await finishInRequest({
     conversationId,
     messageId,
-    bodyText: sent.text,
+    bodyText: text,
     created: true,
     at: now,
     trackingNumber: sent.trackingNumber,
@@ -1143,6 +1320,48 @@ export function customerWrote(now: Date) {
     lastMessageAt: latest(conversations.lastMessageAt, now),
     lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, now),
   };
+}
+
+/**
+ * The status of a ticket this identity opened, read on the pool before a
+ * send's files are stored, or null for one it did not open, or that is on
+ * another channel, deleted, spam or merged away.
+ *
+ * Only ever a refusal, never a grant: the send's own locked read is
+ * `ownedTicket` in full, and decides. So it reads the ownership row by the
+ * session's identity and leaves out `ownedTicket`'s requester half, which is
+ * the one a contact merge moves: the gate's contact, read before a merge
+ * committed, would have refused the user's own ticket `404`, and the SDK drops
+ * a ticket answered that. The identity is never moved off its ownership rows
+ * — they are immutable, and deleted only with the account — so null here is
+ * not the caller's ticket however a merge lands.
+ */
+async function openedStatus(
+  caller: Caller,
+  ticketId: string,
+): Promise<TicketView['status'] | null> {
+  const [row] = await db
+    .select({ status: ticketStatuses.category })
+    .from(conversations)
+    .innerJoin(
+      apiTickets,
+      and(
+        eq(apiTickets.conversationId, conversations.id),
+        eq(apiTickets.identityId, caller.identityId),
+      ),
+    )
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(
+      and(
+        eq(conversations.id, ticketId),
+        eq(conversations.channel, 'api'),
+        isNull(conversations.deletedAt),
+        eq(conversations.isSpam, false),
+        isNull(conversations.mergedIntoId),
+      ),
+    )
+    .limit(1);
+  return row?.status ?? null;
 }
 
 /**
@@ -1192,11 +1411,28 @@ export async function sendApiMessage(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'sendMessage', ticketId);
 
-  // As in a create: the session judged at the request's moment, the rows
-  // stamped once the transaction holds the account, the requester and the
-  // ticket.
-  const asked = new Date();
+  const upload = uploadAdmission(caller, sent);
+  if (upload) return upload;
   const messageId = randomUUID();
+  let files: StoredUpload[] = [];
+  if (sent.uploads.length > 0) {
+    // No upload onto a ticket the user cannot write on: a closed ticket, or
+    // an id that is not theirs, refused before 25 MB go to Storage only to be
+    // removed again. The locked read below still decides.
+    const status = await openedStatus(caller, ticketId);
+    if (status === null) return { kind: 'not_found' };
+    if (status === 'closed') return { kind: 'ticket_closed' };
+    const stored = await storeFiles(ticketId, messageId, sent.uploads);
+    if (!stored) return { kind: 'upload_failed' };
+    files = stored;
+  }
+  // After the files, which can take seconds: stamped before them, a message
+  // could land behind an agent's reply written during its upload, and no
+  // reply clock would start (`appendVisitorMessage` says the same). The
+  // session is judged now; the rows are stamped once the transaction holds the
+  // account, the requester and the ticket.
+  const asked = new Date();
+  const text = storedText(sent);
 
   let stored:
     | { kind: 'stored'; as: Caller; now: Date }
@@ -1247,31 +1483,37 @@ export async function sendApiMessage(
         direction: 'inbound',
         kind: 'reply',
         authorContactId: holder.contactId,
-        bodyText: sent.text,
+        bodyText: text,
         channelMessageId: keyOf(holder, sent.key),
         deliveryStatus: 'delivered',
         deliveredAt: now,
         meta: metaFor(sent, 'sendMessage'),
         createdAt: now,
       });
+      await insertFiles(tx, messageId, files, now);
 
       await tx.update(conversations).set(customerWrote(now)).where(eq(conversations.id, ticketId));
       await oweFinish(tx, { messageId, conversationId: ticketId, now });
       return { kind: 'stored' as const, as: holder, now };
     });
   } catch (error) {
+    await releaseFiles(files, messageId, ticketId);
     const first = await keyedAfterConflict(error, caller, sent.key);
     if (!first) throw error;
     return replay(caller, first, 'sendMessage', ticketId);
   }
 
-  if (stored.kind === 'spent') return replay(caller, stored.keyed, 'sendMessage', ticketId);
-  if (stored.kind !== 'stored') return { kind: stored.kind };
+  if (stored.kind !== 'stored') {
+    await releaseFiles(files, messageId, ticketId);
+    if (stored.kind === 'spent') return replay(caller, stored.keyed, 'sendMessage', ticketId);
+    return { kind: stored.kind };
+  }
+  if (sent.uploads.length > 0) spendUpload(caller.identityId, megabytesOf(sent.uploads));
 
   await finishInRequest({
     conversationId: ticketId,
     messageId,
-    bodyText: sent.text,
+    bodyText: text,
     created: false,
     at: stored.now,
     trackingNumber: null,

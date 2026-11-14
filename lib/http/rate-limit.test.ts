@@ -6,6 +6,7 @@ import {
   allowVouched,
   fits,
   forwardedChain,
+  peekVouched,
   retryAfterSeconds,
 } from './rate-limit';
 
@@ -94,6 +95,31 @@ describe('fits', () => {
     const k = key();
     allow(k, 10, -1, 10);
     expect(fits(k, 10, 10)).toBe(true);
+  });
+});
+
+describe('peekVouched', () => {
+  it('answers as admit would, and spends nothing', () => {
+    const k = key();
+    expect(peekVouched(k, 10, HOUR, 10)).toEqual({ allowed: true, resetInSeconds: 3600 });
+    expect(peekVouched(k, 10, HOUR, 10).allowed).toBe(true);
+    expect(peekVouched(k, 10, HOUR, 11).allowed).toBe(false);
+  });
+
+  it('counts what admit has spent, and says when that window turns', () => {
+    const k = key();
+    admitVouched(k, 10, HOUR, 7);
+    expect(peekVouched(k, 10, HOUR, 3).allowed).toBe(true);
+    const refused = peekVouched(k, 10, HOUR, 4);
+    expect(refused.allowed).toBe(false);
+    expect(refused.resetInSeconds).toBeGreaterThan(3500);
+    expect(refused.resetInSeconds).toBeLessThanOrEqual(3600);
+  });
+
+  it('forgets a window that has passed', () => {
+    const k = key();
+    admitVouched(k, 10, -1, 10);
+    expect(peekVouched(k, 10, HOUR, 10).allowed).toBe(true);
   });
 });
 

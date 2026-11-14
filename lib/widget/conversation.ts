@@ -302,7 +302,7 @@ export type VisitorUpload = {
 /** A file that could not be stored, so the message it came with was not either. */
 export class VisitorUploadFailed extends Error {}
 
-type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
+export type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
   path: string;
   checksum: string;
   sizeBytes: number;
@@ -463,32 +463,17 @@ export async function appendVisitorMessage(
     });
   } catch (error) {
     if (stored.length === 0) throw error;
-    // A transaction can fail after its COMMIT was sent — the connection lost
-    // before the answer — and then it may have committed (`db/client.ts`). Its
-    // files are then on a stored message, and removing them would leave the
-    // ticket with links to nothing. So the message is looked for by the id it
-    // was given; found, the send succeeded, and the rest of it runs.
-    const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
-    if (outcome === true) {
-      log.warn(
-        `a transaction answered with an error but its message was stored, kept its files message_id=${messageId}`,
-      );
-      result = { conversationId, messageId, createdConversation: !existing };
-    } else {
-      // Unknown is kept as well: an object nothing references costs bytes,
-      // one a stored message references and that is gone is a broken file.
-      if (outcome === false) {
-        await discardPaths(
-          stored.map((file) => file.path),
-          conversationId,
-        );
-      } else {
-        log.warn(
-          `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${stored.map((file) => file.path).join(',')}`,
-        );
-      }
-      throw error;
-    }
+    const outcome = await releaseUnlessStored(
+      messageId,
+      stored.map((file) => file.path),
+      conversationId,
+    );
+    // Found, the send succeeded after all, and the rest of it runs.
+    if (outcome !== 'stored') throw error;
+    log.warn(
+      `a transaction answered with an error but its message was stored, kept its files message_id=${messageId}`,
+    );
+    result = { conversationId, messageId, createdConversation: !existing };
   }
 
   /*
@@ -516,6 +501,37 @@ export async function appendVisitorMessage(
   return result;
 }
 
+/**
+ * Removes the files a message's write was to reference, unless the message was
+ * stored after all, for a write that failed or wrote nothing: the widget's
+ * send, and the myBlu app's two (`lib/api/tickets.ts`).
+ *
+ * A transaction can fail after its COMMIT was sent — the connection lost
+ * before the answer — and then it may have committed (`db/client.ts`). Its
+ * files are then on a stored message, and removing them would leave the
+ * ticket with links to nothing. So the message is looked for by the id it was
+ * given: found, the files are kept (`stored`); not there, they are removed
+ * (`released`). An answer that could not be read keeps them too (`kept`): an
+ * object nothing references costs bytes, one a stored message references and
+ * that is gone is a broken file. The log line names every key it kept.
+ */
+export async function releaseUnlessStored(
+  messageId: string,
+  paths: readonly string[],
+  conversationId: string,
+): Promise<'stored' | 'released' | 'kept'> {
+  const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
+  if (outcome === true) return 'stored';
+  if (outcome === false) {
+    await discardPaths(paths, conversationId);
+    return 'released';
+  }
+  log.warn(
+    `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${paths.join(',')}`,
+  );
+  return 'kept';
+}
+
 async function messageExists(messageId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: messages.id })
@@ -540,8 +556,11 @@ async function messageExists(messageId: string): Promise<boolean> {
  * be customer content that no purge could find. Removing a key that was never
  * written succeeds. One written after the removal is not caught here, which is
  * why the failure's line names every key.
+ *
+ * The myBlu app's two sends store theirs through this too (`lib/api/tickets.ts`):
+ * one set of keys, one failure and one clean-up for every customer's upload.
  */
-async function storeVisitorFiles(
+export async function storeVisitorFiles(
   conversationId: string,
   messageId: string,
   files: readonly VisitorUpload[],

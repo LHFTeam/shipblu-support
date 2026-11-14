@@ -15,16 +15,16 @@ import { admit, admitVouched, clientIp, peekVouched, type Admission } from '@/li
  * first; only a request that presents none, or one refused, spends an address
  * bucket (`spendBadBearer`).
  *
- * The buckets here are `plans/myblu-ticket-api.md`'s first seven. Uploaded
- * megabytes arrive with the route that spends them (stage 7), on the session's
- * identity.
+ * The buckets here are `plans/myblu-ticket-api.md`'s eight: the last, uploaded
+ * megabytes, arrived with the sends that spend it (stage 7).
  *
  * Two stores. The address and bad-bearer buckets are keyed on a header the
  * caller writes, and live in the shared one every public endpoint uses, which
  * a spray of forged addresses can fill and make evict. The plane, mint and
- * identity buckets are keyed on nothing an unauthenticated caller can choose,
- * and live in the vouched store (`admitVouched`), which that spray cannot
- * reach: in the shared one, it reset the mint cap.
+ * identity buckets — the uploaded megabytes among them — are keyed on nothing
+ * an unauthenticated caller can choose, and live in the vouched store
+ * (`admitVouched`), which that spray cannot reach: in the shared one, it reset
+ * the mint cap.
  */
 
 const MINUTE_MS = 60_000;
@@ -156,3 +156,31 @@ export function admitNewTicket(identityId: string): Admission {
  * replies reopen what they had resolved.
  */
 export const MAX_OPEN_TICKETS = 10;
+
+/**
+ * Megabytes of files uploaded, on the session's identity: a hundred an hour,
+ * the widget's figure per visitor (`/api/widget/message`), so four full
+ * messages and change. One message carries at most 25 MB (`GET /config`).
+ *
+ * Asked before a send's files are stored (`uploadFits`, `peekVouched`, which spends nothing)
+ * and spent only once they are (`spendUpload`), the widget's lesson: spent up
+ * front, a send that failed on Storage — `502 upload_failed`, which the SDK
+ * retries under the same key — cost its megabytes again on every retry, and
+ * four retries of one video ran the hour out with nothing stored. Nor is a
+ * replay spent: a key already spent stores nothing, so it is answered before
+ * this is asked. Two sends can both fit and then both spend, the price of not
+ * holding a lock across a multi-second upload, as the widget pays it.
+ */
+const UPLOAD_MB_LIMIT = 100;
+
+function uploadKey(identityId: string): string {
+  return `api-v1:upload-mb:${identityId}`;
+}
+
+export function uploadFits(identityId: string, megabytes: number): Admission {
+  return peekVouched(uploadKey(identityId), UPLOAD_MB_LIMIT, HOUR_MS, megabytes);
+}
+
+export function spendUpload(identityId: string, megabytes: number): void {
+  admitVouched(uploadKey(identityId), UPLOAD_MB_LIMIT, HOUR_MS, megabytes);
+}

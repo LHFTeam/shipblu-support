@@ -2395,6 +2395,32 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   service and makes the queued ones send nothing once the worker restarts; a
   revert leaves any `notify_myblu` row queued without a handler, failing until
   it is `dead`, which is harmless.
+- **The myBlu app's files arrive with stage 7 of `plans/myblu-ticket-api.md`,**
+  inert on the same terms as stage 4 (the token and an active `api` row). No
+  schema, no migration, no variable and no shape: the multipart bodies, the
+  file refusals and `GET /attachments/{id}` were published in stage 0b, so the
+  document, its changelog and the SDK's pin are as stage 4 left them.
+  `POST /tickets` and `POST /tickets/{id}/messages` take `multipart/form-data`
+  beside JSON: `text`, `locale` and `trackingNumber` as parts, `files`
+  repeated, up to five and 25 MB in all, judged and typed by the widget's own
+  functions and stored with the message or not at all — a file Storage refuses
+  is `502 upload_failed` with every key it tried removed, and a send refused
+  under the lock removes its files too. A multipart body must carry
+  `Content-Length` (`411` without it). Uploads spend a budget of 100 MB an hour
+  on the identity, only once stored. `GET /attachments/{id}` answers a
+  five-minute Storage link for a file on one of the user's tickets, and `404`
+  for anything else. In the console an app ticket's photos and voice notes are
+  drawn inline, as a chat's are. After the release is on `main`, by the owner,
+  with the test phone and session of stage 4: from a phone, with `curl` against
+  `support.shipblu.com`, send a HEIC, a video near the 25 MB ceiling, a PDF, and
+  six files at once; check the first three open from the console and through
+  `GET /attachments/{id}`, that the sixth file is refused `file_refused`
+  `too_many` with nothing stored, and how long the video took over mobile data
+  against Render's request timeout (the plan's _Risks_). Then the same from
+  the SDK's sample at a pre-release tag, and purge the ticket and the contact,
+  which removes the objects with them. This writes to production. Way back:
+  revert; the attachment rows and their objects stay on their messages, and
+  the console goes on drawing them.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and

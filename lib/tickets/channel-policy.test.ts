@@ -169,6 +169,8 @@ it('draws files inline only on a chat, so email and anything added later stay at
     'facebook_comment',
     'instagram',
     'instagram_comment',
+    // The myBlu app, a chat on a phone, from its files (stage 7).
+    'api',
     'whatsapp_bot',
   ]);
 });
