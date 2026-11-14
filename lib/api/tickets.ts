@@ -29,6 +29,7 @@ import { afterPage } from './after-page';
 import { apiChannel } from './channel';
 import { encodeCursor, THREAD_START, type Cursor } from './cursor';
 import { finishInRequest, oweFinish } from './finish';
+import { messageFrom } from './from';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
@@ -148,16 +149,6 @@ const messageColumns = {
 };
 
 /**
- * Who wrote it, as the widget maps it, with `customer` for its `visitor`: the
- * user for an inbound row, a person on the team for an outbound one an agent
- * wrote, and nobody — the acknowledgement, a rule's reply — for the rest.
- */
-function fromOf(row: { direction: string; byAgent: boolean }): MessageView['from'] {
-  if (row.direction === 'inbound') return 'customer';
-  return row.byAgent ? 'agent' : 'system';
-}
-
-/**
  * Whether the text is only the stand-in written for the message's files
  * (`[image]`, `[2 attachments]`), which the API answers as `""`: `text` is
  * words somebody wrote, never a label of ours. The widget's own rule
@@ -192,7 +183,7 @@ function messageView(caller: Caller, row: MessageRow): MessageView {
   const files = row.files ?? [];
   return {
     id: row.id,
-    from: fromOf(row),
+    from: messageFrom(row),
     text: standsIn(row, files) ? '' : row.bodyText,
     createdAt: row.createdAt.toISOString(),
     clientId: clientIdOf(caller, row),
@@ -346,7 +337,7 @@ function ticketView(row: TicketRow): TicketView {
     unreadCount: row.unreadCount,
     preview: preview
       ? {
-          from: fromOf(preview),
+          from: messageFrom(preview),
           text: standsIn(preview, previewFiles) ? '' : previewText(preview.bodyText),
           hasAttachments: previewFiles.length > 0,
         }

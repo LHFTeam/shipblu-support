@@ -132,6 +132,31 @@ const schema = z.object({
   MYBLU_API_TOKEN_PREVIOUS: z.string().optional(),
 
   /**
+   * The myBlu webhook (`plans/myblu-ticket-api.md`, _The webhook_): the one URL
+   * on myBlu's backend that is told when the team writes on one of its users'
+   * tickets, so it can push to the user's phone, and the secret each delivery
+   * is signed under. `_PREVIOUS` signs beside it only while a rotation is under
+   * way, and the receiver accepts either signature.
+   *
+   * **The URL set is the switch.** While it is unset no `notify_myblu` job is
+   * queued (`mybluWebhookConfigured` in `lib/api/notify.ts`), and a job already
+   * queued sends nothing when it runs, so unsetting it is the way back. A URL
+   * with no secret sends nothing.
+   *
+   * Plain optional strings, for the reason `LOG_ALL_INCOMING_WEBHOOKS` below
+   * gives. The URL must be `https`, with no userinfo and no query string, and a
+   * secret under 32 characters counts as unset; both are decided where the
+   * worker first uses them (`webhookTarget` in `lib/api/webhook.ts`), which
+   * names what is wrong on every job it refuses, never in this schema.
+   *
+   * Per environment, never shared: a secret staging holds would sign a
+   * delivery production's receiver accepts.
+   */
+  MYBLU_WEBHOOK_URL: z.string().optional(),
+  MYBLU_WEBHOOK_SECRET: z.string().optional(),
+  MYBLU_WEBHOOK_SECRET_PREVIOUS: z.string().optional(),
+
+  /**
    * Overrides for how a tracking number and an SBID are recognised in message
    * text. Both are regular-expression sources; `lib/shipments/detect.ts` holds
    * the defaults and falls back to them, loudly, if one does not compile.
