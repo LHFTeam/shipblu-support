@@ -26,6 +26,7 @@ import {
   rowIsDelivery,
   sendsByEmail,
 } from './outbound';
+import { isReadOnlyChannel } from './channel-policy';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -304,9 +305,11 @@ describe('carrierFor', () => {
     expect(carrierFor('whatsapp_bot')).toBeNull();
   });
 
-  // The one rule the two predicates keep between them, over every channel: a
-  // row that is its delivery has no carrier, and one with a carrier is not.
-  it('agrees with rowIsDelivery on every channel', () => {
+  // Every channel is exactly one of three: carried, its own delivery, or
+  // nobody's to write to. `rowIsDelivery` is derived from the other two, so a
+  // channel given no carrier is a row its customer reads unless it is
+  // read-only — never a `pending` row with nothing queued behind it.
+  it('puts every channel in exactly one of: a carrier, its own delivery, read-only', () => {
     for (const channel of [
       'email',
       'portal',
@@ -319,9 +322,14 @@ describe('carrierFor', () => {
       'instagram',
       'instagram_comment',
     ] as const) {
-      if (rowIsDelivery(channel)) expect(carrierFor(channel), channel).toBeNull();
-      if (carrierFor(channel) !== null) expect(rowIsDelivery(channel), channel).toBe(false);
+      const ways = [
+        carrierFor(channel) !== null,
+        rowIsDelivery(channel),
+        isReadOnlyChannel(channel),
+      ];
+      expect(ways.filter(Boolean), channel).toHaveLength(1);
     }
+    expect(rowIsDelivery('whatsapp_bot')).toBe(false);
   });
 });
 

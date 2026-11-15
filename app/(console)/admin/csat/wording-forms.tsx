@@ -31,33 +31,12 @@ import {
   type WordingPair,
 } from '@/lib/csat/wording';
 import type { ActionState } from '@/lib/http/action-state';
-import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
+import { ruleChannelLabel, wordingChannelOptions } from './wording-channels';
 import { SurveyCard } from '../../../widget/survey-card';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWordingRule, saveWordingRule, sendTestSurvey } from './actions';
 
 type Group = { id: string; name: string };
-
-/**
- * The channels a survey goes out on, named as the rest of the console names
- * them (`CHANNEL_LABELS`). Every one is in the list the action validates
- * against — an option here the action rejects is a form that fails on save
- * for no reason the admin can see.
- *
- * The myBlu app is accepted there and not offered here: no survey reaches the
- * app before its stage (`plans/myblu-ticket-api.md`, stage 8;
- * `channelSwitch('api')` answers null), so a wording scoped to it would be a
- * rule nothing ever reads. It joins this list with that stage.
- */
-const CHANNELS = (['email', 'webchat', 'facebook', 'instagram', 'portal'] as const).map(
-  (value) => ({ value, label: CHANNEL_LABELS[value] }),
-);
-
-function channelLabel(value: string | null): string {
-  return value && value in CHANNEL_LABELS
-    ? CHANNEL_LABELS[value as keyof typeof CHANNEL_LABELS]
-    : 'Every channel';
-}
 
 const PLACEHOLDERS: Record<WordingLocale, Record<WordingField, string>> = {
   en: DEFAULT_WORDING.en,
@@ -284,11 +263,11 @@ function RuleFields({
 
         <Field
           label="Channel"
-          explain="Scope the wording to one channel. Facebook’s card has the tightest limits, which every rule is held to anyway, because a rule with no channel reaches Facebook too. Customer portal is a scope of its own here: its surveys go by email, but an Email rule does not reach them — the same as the out-of-hours reply."
+          explain="Scope the wording to one channel. Facebook’s card has the tightest limits, which every rule is held to anyway, because a rule with no channel reaches Facebook too. Portal is a scope of its own here: its surveys go by email, but an Email rule does not reach them — the same as the out-of-hours reply."
         >
           <Select name="channel" defaultValue={rule?.channel ?? ''}>
             <option value="">Every channel</option>
-            {CHANNELS.map((channel) => (
+            {wordingChannelOptions(rule?.channel).map((channel) => (
               <option key={channel.value} value={channel.value}>
                 {channel.label}
               </option>
@@ -364,7 +343,7 @@ export function WordingRuleEditor({ rule, groups }: { rule: WordingRule; groups:
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-          {channelLabel(rule.channel)}
+          {ruleChannelLabel(rule.channel)}
           <span className="font-normal text-(--color-text-secondary)">·</span>
           {group ? group.name : 'Every group'}
           {rule.isActive ? null : <Badge tone="neutral">Off</Badge>}
@@ -477,7 +456,7 @@ export function SendTestForm({
             <option value="">Built in</option>
             {rules.map((rule) => (
               <option key={rule.id} value={rule.id}>
-                {channelLabel(rule.channel)} ·{' '}
+                {ruleChannelLabel(rule.channel)} ·{' '}
                 {groups.find((group) => group.id === rule.groupId)?.name ?? 'Every group'}
               </option>
             ))}

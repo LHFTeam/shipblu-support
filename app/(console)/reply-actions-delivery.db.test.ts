@@ -5,14 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
  * Where an agent's reply goes, decided by its channel, from the console's
  * action to the row and the queue, against real Postgres.
  *
- * `sendReply` chooses what the row carries — the HTML part, the address, the
- * delivery status — and `storeAgentReply` whether a carrier is queued. On the
- * myBlu app (`api`) both asked about web chat by name, and `carrierFor('api')`
- * answers `send_email`, so a reply to an app ticket was written and queued as
- * an email: never sent to a contact with no address, and mailed to one with an
- * address about a conversation they had in the app. Its row is its delivery,
- * as web chat's is (`rowIsDelivery`), and an email ticket is the control that
- * the predicate did not swallow email with it.
+ * `sendReply` chooses what the row carries — the HTML part, the address — and
+ * `storeAgentReply` the delivery status and whether a carrier is queued, from
+ * one answer. On the myBlu app (`api`) both once asked about web chat by name,
+ * and `carrierFor('api')` answered `send_email`, so a reply to an app ticket
+ * was written and queued as an email: never sent to a contact with no address,
+ * and mailed to one with an address about a conversation they had in the app.
+ * Its row is its delivery, as web chat's is (`rowIsDelivery`), and an email
+ * ticket is the control that the predicate did not swallow email with it.
  */
 
 const signedIn = vi.hoisted(() => ({ id: '' }));

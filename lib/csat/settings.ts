@@ -170,8 +170,15 @@ export function forgetCsatSettings(): void {
 
 export type CsatSettingsInput = Omit<
   CsatSettings,
-  'changedAt' | 'changedBy' | 'lastTemplateRefusal'
->;
+  'changedAt' | 'changedBy' | 'lastTemplateRefusal' | 'channels'
+> & {
+  /**
+   * `api` may be left out, and is then kept as stored: the settings form posts
+   * no switch for the myBlu app until stage 8 (`forms.tsx`), and a save of the
+   * rest must not write one for it.
+   */
+  channels: Omit<CsatSettings['channels'], 'api'> & { api?: boolean };
+};
 
 /** Write the single row, creating it the first time. */
 export async function saveCsatSettings(
@@ -187,7 +194,7 @@ export async function saveCsatSettings(
     surveyWebchat: input.channels.webchat,
     surveyFacebook: input.channels.facebook,
     surveyInstagram: input.channels.instagram,
-    surveyApi: input.channels.api,
+    ...(input.channels.api === undefined ? {} : { surveyApi: input.channels.api }),
     surveyRuleResolved: input.surveyRuleResolved,
     lowRatingAlerts: input.lowRatingAlerts,
     privacyUrl: input.privacyUrl,

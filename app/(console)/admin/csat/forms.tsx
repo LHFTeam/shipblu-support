@@ -215,17 +215,16 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
-        {/* Kept, with its stored value, for the stage that lets the app pull
-            its survey (`plans/myblu-ticket-api.md`, stage 8). Until then no
-            survey can reach the app and `channelSwitch` gives this channel
-            none, so the hint says the switch changes nothing yet rather than
-            letting an admin turn it on and wait. */}
-        <Toggle
-          name="surveyApi"
-          label={CHANNEL_LABELS.api}
-          hint="Not surveyed yet: the app will fetch its survey and show it itself, in a later release. Until then this switch changes nothing."
-          defaultChecked={settings.channels.api}
-        />
+        {/* No switch until the stage that lets the app pull its survey
+            (`plans/myblu-ticket-api.md`, stage 8). A switch that changed
+            nothing still saved, and whatever an admin set today would have
+            taken effect, unannounced, the day that stage shipped. So the form
+            posts nothing for the app and the action leaves `survey_api` as it
+            is stored (`saveCsatSettings`); the switch returns with stage 8. */}
+        <p className="text-xs text-(--color-text-secondary)">
+          {CHANNEL_LABELS.api} customers are not surveyed yet. Their switch arrives with the release
+          that lets the app show its survey.
+        </p>
         <p className="text-xs text-(--color-text-secondary)">
           WhatsApp customers are not answered from this platform, so they are not surveyed from it
           either.

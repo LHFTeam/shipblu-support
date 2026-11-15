@@ -8,7 +8,7 @@ import { text, uuidField } from '@/lib/http/form-data';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
-import { rowIsDelivery, sendsByEmail } from '@/lib/tickets/outbound';
+import { sendsByEmail } from '@/lib/tickets/outbound';
 import { isCommentTicket, isMetaChannel, metaPlatformOf } from '@/lib/tickets/channel-policy';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
@@ -200,7 +200,6 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   // A portal ticket's reply goes out by email too, so it is written as one.
   const isEmail = sendsByEmail(conversation.channel);
-  const delivered = rowIsDelivery(conversation.channel);
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
@@ -211,12 +210,6 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     bodyHtml: html,
     toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
     inReplyTo: parentMessageId,
-    // Web chat and the myBlu app have no outbound provider: writing the row
-    // *is* delivery, because the customer's client reads the same table
-    // (`rowIsDelivery`). Marking it pending would leave a permanent
-    // "sending…" badge on a message the customer is already looking at.
-    deliveryStatus: delivered ? 'delivered' : 'pending',
-    ...(delivered ? { deliveredAt: new Date() } : {}),
     meta:
       conversation.channel === 'whatsapp'
         ? { sendKind: 'text' }
@@ -380,7 +373,6 @@ export async function sendTemplateReply(
   await storeAgentReply(conversationId, row.conversation.channel, {
     authorAgentId: agent.id,
     bodyText: rendered,
-    deliveryStatus: 'pending',
     meta: {
       sendKind: 'template',
       template: { name: template.name, language: template.language, components },

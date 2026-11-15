@@ -51,8 +51,9 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *   whatsapp_bot         always. Its conversations are the customer bot's, and
  *                        nobody on the team writes to them (`isReadOnlyChannel`):
  *                        a message there lands in front of a customer part-way
- *                        through the bot's flow, and `carrierFor` would queue it
- *                        as an email besides. The out-of-hours acknowledgement
+ *                        through the bot's flow, and nothing would carry it
+ *                        besides (`carrierFor` answers null; it once answered
+ *                        `send_email`, and the message was queued as an email). The out-of-hours acknowledgement
  *                        and the survey turned the bot away themselves, but the
  *                        automation engine asked only this, so an `on_update`
  *                        rule's `send_reply` fired by an edit on a bot ticket
@@ -208,9 +209,9 @@ export async function writeAutomatedReply(
   // well as `email`, and testing `channel === 'email'` stored a portal reply
   // with no HTML body and no address, which the worker then rebuilt as one
   // escaped paragraph with every line break in a three-paragraph message lost.
-  // But `carrierFor` also answers `send_email` for web chat and the myBlu app,
-  // which nothing carries: asked of the carrier, an automated message there
-  // was stored with an HTML part and the contact's address — on the app, an
+  // And `carrierFor` once answered `send_email` for web chat and the myBlu app,
+  // which nothing carries: asked of that, an automated message there was
+  // stored with an HTML part and the contact's address — on the app, an
   // address that can be a previous holder of the phone's.
   const isEmail = sendsByEmail(reply.channel);
   // No carrier: the message is in the database, where the customer's client —
@@ -374,13 +375,6 @@ export function sendsByEmail(channel: ConversationChannel): boolean {
 }
 
 /**
- * Channels where storing the message is delivering it, because the customer's
- * own client reads the conversation from this database: the web chat widget,
- * through its stream, and the myBlu app (`api`), through its poll of `/api/v1`.
- */
-const ROW_IS_DELIVERY: readonly ConversationChannel[] = ['webchat', 'api'];
-
-/**
  * Whether writing a message's row is its delivery: no carrier is queued, the
  * row is written `delivered` — meaning "stored where the customer's client
  * reads it", not that a provider accepted it — and, through `sendsByEmail`, no
@@ -389,18 +383,26 @@ const ROW_IS_DELIVERY: readonly ConversationChannel[] = ['webchat', 'api'];
  * One predicate where web chat used to be named at each place it was set
  * aside: the status and the queueing for an automated message
  * (`writeAutomatedReply`, `enqueueAutomatedDelivery`), the queueing and the
- * status for an agent's (`storeAgentReply`, `sendReply`), and `sendsByEmail`.
+ * status for an agent's (`storeAgentReply`, which decides both, so neither
+ * console sender states a status of its own), and `sendsByEmail`.
  * The myBlu app joined web chat at all five at once; a test naming web chat at
  * one of them is how the next such channel would be queued as an email at that
  * one alone.
  *
- * A named list, as the read-only channels are: a channel added to the enum
- * answers false until somebody puts it here, so its messages are queued on the
- * carrier `carrierFor` names for it and fail where somebody looks, rather than
- * being stored as delivered with nothing sending them.
+ * Today that is web chat, read through the widget's stream, and the myBlu app
+ * (`api`), through its poll of `/api/v1`: the customer's own client reads the
+ * conversation from this database.
+ *
+ * Derived, not listed: a channel nothing carries (`carrierFor` answers null)
+ * that the team writes to (not `isReadOnlyChannel`). A list of its own kept
+ * beside `carrierFor` had to agree with it by hand, and a channel given no
+ * carrier there but left off the list was written `pending` with no job
+ * behind it — "sending…" for ever, the failure this exists to prevent. Now
+ * the exhaustive switch in `carrierFor` decides it for every channel, a new
+ * one included: no carrier, and not read-only, is a row its customer reads.
  */
 export function rowIsDelivery(channel: ConversationChannel): boolean {
-  return ROW_IS_DELIVERY.includes(channel);
+  return carrierFor(channel) === null && !isReadOnlyChannel(channel);
 }
 
 /**

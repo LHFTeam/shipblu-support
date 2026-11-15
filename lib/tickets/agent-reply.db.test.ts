@@ -43,7 +43,9 @@ withCleanDatabase();
 // reply moved.
 const LAST_MESSAGE_AT = new Date('2026-09-01T09:00:00Z');
 
-async function ticket(channel: 'email' | 'whatsapp' | 'webchat' | 'api' | 'facebook') {
+async function ticket(
+  channel: 'email' | 'whatsapp' | 'webchat' | 'api' | 'facebook' | 'whatsapp_bot',
+) {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [agent] = await db
     .insert(agents)
@@ -72,7 +74,6 @@ describe('storeAgentReply', () => {
     const messageId = await storeAgentReply(id, 'whatsapp', {
       authorAgentId: agentId,
       bodyText: 'Your parcel is on its way.',
-      deliveryStatus: 'pending',
       meta: { sendKind: 'text' },
     });
 
@@ -83,7 +84,6 @@ describe('storeAgentReply', () => {
       kind: 'reply',
       authorAgentId: agentId,
       bodyText: 'Your parcel is on its way.',
-      deliveryStatus: 'pending',
       meta: { sendKind: 'text' },
     });
 
@@ -116,7 +116,6 @@ describe('storeAgentReply', () => {
     const messageId = await storeAgentReply(id, channel, {
       authorAgentId: agentId,
       bodyText: 'Thanks for waiting.',
-      deliveryStatus: 'pending',
     });
 
     expect(
@@ -137,8 +136,6 @@ describe('storeAgentReply', () => {
       await storeAgentReply(id, channel, {
         authorAgentId: agentId,
         bodyText: 'Hello!',
-        deliveryStatus: 'delivered',
-        deliveredAt: new Date(),
       });
 
       expect(await db.select({ id: jobs.id }).from(jobs)).toEqual([]);
@@ -147,8 +144,29 @@ describe('storeAgentReply', () => {
         .from(conversations)
         .where(eq(conversations.id, id));
       expect(row!.lastAgentMessageAt).toBeInstanceOf(Date);
+      // The status is `storeAgentReply`'s to decide, from the same answer that
+      // queued nothing: no sender states one.
+      const [message] = await db
+        .select({ status: messages.deliveryStatus, deliveredAt: messages.deliveredAt })
+        .from(messages)
+        .where(eq(messages.conversationId, id));
+      expect(message!.status).toBe('delivered');
+      expect(message!.deliveredAt).toBeInstanceOf(Date);
     },
   );
+
+  // The bot has neither a carrier nor a client reading the row: a reply there
+  // would sit `pending` for ever, so it is refused before it is written.
+  it('refuses a reply on the bot before writing anything', async () => {
+    const { id, agentId } = await ticket('whatsapp_bot');
+
+    await expect(
+      storeAgentReply(id, 'whatsapp_bot', { authorAgentId: agentId, bodyText: 'Hello!' }),
+    ).rejects.toThrow('nobody on the team writes there');
+    expect(
+      await db.select({ id: messages.id }).from(messages).where(eq(messages.conversationId, id)),
+    ).toEqual([]);
+  });
 });
 
 /**
@@ -296,7 +314,6 @@ describe('storeAgentReply on a ticket held for routing', () => {
     storeAgentReply(id, 'email', {
       authorAgentId,
       bodyText: 'Your parcel is on its way.',
-      deliveryStatus: 'pending',
     });
 
   async function ticketRow(id: string) {
