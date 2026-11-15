@@ -410,6 +410,18 @@ function survey(overrides: Partial<SurveySubject> = {}): SurveySubject {
 }
 
 describe('decideSurveyCreated', () => {
+  // Nothing expires a survey on reopen; a push asking to rate a conversation
+  // the user has since gone on with prompts about the wrong thing.
+  it('sends nothing for a ticket open or pending again, and sends on a closed one', () => {
+    for (const status of ['open', 'pending'] as const) {
+      expect(decideSurveyCreated(survey({ status }), NOW, true)).toEqual({
+        kind: 'quiet',
+        reason: 'reopened',
+      });
+    }
+    expect(decideSurveyCreated(survey({ status: 'closed' }), NOW, true).kind).toBe('send');
+  });
+
   // As a reply's: the survey is there once the API is back, so the job waits
   // for it, behind every answer that is final.
   it('waits while the API is switched off, behind every answer that is final', () => {

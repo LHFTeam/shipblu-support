@@ -341,7 +341,14 @@ export type QuietReason =
    * through a link — or superseded by a newer one. A push asking the user to
    * rate it would open a survey with nothing to tap.
    */
-  | 'not_waiting';
+  | 'not_waiting'
+  /**
+   * The ticket is open or pending again: a survey asks how a resolved ticket
+   * went, and a push asking to rate one the user has since written on — a
+   * reply right after the resolve, or a receiver failing until the job's
+   * retries ran late — prompts about a conversation still going.
+   */
+  | 'reopened';
 
 export type Decision<E> =
   | { kind: 'send'; event: E }
@@ -434,8 +441,10 @@ export function decideMessageCreated(
 
 /**
  * Whether to send `survey.created` for this survey now, and the body if so:
- * `decideMessageCreated`'s order, for a survey the app pulls (`api_pull`) and
- * that is still waiting for an answer. Its day counts from when it was sent.
+ * `decideMessageCreated`'s order, for a survey the app pulls (`api_pull`),
+ * still waiting for an answer, on a ticket still resolved or closed — nothing
+ * expires a survey when its ticket reopens, only a newer send does, so the
+ * ticket's status is asked here. Its day counts from when it was sent.
  */
 export function decideSurveyCreated(
   subject: SurveySubject,
@@ -448,6 +457,9 @@ export function decideSurveyCreated(
   const standing = inApp(subject);
   if (standing.kind === 'quiet') return standing;
   if (subject.surveyStatus !== 'sent') return { kind: 'quiet', reason: 'not_waiting' };
+  if (subject.status !== 'resolved' && subject.status !== 'closed') {
+    return { kind: 'quiet', reason: 'reopened' };
+  }
   if (stale(subject.sentAt, now)) return { kind: 'quiet', reason: 'stale' };
   if (!apiOn) return { kind: 'later', reason: 'api_off' };
 

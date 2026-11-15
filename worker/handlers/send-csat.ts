@@ -1,7 +1,7 @@
 import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
-import { recordSkip, sendSurvey, suppressedBy } from '@/lib/csat';
+import { recordSkip, sendPulledSurvey, sendSurvey, suppressedBy } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { metaSurveyMessage } from '@/lib/csat/meta-survey';
 import { wordingForTicket } from '@/lib/csat/rules';
@@ -162,16 +162,16 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     snapshot,
     resurveyAfterDays: settings.resurveyAfterDays,
     ruleId,
-    requesterEmail: ticket.contactEmail,
   };
   const delivery = decision.delivery;
   // The myBlu app pulls its survey and words it from the row's rule and
   // locale when it asks (`lib/api/survey.ts`), so it is sent no body.
   const sent =
     delivery === PULLED
-      ? await sendSurvey({ ...common, delivery })
+      ? await sendPulledSurvey(common)
       : await sendSurvey({
           ...common,
+          requesterEmail: ticket.contactEmail,
           delivery,
           body: (url) => {
             if (!carriesLink(delivery)) {

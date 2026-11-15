@@ -428,11 +428,14 @@ describe('POST /tickets', () => {
         'canReply',
         'createdAt',
         'lastMessageAt',
+        'lastActivityAt',
         'unreadCount',
         'preview',
         'survey',
       ].sort(),
     );
+    // Never surveyed, it last changed when its message did.
+    expect(answered.lastActivityAt).toBe(answered.lastMessageAt);
 
     const me = await caller(token);
     const [row] = await db.select().from(conversations).where(eq(conversations.id, answered.id));

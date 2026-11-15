@@ -91,7 +91,10 @@ export async function notifyMyblu(job: ClaimedJob): Promise<void> {
       throw new PermanentJobError(`notify_myblu: ${subjectName} is ${decision.reason}`);
     case 'quiet':
       if (decision.reason === 'stale') {
-        log.warn(`nothing sent: older than a day ${subjectName} reason=stale`);
+        // `[notify_myblu] message key=value`, as every line: the subject's id
+        // under its own key, which the guide and AGENTS.md quote it by.
+        const [key, id] = Object.entries(fields)[0]!;
+        log.warn(`nothing sent: older than a day ${key}=${id} reason=stale`);
       } else {
         log.info('nothing sent', { ...fields, reason: decision.reason });
       }

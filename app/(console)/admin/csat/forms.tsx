@@ -218,11 +218,13 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
         {/* The app pulls its survey and draws it itself (`api_pull`,
             `plans/myblu-ticket-api.md` stage 8): no message, no link, and no
             email, since an app ticket's contact address can be a previous
-            holder of the phone's. */}
+            holder of the phone's. The push (`survey.created`) goes only while
+            myBlu's webhook is set and the API is on, so the hint promises it
+            only on that condition rather than of every survey. */}
         <Toggle
           name="surveyApi"
           label={CHANNEL_LABELS.api}
-          hint="The app shows the survey on the ticket itself, and is told when one is ready. Nothing is sent by email."
+          hint="The app shows the survey on the ticket itself and moves the ticket to the top of its list. The user's phone is told only while myBlu's webhook is set up. Nothing is sent by email."
           defaultChecked={settings.channels.api}
         />
         <p className="text-xs text-(--color-text-secondary)">

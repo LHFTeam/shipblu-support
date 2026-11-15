@@ -911,7 +911,7 @@
         "operationId": "listTickets",
         "tags": ["Tickets"],
         "summary": "The user's tickets",
-        "description": "Newest first, by `(lastMessageAt, id)`, paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.\n\nServed from stage 5. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
+        "description": "Newest first, by `(lastActivityAt, id)` — the later of the newest message and the newest survey given — paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.\n\nServed from stage 5. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
         "x-shipblu-stage": "5",
         "security": [
           {
@@ -986,6 +986,7 @@
                           "canReply": true,
                           "createdAt": "2026-11-12T09:29:58.123Z",
                           "lastMessageAt": "2026-11-12T09:41:07.004Z",
+                          "lastActivityAt": "2026-11-12T09:41:07.004Z",
                           "unreadCount": 1,
                           "preview": {
                             "from": "agent",
@@ -1004,6 +1005,7 @@
                           "canReply": true,
                           "createdAt": "2026-11-09T14:02:11.418Z",
                           "lastMessageAt": "2026-11-10T08:15:40.200Z",
+                          "lastActivityAt": "2026-11-10T09:15:41.002Z",
                           "unreadCount": 0,
                           "preview": {
                             "from": "agent",
@@ -1274,6 +1276,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:29:58.123Z",
+                        "lastActivityAt": "2026-11-12T09:29:58.123Z",
                         "unreadCount": 0,
                         "preview": {
                           "from": "customer",
@@ -1325,6 +1328,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:29:58.123Z",
+                        "lastActivityAt": "2026-11-12T09:29:58.123Z",
                         "unreadCount": 0,
                         "preview": {
                           "from": "customer",
@@ -1694,6 +1698,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:41:07.004Z",
+                        "lastActivityAt": "2026-11-12T09:41:07.004Z",
                         "unreadCount": 1,
                         "preview": {
                           "from": "agent",
@@ -2018,6 +2023,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:41:07.004Z",
+                        "lastActivityAt": "2026-11-12T09:41:07.004Z",
                         "unreadCount": 1,
                         "preview": {
                           "from": "agent",
@@ -2309,6 +2315,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:44:31.560Z",
+                        "lastActivityAt": "2026-11-12T09:44:31.560Z",
                         "unreadCount": 0,
                         "preview": {
                           "from": "customer",
@@ -2360,6 +2367,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:44:31.560Z",
+                        "lastActivityAt": "2026-11-12T09:44:31.560Z",
                         "unreadCount": 0,
                         "preview": {
                           "from": "customer",
@@ -2747,6 +2755,7 @@
                         "canReply": true,
                         "createdAt": "2026-11-12T09:29:58.123Z",
                         "lastMessageAt": "2026-11-12T09:41:07.004Z",
+                        "lastActivityAt": "2026-11-12T09:41:07.004Z",
                         "unreadCount": 0,
                         "preview": {
                           "from": "agent",
@@ -3925,7 +3934,7 @@
         },
         "required": ["status"],
         "additionalProperties": {},
-        "description": "Whether the ticket has a survey, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Always null until the survey's stage ships."
+        "description": "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null from a server before the survey's stage (stage 8)."
       },
       "Ticket": {
         "type": "object",
@@ -3990,7 +3999,12 @@
           "lastMessageAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When its newest message was stored; the list is ordered by it."
+            "description": "When its newest message was stored."
+          },
+          "lastActivityAt": {
+            "description": "When the ticket last changed for its user: its newest message, or a survey the app was given since, whichever is later. `GET /tickets` is ordered by it, so a ticket whose survey is ready comes to the top of the page a poll re-reads. Absent from a server before the survey's stage (stage 8), which orders by `lastMessageAt`; read that then.",
+            "type": "string",
+            "format": "date-time"
           },
           "unreadCount": {
             "type": "integer",
@@ -4744,7 +4758,7 @@
         },
         "required": ["version", "id", "occurredAt", "user", "ticket", "type", "survey"],
         "additionalProperties": {},
-        "description": "Sent when a resolved ticket's survey is ready. From the survey's stage (stage 8)."
+        "description": "Sent when a survey is ready on a resolved or closed ticket. Not sent once the ticket is open again, nor for a survey answered or superseded before the push went."
       },
       "AnyWebhookEvent": {
         "type": "object",

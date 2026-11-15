@@ -342,6 +342,7 @@ const TICKET: z.input<typeof Ticket> = {
   canReply: true,
   createdAt: '2026-11-12T09:29:58.123Z',
   lastMessageAt: '2026-11-12T09:41:07.004Z',
+  lastActivityAt: '2026-11-12T09:41:07.004Z',
   unreadCount: 1,
   preview: {
     from: 'agent',
@@ -355,6 +356,7 @@ const TICKET: z.input<typeof Ticket> = {
 const NEW_TICKET: z.input<typeof Ticket> = {
   ...TICKET,
   lastMessageAt: OPENING.createdAt,
+  lastActivityAt: OPENING.createdAt,
   unreadCount: 0,
   preview: { from: 'customer', text: OPENING.text, hasAttachments: false },
 };
@@ -363,6 +365,7 @@ const NEW_TICKET: z.input<typeof Ticket> = {
 const ANSWERED_TICKET: z.input<typeof Ticket> = {
   ...TICKET,
   lastMessageAt: ANSWER.createdAt,
+  lastActivityAt: ANSWER.createdAt,
   unreadCount: 0,
   preview: { from: 'customer', text: ANSWER.text, hasAttachments: false },
 };
@@ -376,6 +379,9 @@ const RESOLVED_TICKET: z.input<typeof Ticket> = {
   status: 'resolved',
   createdAt: '2026-11-09T14:02:11.418Z',
   lastMessageAt: '2026-11-10T08:15:40.200Z',
+  // Its survey was given an hour after the last message, which is what put
+  // it where it sits in the list.
+  lastActivityAt: '2026-11-10T09:15:41.002Z',
   preview: {
     from: 'agent',
     text: 'The refund was sent to your wallet this morning. Is there anything else?',
@@ -908,7 +914,7 @@ function paths(): Json {
         stage: '5',
         summary: "The user's tickets",
         description:
-          'Newest first, by `(lastMessageAt, id)`, paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.',
+          'Newest first, by `(lastActivityAt, id)` — the later of the newest message and the newest survey given — paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.',
         plane: 'client',
         parameters: queryParameters(ListTicketsQuery),
         answers: answer({

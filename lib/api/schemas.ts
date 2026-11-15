@@ -338,7 +338,7 @@ export const Preview = z
 export const TicketSurveySummary = z
   .looseObject({ status: SurveyStatus })
   .describe(
-    "Whether the ticket has a survey, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Always null until the survey's stage ships.",
+    "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null from a server before the survey's stage (stage 8).",
   );
 
 /**
@@ -370,7 +370,12 @@ export const Ticket = z
       .boolean()
       .describe('Whether a message may be sent on it now; false once it is `closed`.'),
     createdAt: instant('When it was opened.'),
-    lastMessageAt: instant('When its newest message was stored; the list is ordered by it.'),
+    lastMessageAt: instant('When its newest message was stored.'),
+    lastActivityAt: instant()
+      .optional()
+      .describe(
+        "When the ticket last changed for its user: its newest message, or a survey the app was given since, whichever is later. `GET /tickets` is ordered by it, so a ticket whose survey is ready comes to the top of the page a poll re-reads. Absent from a server before the survey's stage (stage 8), which orders by `lastMessageAt`; read that then.",
+      ),
     unreadCount: count("The team's messages on it the user has not marked read."),
     preview: Preview.nullable().describe(
       "The ticket's newest message, for a list row; null only for a ticket with no message the app may read.",
@@ -935,7 +940,9 @@ export const SurveyCreatedEvent = z
       })
       .describe('The survey, by id.'),
   })
-  .describe("Sent when a resolved ticket's survey is ready. From the survey's stage (stage 8).");
+  .describe(
+    'Sent when a survey is ready on a resolved or closed ticket. Not sent once the ticket is open again, nor for a survey answered or superseded before the push went.',
+  );
 
 /**
  * Any event, by what every type carries: the arm a type added after a receiver

@@ -22,6 +22,7 @@ import {
   TicketEnvelope,
   TicketsPage,
 } from '@/lib/api/schemas';
+import { sendPulledSurvey } from '@/lib/csat';
 import { MAX_COMMENT } from '@/lib/csat/limits';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import { ratingLabels } from '@/lib/csat/wording';
@@ -29,6 +30,7 @@ import { resetEnvCache } from '@/lib/env';
 import type { ClaimedJob } from '@/lib/queue';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import { notifyMyblu } from '@/worker/handlers/notify-myblu';
 import { sendCsat } from '@/worker/handlers/send-csat';
 import { POST as postSession } from './sessions/route';
@@ -303,6 +305,27 @@ describe('send_csat on an app ticket', () => {
     ).toEqual([]);
   });
 
+  // No message and no other write touches the ticket, so without its own
+  // touch nothing fired `notify_change`, and an agent who pressed "Send now"
+  // read "Survey queued" until something else changed the ticket.
+  it('touches the ticket, so an open page wakes to the survey', async () => {
+    const token = await minted();
+    const ticket = await opened(token);
+    await resolve(ticket.id);
+    const [before] = await db
+      .select({ updatedAt: conversations.updatedAt })
+      .from(conversations)
+      .where(eq(conversations.id, ticket.id));
+
+    await surveyed(ticket.id);
+
+    const [after] = await db
+      .select({ updatedAt: conversations.updatedAt })
+      .from(conversations)
+      .where(eq(conversations.id, ticket.id));
+    expect(after!.updatedAt.getTime()).toBeGreaterThan(before!.updatedAt.getTime());
+  });
+
   it('surveys a closed ticket too, and an Arabic one in Arabic', async () => {
     const token = await minted();
     const ticket = await opened(token, 'ar');
@@ -399,6 +422,25 @@ describe('GET /tickets/{id}/survey', () => {
     expect(tickets.find((t) => t.id === quiet.id)?.survey).toBeNull();
   });
 
+  // The push refuses any survey but a pulled one; the route and the summary
+  // ask the same, so the app is never served a survey the push says is not its.
+  it('serves only a survey the app pulls, never one sent another way', async () => {
+    const token = await minted();
+    const ticket = await opened(token);
+    await resolve(ticket.id);
+    await db.insert(csatSurveys).values({
+      conversationId: ticket.id,
+      status: 'sent',
+      delivery: 'email_link',
+      channel: 'api',
+      locale: 'en',
+      sentAt: new Date(),
+    });
+
+    expect(await refusal(await read(token, ticket.id))).toMatchObject({ status: 404 });
+    expect((await listed(token)).find((t) => t.id === ticket.id)?.survey).toBeNull();
+  });
+
   it('is 404 for another user’s ticket, and for an id that is not one', async () => {
     const token = await minted();
     const ticket = await surveyedTicket(token);
@@ -407,6 +449,42 @@ describe('GET /tickets/{id}/survey', () => {
     expect(await refusal(await read(stranger, ticket.id))).toMatchObject({ status: 404 });
     expect(await refusal(await read(token, 'not-a-ticket'))).toMatchObject({ status: 404 });
     expect(await refusal(await read(token, randomUUID()))).toMatchObject({ status: 404 });
+  });
+
+  // A survey writes no message: ordered by the message alone, a ticket far
+  // down the list whose survey was written never reached the page a poll
+  // re-reads, and its summary never arrived without the push.
+  it('brings a ticket whose survey is given to the top of the list, and pages by the same order', async () => {
+    const token = await minted();
+    const older = await opened(token);
+    const newer = await opened(token);
+    await resolve(older.id);
+    await surveyed(older.id);
+    const [given] = await db
+      .select({ sentAt: csatSurveys.sentAt })
+      .from(csatSurveys)
+      .where(eq(csatSurveys.conversationId, older.id));
+
+    const tickets = await listed(token);
+    expect(tickets.map((t) => t.id)).toEqual([older.id, newer.id]);
+    expect(tickets[0]).toMatchObject({
+      lastActivityAt: given!.sentAt!.toISOString(),
+      survey: { status: 'sent' },
+    });
+    expect(tickets[1]!.lastActivityAt).toBe(tickets[1]!.lastMessageAt);
+    // The one ticket's read says the same, through the same columns.
+    expect((await ticketOf(token, older.id)).lastActivityAt).toBe(given!.sentAt!.toISOString());
+
+    const first = TicketsPage.parse(
+      await (await getList(clientRequest('/tickets?limit=1', token))).json(),
+    );
+    expect(first.tickets.map((t) => t.id)).toEqual([older.id]);
+    const second = TicketsPage.parse(
+      await (
+        await getList(clientRequest(`/tickets?limit=1&before=${first.olderCursor}`, token))
+      ).json(),
+    );
+    expect(second.tickets.map((t) => t.id)).toEqual([newer.id]);
   });
 
   it('serves the survey the ticket has, not a newer one the team decided not to send', async () => {
@@ -473,6 +551,54 @@ describe('POST /tickets/{id}/survey', () => {
     });
     expect(await rowsOf(ticket.id)).toMatchObject([
       { status: 'expired', rating: null, answerSource: null },
+    ]);
+    expect(await eventsOf(ticket.id, 'csat_received')).toEqual([]);
+  });
+
+  // The answer read the survey as `sent`, and a newer send superseded it
+  // before the rating was written: asked off that read alone, the rating
+  // landed on the superseded survey, and the answer drew the newer one
+  // unanswered, so the user was asked again.
+  it('records nothing on a survey a newer send superseded while the answer waited, and answers that survey', async () => {
+    const token = await minted();
+    const ticket = await surveyedTicket(token);
+    const [first] = await rowsOf(ticket.id);
+    // Sent two days ago, outside the resurvey window, so a second send may go.
+    await db
+      .update(csatSurveys)
+      .set({ sentAt: new Date(Date.now() - 2 * 24 * 3_600_000) })
+      .where(eq(csatSurveys.id, first!.id));
+
+    // A second send, held open after it superseded the first and wrote the
+    // second; the answer's read still sees the first as sent, and its write
+    // waits on the ticket's lock.
+    const hold = holdNextTransaction('after');
+    const sending = sendPulledSurvey({
+      conversationId: ticket.id,
+      locale: 'en',
+      snapshot: { agentId: null, groupId: null, channel: 'api' },
+      resurveyAfterDays: 1,
+      ruleId: null,
+    });
+    await hold.atHold;
+    const answering = answer(token, ticket.id, { rating: 5 });
+    expect(await untilWaitingOnALock(db)).toBe(true);
+    hold.release();
+    expect(await sending).toMatchObject({ kind: 'sent' });
+
+    expect(await survey(await answering)).toMatchObject({
+      id: first!.id,
+      status: 'expired',
+      rating: null,
+    });
+    const rows = await rowsOf(ticket.id);
+    expect(
+      rows
+        .map((row) => ({ status: row.status, rating: row.rating }))
+        .sort((a, b) => a.status.localeCompare(b.status)),
+    ).toEqual([
+      { status: 'expired', rating: null },
+      { status: 'sent', rating: null },
     ]);
     expect(await eventsOf(ticket.id, 'csat_received')).toEqual([]);
   });
@@ -558,6 +684,21 @@ describe('notify_myblu for a survey', () => {
     const ticket = await surveyedTicket(token);
     const [row] = await rowsOf(ticket.id);
     await survey(await answer(token, ticket.id, { rating: 5 }));
+    const fetchMock = receiver();
+
+    await notifyMyblu(await pushFor(row!.id));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for a ticket open again, and completes', async () => {
+    const token = await minted();
+    const ticket = await surveyedTicket(token);
+    const [row] = await rowsOf(ticket.id);
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Open') })
+      .where(eq(conversations.id, ticket.id));
     const fetchMock = receiver();
 
     await notifyMyblu(await pushFor(row!.id));

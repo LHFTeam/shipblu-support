@@ -480,10 +480,11 @@ else: the app sees only the tickets its own user opened through it.
 | `statusLabel`    | string or null                       | A label the team typed for this status, one language, shown as written. When null, the SDK's word for `status`.                                     |
 | `canReply`       | boolean                              | Whether a message may be sent now.                                                                                                                  |
 | `createdAt`      | instant                              | When it was opened.                                                                                                                                 |
-| `lastMessageAt`  | instant                              | When its newest message was stored; the list is ordered by it.                                                                                      |
+| `lastMessageAt`  | instant                              | When its newest message was stored.                                                                                                                 |
+| `lastActivityAt` | instant, absent before stage 8       | The later of its newest message and a survey the app was given since. The list is ordered by it; before stage 8, read `lastMessageAt`.              |
 | `unreadCount`    | integer                              | The team's messages on it not yet marked read.                                                                                                      |
 | `preview`        | object or null                       | `{ from, text, hasAttachments }`: the newest message, for a list row; `text` is its first 140 UTF-16 code units, never cut inside a surrogate pair. |
-| `survey`         | object or null                       | `{ status }` when the ticket has a survey, so a list can prompt without a call per ticket. Null until stage 8.                                      |
+| `survey`         | object or null                       | `{ status }` when the ticket has a survey the app pulls, so a list can prompt without a call per ticket. Null before stage 8.                       |
 
 The SDK ships the help centre's words for the four statuses: Open / مفتوحة,
 In progress / قيد المعالجة, Resolved / تم الحل, Closed / مغلقة.
@@ -633,10 +634,11 @@ a screen is open and is woken by a push while it is not.
 - `after` re-reads a few seconds before its cursor, because a row stamped
   earlier can be committed later. **A page may repeat rows the client holds:
   merge by `id`.**
-- `GET /tickets` is newest first by `(lastMessageAt, id)`, every status, and
-  pages back with `before`. It has no `after`: a ticket that gets a message
-  moves to the top, so the list is polled by re-reading its first page and
-  merging by `id`. `?trackingNumber=` finds the tickets opened with a parcel's
+- `GET /tickets` is newest first by `(lastActivityAt, id)`, every status, and
+  pages back with `before`. It has no `after`: a ticket that gets a message,
+  or whose survey is ready, moves to the top, so the list is polled by
+  re-reading its first page and merging by `id`, and sorted by
+  `lastActivityAt` (`lastMessageAt` from a server before stage 8). `?trackingNumber=` finds the tickets opened with a parcel's
   number, whatever its case and hyphens, so a shipment screen finds its ticket
   after a reinstall; `unreadTotal` still counts every ticket, whatever the filter or the
   page. A user with no tickets gets an empty list, never a `404`.

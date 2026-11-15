@@ -654,7 +654,11 @@ never retried — is right for both.
 - `GET /tickets` is ordered by `(lastMessageAt, id)` descending and pages back
   with `?before=<olderCursor>`. It has no `after`: a ticket that gets a
   message moves to the top, so the list is polled by re-reading its first page
-  and merging by `id`.
+  and merging by `id`. From stage 8 the order is `(lastActivityAt, id)`, the
+  later of the newest message and the newest survey the app was given: a
+  survey writes no message, so ordered by the message alone a ticket far down
+  the list whose survey was written never reached the page the SDK re-reads,
+  and its `survey` summary never arrived without the push.
 - A cursor is opaque base64url of Postgres's own timestamp text and the row
   id, the inbox's form (`lib/tickets/inbox-filters.ts`): a JS `Date` holds
   milliseconds where `timestamptz` holds microseconds, and a round trip skips
@@ -1131,6 +1135,7 @@ with the questions it settled by its recommended default:
   "canReply": true,
   "createdAt": "2026-11-12T09:29:58.123Z",
   "lastMessageAt": "2026-11-12T09:41:07.004Z",
+  "lastActivityAt": "2026-11-12T09:41:07.004Z",
   "unreadCount": 1,
   "preview": { "from": "agent", "text": "We have asked the courier…", "hasAttachments": false },
   "survey": null

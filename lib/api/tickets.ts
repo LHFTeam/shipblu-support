@@ -47,7 +47,7 @@ import { messageFrom } from './from';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
-import { surveyStatusSql } from './survey';
+import { surveyGivenAtSql, surveyStatusSql } from './survey';
 import type { AttachmentLink, Message, Ticket } from './schemas';
 import { ownedTicket, ownedTicketNow } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -309,6 +309,19 @@ const trackingNumberSql = sql<
   string | null
 >`(select ${apiTickets.trackingNumber} from ${apiTickets} where ${apiTickets.conversationId} = ${conversations.id})`;
 
+/**
+ * `lastActivityAt`: the later of the ticket's newest message and the newest
+ * survey the app was given (`surveyGivenAtSql`), `greatest` passing over the
+ * null of a ticket never surveyed. What the list is ordered and paged by, so a
+ * survey written on a ticket far down the list, which no message moves, still
+ * brings it to the first page the SDK re-reads. Mapped as `last_message_at` is,
+ * to a `Date`; the cursor takes its text.
+ */
+const lastActivitySql =
+  sql<Date>`greatest(${conversations.lastMessageAt}, ${surveyGivenAtSql})`.mapWith(
+    conversations.lastMessageAt,
+  );
+
 const ticketColumns = {
   id: conversations.id,
   number: conversations.number,
@@ -318,6 +331,7 @@ const ticketColumns = {
   statusLabel: shownLabelSql,
   createdAt: conversations.createdAt,
   lastMessageAt: conversations.lastMessageAt,
+  lastActivityAt: lastActivitySql,
   unreadCount: unreadCountSql,
   preview: previewSql,
   survey: surveyStatusSql,
@@ -332,6 +346,7 @@ type TicketRow = {
   statusLabel: string | null;
   createdAt: Date;
   lastMessageAt: Date;
+  lastActivityAt: Date;
   unreadCount: number;
   preview: PreviewRow | null;
   survey: 'sent' | 'answered' | 'expired' | null;
@@ -353,6 +368,7 @@ function ticketView(row: TicketRow): TicketView {
     canReply: row.status !== 'closed',
     createdAt: row.createdAt.toISOString(),
     lastMessageAt: row.lastMessageAt.toISOString(),
+    lastActivityAt: row.lastActivityAt.toISOString(),
     unreadCount: row.unreadCount,
     preview: preview
       ? {
@@ -466,7 +482,7 @@ const cursorOf = (row: MessageRow): string =>
 function vsCursor(
   op: '<' | '>' | '<=',
   cursor: Cursor,
-  time: AnyPgColumn = messages.createdAt,
+  time: AnyPgColumn | SQL = messages.createdAt,
   id: AnyPgColumn = messages.id,
 ): SQL {
   return sql`(${time}, ${id}) ${sql.raw(op)} (${cursor.time}::timestamptz, ${cursor.id}::uuid)`;
@@ -608,12 +624,18 @@ export type TicketsListPage = {
 };
 
 /**
- * A page of the caller's tickets, newest first by `(last_message_at, id)`,
- * one row more than the page so the caller knows whether anything is left,
- * every status, and only those opened with one tracking number when one is
- * asked for. The order and the `before` comparison change together, as the
- * inbox's do: the id breaks a tie on the instant, so a page boundary between
- * two tickets stamped alike neither repeats nor skips one.
+ * A page of the caller's tickets, newest first by `(lastActivityAt, id)` —
+ * the later of the newest message and the newest survey the app was given
+ * (`lastActivitySql`) — one row more than the page so the caller knows
+ * whether anything is left, every status, and only those opened with one
+ * tracking number when one is asked for. The order and the `before`
+ * comparison change together, on the same expression, as the inbox's do: the
+ * id breaks a tie on the instant, so a page boundary between two tickets
+ * stamped alike neither repeats nor skips one. Ordered by the message alone, a
+ * survey written on a ticket below the first page — one resolved long after
+ * its last message — moved nothing, and the SDK, which re-reads only that page,
+ * never saw its `survey` turn up. The order is computed per row, so no index
+ * serves it: the identity's own tickets, a few per user, are what it sorts.
  *
  * The identity is named on the joined ownership row as well as inside
  * `ownedTicket`, so the planner can drive from `api_tickets_identity_idx`, a
@@ -640,7 +662,7 @@ export function listStatement(caller: Caller, asked: ListAsked) {
   return db
     .select({
       ...ticketColumns,
-      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
+      cursorTime: sql<string>`${lastActivitySql}::text`,
       unreadTotal: unreadTotalSql(caller),
     })
     .from(conversations)
@@ -655,10 +677,10 @@ export function listStatement(caller: Caller, asked: ListAsked) {
           : sql`${trackingFoldSql(apiTickets.trackingNumber)} = ${normaliseTrackingNumber(asked.trackingNumber)}`,
         asked.cursor === null
           ? undefined
-          : vsCursor('<', asked.cursor, conversations.lastMessageAt, conversations.id),
+          : vsCursor('<', asked.cursor, lastActivitySql, conversations.id),
       ),
     )
-    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+    .orderBy(desc(lastActivitySql), desc(conversations.id))
     .limit(asked.limit + 1);
 }
 
