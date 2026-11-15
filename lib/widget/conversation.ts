@@ -419,30 +419,13 @@ export async function appendVisitorMessage(
           // on the chat has words in it — a photo sent with no caption.
           ...(meta.locale ? { locale: meta.locale } : {}),
           // What was sent, for the stand-in's rebuild (`isMediaStandIn`).
-          ...(stored.length > 0
-            ? { webchatFiles: stored.map(({ kind, filename }) => ({ kind, filename })) }
-            : {}),
+          ...webchatFilesMeta(stored),
         },
         createdAt: now,
       });
 
       if (stored.length > 0) {
-        await tx.insert(attachments).values(
-          stored.map((file, index) => ({
-            messageId,
-            storagePath: file.path,
-            // Display only, never a path segment — the key is derived from ids.
-            filename: file.filename,
-            contentType: file.contentType,
-            sizeBytes: file.sizeBytes,
-            checksum: file.checksum,
-            // A millisecond apart, in the order attached: one statement would
-            // give them one `now()`, and the console's thread breaks that tie
-            // by a random id, so an agent read "the first shows the box" under
-            // whichever photo sorted first.
-            createdAt: new Date(now.getTime() + index),
-          })),
-        );
+        await tx.insert(attachments).values(attachmentRows(messageId, stored, now));
       }
 
       if (!existing) {
@@ -499,6 +482,48 @@ export async function appendVisitorMessage(
   });
 
   return result;
+}
+
+/**
+ * What a message sent with files records of them in `messages.meta`: what was
+ * sent, under the widget's key, which `isMediaStandIn` rebuilds the stand-in
+ * from so the console's thread leaves it out where the files are drawn. Empty
+ * for a message without files. One copy for every surface a customer's files
+ * arrive on — the widget's send and the myBlu app's two — so a stand-in the
+ * console hides on one is hidden on the others.
+ */
+export function webchatFilesMeta(stored: readonly Pick<StoredUpload, 'kind' | 'filename'>[]): {
+  webchatFiles?: { kind: StoredUpload['kind']; filename: string }[];
+} {
+  return stored.length > 0
+    ? { webchatFiles: stored.map(({ kind, filename }) => ({ kind, filename })) }
+    : {};
+}
+
+/**
+ * A message's files as `attachments` rows, for the transaction that writes the
+ * message — the widget's and the myBlu app's alike, so a column added to the
+ * table, or a change in what is read off a stored file, reaches both.
+ */
+export function attachmentRows(
+  messageId: string,
+  stored: readonly StoredUpload[],
+  now: Date,
+): (typeof attachments.$inferInsert)[] {
+  return stored.map((file, index) => ({
+    messageId,
+    storagePath: file.path,
+    // Display only, never a path segment — the key is derived from ids.
+    filename: file.filename,
+    contentType: file.contentType,
+    sizeBytes: file.sizeBytes,
+    checksum: file.checksum,
+    // A millisecond apart, in the order attached: one statement would give
+    // them one `now()`, and the console's thread breaks that tie by a random
+    // id, so an agent read "the first shows the box" under whichever photo
+    // sorted first.
+    createdAt: new Date(now.getTime() + index),
+  }));
 }
 
 /**
@@ -597,9 +622,12 @@ export async function storeVisitorFiles(
 /**
  * Removes objects no row will reference. Never throws — `removeObjects` does
  * not — because the caller is already answering a failure, and a leftover is
- * bytes in a private bucket nobody can reach, which the log names.
+ * bytes in a private bucket nobody can reach, which the log names. For a write
+ * known to have stored nothing — a refusal its transaction answered before the
+ * message's insert — where `releaseUnlessStored`'s look for the message would
+ * be a query to learn what the caller already knows.
  */
-async function discardPaths(paths: readonly string[], conversationId: string) {
+export async function discardPaths(paths: readonly string[], conversationId: string) {
   if (paths.length === 0) return;
   const { failed } = await removeObjects([...paths]);
   if (failed.length > 0) {

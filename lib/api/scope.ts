@@ -47,6 +47,25 @@ type TicketColumns = Record<
  * reads the tickets a second time inside a read of one (`unreadTotalSql`).
  */
 export function ownedTicket(caller: Caller, table: TicketColumns = conversations): SQL {
+  return and(openedTicket(caller, table), eq(table.requesterContactId, caller.contactId))!;
+}
+
+/**
+ * `ownedTicket` without its requester half: a ticket this identity opened, on
+ * `api`, not deleted, spam or merged away. For a read on the pool before a
+ * write's lock, which may only refuse (`openedStatus` in `lib/api/tickets.ts`):
+ * the requester half is the one a contact merge moves, so the gate's contact,
+ * read before a merge committed, would refuse the user's own ticket, and the
+ * SDK drops a ticket answered `404`. The identity is never moved off its
+ * ownership rows, so this answers no for nothing `ownedTicket` would answer
+ * yes for. Built here, as `ownedTicket`'s own first half, so the pre-check can
+ * never be stricter than the locked read it stands in front of: a condition
+ * loosened in one is loosened in both.
+ */
+export function openedTicket(
+  caller: Pick<Caller, 'identityId'>,
+  table: TicketColumns = conversations,
+): SQL {
   return and(
     exists(
       db
@@ -59,7 +78,6 @@ export function ownedTicket(caller: Caller, table: TicketColumns = conversations
           ),
         ),
     ),
-    eq(table.requesterContactId, caller.contactId),
     eq(table.channel, 'api'),
     isNull(table.deletedAt),
     eq(table.isSpam, false),

@@ -16,6 +16,7 @@ import { webchatFilesStandIn } from '@/lib/chat/stand-ins';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { preview } from '@/lib/html/sanitize';
 import type { Admission } from '@/lib/http/rate-limit';
+import { logger, scrubbed } from '@/lib/log';
 import { shownLabelSql } from '@/lib/portal/tickets';
 import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
@@ -29,9 +30,12 @@ import { lockedStatusCategory, statusCategoryOf } from '@/lib/tickets/status-cat
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import { isUuid } from '@/lib/http/uuid';
 import {
+  attachmentRows,
+  discardPaths,
   releaseUnlessStored,
   storeVisitorFiles,
   VisitorUploadFailed,
+  webchatFilesMeta,
   type StoredUpload,
   type VisitorUpload,
 } from '@/lib/widget/conversation';
@@ -45,7 +49,7 @@ import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFit
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
 import type { AttachmentLink, Message, Ticket } from './schemas';
-import { ownedTicket } from './scope';
+import { openedTicket, ownedTicket } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
 
 /**
@@ -74,6 +78,8 @@ import { holdAccount, requesterNow, type Caller } from './sessions';
  * (`markTicketRead`) is the only writer of `messages.read_at` on `api`, and it
  * never moves or unsets one.
  */
+
+const log = logger('api_tickets');
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -983,12 +989,11 @@ function metaFor(sent: Sent, operation: Operation): Record<string, unknown> {
     // What `426` is decided on, kept as the build that wrote the message.
     client: sent.client,
     apiOperation: operation,
-    // What was sent, under the widget's key, for the stand-in's rebuild
-    // (`isMediaStandIn`): the console's thread leaves the stand-in out where
-    // the files are drawn, and this API answers its `text` as `""`.
-    ...(sent.uploads.length > 0
-      ? { webchatFiles: sent.uploads.map(({ kind, filename }) => ({ kind, filename })) }
-      : {}),
+    // What was sent, under the widget's key and through the widget's own
+    // function, for the stand-in's rebuild (`isMediaStandIn`): the console's
+    // thread leaves the stand-in out where the files are drawn, and this API
+    // answers its `text` as `""`.
+    ...webchatFilesMeta(sent.uploads),
   };
 }
 
@@ -1042,9 +1047,8 @@ async function storeFiles(
 /**
  * The files' rows, in the message's own transaction, so the live update that
  * tells the console about the message finds its files, and a message is never
- * stored without them. A millisecond apart, in the order sent, as the widget's
- * are: one statement would give them one `now()`, and the console's thread
- * breaks that tie by a random id.
+ * stored without them: the widget's rows (`attachmentRows`), a millisecond
+ * apart in the order sent.
  */
 async function insertFiles(
   tx: Executor,
@@ -1053,37 +1057,55 @@ async function insertFiles(
   now: Date,
 ): Promise<void> {
   if (stored.length === 0) return;
-  await tx.insert(attachments).values(
-    stored.map((file, index) => ({
-      messageId,
-      storagePath: file.path,
-      // Display only, never a path segment: the key is derived from ids.
-      filename: file.filename,
-      contentType: file.contentType,
-      sizeBytes: file.sizeBytes,
-      checksum: file.checksum,
-      createdAt: new Date(now.getTime() + index),
-    })),
+  await tx.insert(attachments).values(attachmentRows(messageId, stored, now));
+}
+
+/**
+ * Files stored ahead of a message whose transaction answered a refusal — every
+ * refusal is answered before the message's insert, so nothing references them
+ * — removed without asking whether the message exists.
+ */
+async function discardFiles(stored: readonly StoredUpload[], conversationId: string) {
+  await discardPaths(
+    stored.map((file) => file.path),
+    conversationId,
   );
 }
 
 /**
- * The files a write stored ahead of a message it then did not store — a
- * refusal under the lock, a replay, a transaction that failed — removed,
- * unless the message was stored after all (`releaseUnlessStored`, the widget's
- * own judgement of a COMMIT whose answer was lost).
+ * Whether a write whose transaction threw, other than on the key's unique
+ * index, committed after all: a COMMIT sent and its answer lost with the
+ * connection (`db/client.ts`). Its message is then looked for by the id it was
+ * given, as the widget looks for one (`releaseUnlessStored`): found, the write
+ * stood, its files are kept, and the caller carries on as though the
+ * transaction had answered, so the work after a commit — the on-create rules,
+ * the first SLA selection, routing, assignment, the out-of-hours reply, the
+ * upload budget — runs. Answered `500`, as it was, none of it ran in the
+ * request, and the SDK's retry under the same key is a replay, which runs
+ * none of it either: only the backstop a minute on did (`lib/api/finish.ts`),
+ * and the upload budget went unspent. Not
+ * found, its files are removed and the error stands; an answer that could not
+ * be read keeps them, and the error stands too.
+ *
+ * With or without files, since the work after the commit is owed either way.
  */
-async function releaseFiles(
+async function committedAfterAll(
+  error: unknown,
   stored: readonly StoredUpload[],
   messageId: string,
   conversationId: string,
-): Promise<void> {
-  if (stored.length === 0) return;
-  await releaseUnlessStored(
+): Promise<boolean> {
+  const outcome = await releaseUnlessStored(
     messageId,
     stored.map((file) => file.path),
     conversationId,
   );
+  if (outcome !== 'stored') return false;
+  log.warn(
+    `a transaction answered with an error but its message was stored, carried on message_id=${messageId}`,
+    scrubbed(error),
+  );
+  return true;
 }
 
 /**
@@ -1129,22 +1151,38 @@ async function openTickets(tx: Executor, caller: Caller): Promise<number> {
  * `POST /tickets`: open a ticket on the `api` channel with its first message.
  *
  * Shaped like an ingest path, and not a parameter on `createTicket`, the forms'
- * function: the pool's reads first — the key, the channel row, `planRouting` —
- * then one transaction that takes one `now` once it holds the account and the
- * requester, writes the ticket with the routing window spread into its insert,
- * the message, the ownership row, the work owed after it (`oweFinish`), the
- * `opened_from_app` event and `startRouting`, and reads nothing on the pool
- * (AGENTS.md, _postgres.js must never pipeline…_). After the commit the
- * request takes that work and runs it (`finishInRequest`): the claimed
- * tracking number's link, then the on-create rules, the first SLA selection,
- * `beginRouting`, assignment and the out-of-hours reply in the order every
- * other path runs them. A request that ends before it leaves the work to the
- * worker, a minute on, rather than to a retry that is answered as a replay
- * (`lib/api/finish.ts`).
+ * function, in this order:
+ *
+ * 1. **The pool's reads, cheapest refusal first**: the key (a replay), the
+ *    channel row (`not_configured`), the open tickets (`too_many_open`, asked
+ *    again under the lock), the upload budget and the new-ticket bucket
+ *    (`rate_limited`), then `planRouting`. The refusals no wait can change come
+ *    before the budgets, so a create the app cannot make is told so at once
+ *    rather than after an hour's `Retry-After`.
+ * 2. **The files to Storage** (`storeFiles`), which can take seconds over
+ *    mobile data and hold up to 25 MB, before anything is written: a file that
+ *    cannot be stored refuses the send and nothing is kept.
+ * 3. **The session judged** (`asked`), after the upload.
+ * 4. **One transaction** that takes one `now` once it holds the account and
+ *    the requester — so the message is stamped when it was stored, not when its
+ *    upload began nor before a lock's wait — and writes the ticket with the
+ *    routing window spread into its insert, the message and its files' rows,
+ *    the ownership row, the work owed after it (`oweFinish`), the
+ *    `opened_from_app` event and `startRouting`, and reads nothing on the pool
+ *    (AGENTS.md, _postgres.js must never pipeline…_). A refusal under its lock
+ *    removes the files; a transaction that threw but committed, its answer
+ *    lost, carries on as stored (`committedAfterAll`).
+ * 5. **After the commit**, the upload budget is spent and the request takes
+ *    the work it owes and runs it (`finishInRequest`): the claimed tracking
+ *    number's link, then the on-create rules, the first SLA selection,
+ *    `beginRouting`, assignment and the out-of-hours reply in the order every
+ *    other path runs them. A request that ends before it leaves the work to
+ *    the worker, a minute on, rather than to a retry that is answered as a
+ *    replay (`lib/api/finish.ts`).
  *
  * The new-ticket bucket is charged only for a ticket opened. Asked on the pool
  * once the key is known to be unspent (`newTicketFits`, which spends nothing),
- * so a create past it is refused before the channel is read or a lock taken;
+ * so a create past it is refused before a file is stored or a lock taken;
  * spent in the transaction once it has decided to insert, under the account
  * lock, so one account's creates spend it one at a time. A replay never
  * spends it — spent by replays, the bucket refused the eleventh retry of one
@@ -1181,13 +1219,21 @@ export async function createApiTicket(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'createTicket');
 
+  // The refusals no wait can change, before the budgets: a create at the cap
+  // or with the app's row off is told so at once, not `429` with up to an
+  // hour to wait first. The open count is asked on the pool too, before the
+  // files go to Storage — a 25 MB video uploaded only to be removed, on every
+  // foreground an outbox resends it — and only ever refuses: the count under
+  // the account lock decides.
+  const channel = await apiChannel();
+  if (!channel) return { kind: 'not_configured' };
+  if ((await openTickets(db, caller)) >= MAX_OPEN_TICKETS) return { kind: 'too_many_open' };
+
   const upload = uploadAdmission(caller, sent);
   if (upload) return upload;
   const ahead = newTicketFits(caller.identityId);
   if (!ahead.allowed) return { kind: 'rate_limited', admission: ahead, bucket: 'new_tickets' };
 
-  const channel = await apiChannel();
-  if (!channel) return { kind: 'not_configured' };
   // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
   const routing = await planRouting(channel);
 
@@ -1286,13 +1332,20 @@ export async function createApiTicket(
       return { kind: 'created' as const, as: holder, now };
     });
   } catch (error) {
-    await releaseFiles(stored, messageId, conversationId);
     const first = await keyedAfterConflict(error, caller, sent.key);
-    if (!first) throw error;
-    return replay(caller, first, 'createTicket');
+    if (first) {
+      // The key's index refused the insert, so this transaction rolled back.
+      await discardFiles(stored, conversationId);
+      return replay(caller, first, 'createTicket');
+    }
+    if (!(await committedAfterAll(error, stored, messageId, conversationId))) throw error;
+    // Its holder and its `now` went with the lost answer. The contact is read
+    // through the identity again, as a replay reads it; a create's clocks count
+    // from the ticket's own `created_at`, so `asked` stands in for the rest.
+    written = { kind: 'created', as: (await requesterNow(caller)) ?? caller, now: asked };
   }
 
-  if (written.kind !== 'created') await releaseFiles(stored, messageId, conversationId);
+  if (written.kind !== 'created') await discardFiles(stored, conversationId);
   if (written.kind === 'spent') return replay(caller, written.keyed, 'createTicket');
   if (written.kind === 'rate_limited') return written;
   if (written.kind !== 'created') return { kind: written.kind };
@@ -1328,13 +1381,11 @@ export function customerWrote(now: Date) {
  * another channel, deleted, spam or merged away.
  *
  * Only ever a refusal, never a grant: the send's own locked read is
- * `ownedTicket` in full, and decides. So it reads the ownership row by the
- * session's identity and leaves out `ownedTicket`'s requester half, which is
- * the one a contact merge moves: the gate's contact, read before a merge
- * committed, would have refused the user's own ticket `404`, and the SDK drops
- * a ticket answered that. The identity is never moved off its ownership rows
- * — they are immutable, and deleted only with the account — so null here is
- * not the caller's ticket however a merge lands.
+ * `ownedTicket` in full, and decides. So it asks `openedTicket`, `ownedTicket`
+ * less its requester half — the half a contact merge moves, which read off the
+ * gate's contact, before a merge committed, would refuse the user's own ticket
+ * `404`, and the SDK drops a ticket answered that. One predicate built from the
+ * other, so this can never be stricter than the read it stands in front of.
  */
 async function openedStatus(
   caller: Caller,
@@ -1343,23 +1394,8 @@ async function openedStatus(
   const [row] = await db
     .select({ status: ticketStatuses.category })
     .from(conversations)
-    .innerJoin(
-      apiTickets,
-      and(
-        eq(apiTickets.conversationId, conversations.id),
-        eq(apiTickets.identityId, caller.identityId),
-      ),
-    )
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(
-      and(
-        eq(conversations.id, ticketId),
-        eq(conversations.channel, 'api'),
-        isNull(conversations.deletedAt),
-        eq(conversations.isSpam, false),
-        isNull(conversations.mergedIntoId),
-      ),
-    )
+    .where(and(eq(conversations.id, ticketId), openedTicket(caller)))
     .limit(1);
   return row?.status ?? null;
 }
@@ -1397,6 +1433,14 @@ async function openedStatus(
  * reply reopening one they already have is that ticket going on, not a new
  * one (`maxOpen`, `GET /config`).
  *
+ * A send with files asks first, on the pool, whether the ticket is one this
+ * identity opened and is not closed (`openedStatus`, which only refuses), then
+ * the upload budget, then stores the files and takes its `now` after them, as
+ * a create does: a closed ticket is `409` at once rather than after the
+ * budget's hour, and nothing goes to Storage for a send the ticket refuses. A
+ * refusal under the lock removes the files; a transaction that threw but
+ * committed carries on as stored (`committedAfterAll`).
+ *
  * A reply to a `resolved` ticket reopens it through `reopenResolved`, as every
  * customer's reopen does; one to a `closed` ticket is refused, and the app
  * offers a new ticket. Two retries racing under one key wait on the account's
@@ -1411,17 +1455,19 @@ export async function sendApiMessage(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'sendMessage', ticketId);
 
-  const upload = uploadAdmission(caller, sent);
-  if (upload) return upload;
   const messageId = randomUUID();
   let files: StoredUpload[] = [];
   if (sent.uploads.length > 0) {
     // No upload onto a ticket the user cannot write on: a closed ticket, or
     // an id that is not theirs, refused before 25 MB go to Storage only to be
-    // removed again. The locked read below still decides.
+    // removed again. The locked read below still decides. Before the upload
+    // budget, so a send to a closed ticket is told `409` at once and offered a
+    // new ticket, not `429` with up to an hour to wait for that answer.
     const status = await openedStatus(caller, ticketId);
     if (status === null) return { kind: 'not_found' };
     if (status === 'closed') return { kind: 'ticket_closed' };
+    const upload = uploadAdmission(caller, sent);
+    if (upload) return upload;
     const stored = await storeFiles(ticketId, messageId, sent.uploads);
     if (!stored) return { kind: 'upload_failed' };
     files = stored;
@@ -1497,14 +1543,21 @@ export async function sendApiMessage(
       return { kind: 'stored' as const, as: holder, now };
     });
   } catch (error) {
-    await releaseFiles(files, messageId, ticketId);
     const first = await keyedAfterConflict(error, caller, sent.key);
-    if (!first) throw error;
-    return replay(caller, first, 'sendMessage', ticketId);
+    if (first) {
+      // The key's index refused the insert, so this transaction rolled back.
+      await discardFiles(files, ticketId);
+      return replay(caller, first, 'sendMessage', ticketId);
+    }
+    if (!(await committedAfterAll(error, files, messageId, ticketId))) throw error;
+    // As a create's: the contact read again, and `asked` for the stamp that
+    // went with the answer. The reply clock counts from the newer of it and
+    // `last_customer_message_at`, which the commit moved to that stamp.
+    stored = { kind: 'stored', as: (await requesterNow(caller)) ?? caller, now: asked };
   }
 
   if (stored.kind !== 'stored') {
-    await releaseFiles(files, messageId, ticketId);
+    await discardFiles(files, ticketId);
     if (stored.kind === 'spent') return replay(caller, stored.keyed, 'sendMessage', ticketId);
     return { kind: stored.kind };
   }

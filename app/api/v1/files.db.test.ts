@@ -19,12 +19,17 @@ const storage = vi.hoisted(() => ({
   uploaded: [] as string[],
   removed: [] as string[],
   signed: [] as { path: string; expiresInSeconds: number }[],
+  /** Run once during the next upload: a write landing while the file is on its way. */
+  duringUpload: null as (() => Promise<void>) | null,
 }));
 
 vi.mock('@/lib/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/storage')>()),
   uploadObject: async (path: string, content: Buffer) => {
     if (content.toString('latin1').includes('FAIL')) throw new Error('storage said no');
+    const during = storage.duringUpload;
+    storage.duringUpload = null;
+    if (during) await during();
     storage.uploaded.push(path);
     return { path, checksum: `sha-${content.length}`, sizeBytes: content.length };
   },
@@ -100,6 +105,7 @@ beforeEach(async () => {
   storage.uploaded.length = 0;
   storage.removed.length = 0;
   storage.signed.length = 0;
+  storage.duringUpload = null;
   lostCommit.armed = false;
   vi.stubEnv('MYBLU_API_TOKEN', TOKEN);
   resetEnvCache();
@@ -325,12 +331,10 @@ describe('a send with files', () => {
     expect(storage.removed).toEqual(expect.arrayContaining(storage.uploaded));
   });
 
-  it('removes the files of a send the lock refuses, and keeps nothing behind', async () => {
-    const token = await minted();
+  /** Ten open tickets of the caller's, written straight in rather than through the route, whose own bucket allows ten an hour. */
+  async function tenOpen(token: string) {
     const session = await lookupSession(token, new Date());
     if (session.kind !== 'live') throw new Error('expected a live session');
-    // Ten open tickets of the user's, written straight in rather than opened
-    // through the route, whose own bucket allows ten an hour.
     const open = await statusId('Open');
     for (let i = 0; i < 10; i += 1) {
       const [row] = await db
@@ -341,9 +345,27 @@ describe('a send with files', () => {
         .insert(apiTickets)
         .values({ conversationId: row!.id, identityId: session.caller.identityId });
     }
+  }
 
-    // The eleventh open ticket is refused under the account's lock, after its
-    // files were already stored.
+  // An outbox resends a refused create on every foreground: asked only under
+  // the lock, each resend uploaded its video and removed it again.
+  it('uploads nothing for a create at the open cap', async () => {
+    const token = await minted();
+    await tenOpen(token);
+
+    expect(await refusal(await create(token, [['files', photo()]]))).toMatchObject({
+      status: 409,
+      code: 'too_many_open',
+    });
+    expect(storage.uploaded).toEqual([]);
+  });
+
+  it('removes the files of a send the lock refuses, and keeps nothing behind', async () => {
+    const token = await minted();
+    // The cap is reached while the file is on its way, so the pool's count
+    // passes and the count under the account's lock refuses.
+    storage.duringUpload = () => tenOpen(token);
+
     expect(await refusal(await create(token, [['files', photo()]]))).toMatchObject({
       status: 409,
       code: 'too_many_open',
@@ -373,22 +395,71 @@ describe('a send with files', () => {
     expect(storage.uploaded).toEqual([]);
   });
 
-  it('keeps the files of a message whose COMMIT landed but whose answer was lost, and replays it', async () => {
+  // The widget's send carries on when its message turns out stored; answered
+  // 500, this one ran none of the work after the commit, and the SDK's retry,
+  // a replay, ran none of it either.
+  it('carries on after a reply whose COMMIT landed but whose answer was lost, its files kept and its budget spent', async () => {
     const token = await minted();
+    const session = await lookupSession(token, new Date());
+    if (session.kind !== 'live') throw new Error('expected a live session');
     const ticket = (await sent(await create(token, [['text', 'Hello']]))).ticket;
     const key = randomUUID();
 
     lostCommit.armed = true;
-    const lost = await send(token, ticket.id, [['files', photo()]], key);
-    expect(lost.status).toBe(500);
+    const answered = await sent(await send(token, ticket.id, [['files', photo()]], key));
+    expect(answered.message.attachments).toHaveLength(1);
     expect(storage.removed).toEqual([]);
+    // The work after the commit ran: the budget is spent.
+    expect(uploadFits(session.caller.identityId, 100).allowed).toBe(false);
 
     // The SDK's retry under the same key: what the first stored, its file
     // included, and nothing uploaded a second time.
     const replayed = await sent(await send(token, ticket.id, [['files', photo()]], key), 200);
-    expect(replayed.message.attachments).toHaveLength(1);
+    expect(replayed.message.id).toBe(answered.message.id);
     expect(storage.uploaded).toHaveLength(1);
     expect(storage.removed).toEqual([]);
+  });
+
+  it('carries on after a create whose COMMIT landed but whose answer was lost, files or none', async () => {
+    const token = await minted();
+
+    lostCommit.armed = true;
+    const withFile = await sent(await create(token, [['files', photo()]]));
+    expect(withFile.message.attachments).toHaveLength(1);
+    expect(storage.removed).toEqual([]);
+
+    lostCommit.armed = true;
+    const words = await sent(await create(token, [['text', 'Where is my parcel?']]));
+    expect(words.message.text).toBe('Where is my parcel?');
+    // One ticket each, answered rather than left for a replay to find.
+    const opened = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.channel, 'api'));
+    expect(opened.map((row) => row.id).sort()).toEqual(
+      [withFile.ticket.id, words.ticket.id].sort(),
+    );
+  });
+
+  // A refused send's paid upload budget made it wait up to an hour for an
+  // answer the ticket gave at once.
+  it('answers a closed ticket before the upload budget', async () => {
+    const token = await minted();
+    const session = await lookupSession(token, new Date());
+    if (session.kind !== 'live') throw new Error('expected a live session');
+    const ticket = (await sent(await create(token, [['text', 'Hello']]))).ticket;
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Closed') })
+      .where(eq(conversations.id, ticket.id));
+    // The hour's budget all but spent.
+    const { spendUpload } = await import('@/lib/api/limits');
+    spendUpload(session.caller.identityId, 100);
+
+    expect(await refusal(await send(token, ticket.id, [['files', photo()]]))).toMatchObject({
+      status: 409,
+      code: 'ticket_closed',
+    });
   });
 
   it('spends the upload budget only on files stored, never on a failure or a replay', async () => {
