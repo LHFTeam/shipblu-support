@@ -50,6 +50,7 @@ import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
 import { switchWebchatRow, webchatEditRefusal } from '@/lib/widget/switch';
 import { switchApiChannel } from '@/lib/api/channel';
+import type { RowSwitchOutcome } from '@/lib/admin/row-switch';
 import { isChannelType } from './channel-types';
 
 const log = logger('admin_channels');
@@ -591,7 +592,21 @@ export async function setWebchatActive(
   formData: FormData,
 ): Promise<RowSwitchState> {
   await requirePermission('admin.channels');
+  return answerRowSwitch(formData, switchWebchatRow);
+}
 
+/**
+ * What both row switches do once their own `requirePermission` has passed:
+ * read the row's id and the direction, run the switch, and answer. One copy, as
+ * the switch beneath it is one (`switchRow`): the two actions were line for
+ * line the same, and a fix to how `active` is read or how a stale refusal is
+ * redrawn was a fix the other had to be remembered for. Each action keeps its
+ * own permission check, where a reviewer looks for it.
+ */
+async function answerRowSwitch(
+  formData: FormData,
+  switchRowTo: (id: string, active: boolean) => Promise<RowSwitchOutcome>,
+): Promise<RowSwitchState> {
   // Canonical, not as given: the switch finds its row among the ones it reads
   // back by comparing ids in code, which Postgres prints lower-case.
   const id = canonicalUuid(text(formData, 'id'));
@@ -601,7 +616,7 @@ export async function setWebchatActive(
     return { error: 'That form is out of date — reload the page and try again' };
   }
 
-  const outcome = await switchWebchatRow(id, active === 'on');
+  const outcome = await switchRowTo(id, active === 'on');
   // A refusal about the rows means the page drew them other than they are —
   // another admin switched one, or removed it — so the page is drawn again with
   // the answer, which it shows while its rows agree with the ones refused on.
@@ -642,27 +657,7 @@ export async function setApiChannelActive(
   formData: FormData,
 ): Promise<RowSwitchState> {
   await requirePermission('admin.channels');
-
-  // Canonical, not as given: the switch finds its row among the ones it reads
-  // back by comparing ids in code, which Postgres prints lower-case.
-  const id = canonicalUuid(text(formData, 'id'));
-  if (!id) return { error: GONE };
-  const active = formData.get('active');
-  if (active !== 'on' && active !== 'off') {
-    return { error: 'That form is out of date — reload the page and try again' };
-  }
-
-  const outcome = await switchApiChannel(id, active === 'on');
-  // A refusal about the rows means the page drew them other than they are, so
-  // it is drawn again with the answer, shown while its rows agree.
-  if (!outcome.ok) {
-    if (outcome.stateKey === undefined) return { error: outcome.error };
-    revalidatePath('/admin/channels');
-    return { error: outcome.error, stateKey: outcome.stateKey };
-  }
-
-  revalidatePath('/admin/channels');
-  return { ...ok(), notice: outcome.notice, stateKey: outcome.stateKey };
+  return answerRowSwitch(formData, switchApiChannel);
 }
 
 // --- Numbers on the WhatsApp Business app -----------------------------------

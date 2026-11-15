@@ -1066,7 +1066,9 @@ describe('web chat rows', () => {
     expect(state.notice).toContain('the widget now uses “Second chat”');
     // The rows as the switch left them, which the page shows the notice beside
     // only while it draws them so.
-    expect(state.stateKey).toBe([`${first}:off:-`, `${second}:on:-`].sort().join(','));
+    expect(state.stateKey).toBe(
+      [`${first}:off:-:Web%20chat`, `${second}:on:-:Second%20chat`].sort().join(','),
+    );
     expect((await configOf(first)).isActive).toBe(false);
     expect(revalidated).toEqual(['/admin/channels']);
   });
@@ -1086,7 +1088,7 @@ describe('web chat rows', () => {
     // drawn again, and shows the refusal while its rows are the ones refused on.
     expect(await setWebchatActive(INITIAL, form({ id: only, active: 'off' }))).toEqual({
       error: ONLY_WEBCHAT_ROW,
-      stateKey: `${only}:on:-`,
+      stateKey: `${only}:on:-:Web%20chat`,
     });
     expect(revalidated).toEqual(['/admin/channels']);
     expect((await configOf(only)).isActive).toBe(true);
@@ -1135,7 +1137,7 @@ describe('myBlu app rows', () => {
     const off = await setApiChannelActive(INITIAL, form({ id: only.toUpperCase(), active: 'off' }));
     expect(off.error).toBeNull();
     expect(off.notice).toContain('no myBlu app row is on');
-    expect(off.stateKey).toBe(`${only}:off`);
+    expect(off.stateKey).toBe(`${only}:off:myBlu%20app`);
     expect(await activeOf(only)).toBe(false);
     expect(revalidated).toEqual(['/admin/channels']);
 
@@ -1144,7 +1146,7 @@ describe('myBlu app rows', () => {
     expect(on.notice).toBe(
       '“myBlu app” is on, and the app opens its new tickets under it, as the oldest active myBlu app row.',
     );
-    expect(on.stateKey).toBe(`${only}:on`);
+    expect(on.stateKey).toBe(`${only}:on:myBlu%20app`);
     expect(await activeOf(only)).toBe(true);
   });
 
@@ -1154,7 +1156,9 @@ describe('myBlu app rows', () => {
 
     const state = await setApiChannelActive(INITIAL, form({ id: first, active: 'off' }));
     expect(state.notice).toContain('the app now opens its tickets under “myBlu app (spare)”');
-    expect(state.stateKey).toBe([`${first}:off`, `${second}:on`].sort().join(','));
+    expect(state.stateKey).toBe(
+      [`${first}:off:myBlu%20app`, `${second}:on:myBlu%20app%20(spare)`].sort().join(','),
+    );
   });
 
   it('refuses a row of another type, decided by the stored type, writing nothing', async () => {
@@ -1191,7 +1195,7 @@ describe('myBlu app rows', () => {
       ),
     ).toEqual({
       error: 'That channel no longer exists — reload the page',
-      stateKey: `${only}:on`,
+      stateKey: `${only}:on:myBlu%20app`,
     });
     expect(revalidated).toEqual(['/admin/channels']);
     expect(await activeOf(only)).toBe(true);

@@ -65,27 +65,33 @@ describe('webchatSwitch', () => {
   });
 });
 
+/** The notice as `switchRow` asks for it: the rows before, and as the switch leaves them. */
+function noticeFor(list: readonly ReportedRow[], id: string, active: boolean): string {
+  const after = list.map((row) => (row.id === id ? { ...row, isActive: active } : row));
+  return switchNotice(list, after, id, active);
+}
+
 describe('switchNotice', () => {
   it('names where the widget went, and what it shows there', () => {
-    expect(switchNotice(rows(['Old', true], ['New', true, false]), 'old', false)).toBe(
+    expect(noticeFor(rows(['Old', true], ['New', true, false]), 'old', false)).toBe(
       '“Old” is off, and the widget now uses “New”, the oldest active web chat row. It lists no FAQ questions yet, so the widget shows the most-read articles until some are chosen under Chat widget.',
     );
-    expect(switchNotice(rows(['Old', true], ['New', true]), 'old', false)).toBe(
+    expect(noticeFor(rows(['Old', true], ['New', true]), 'old', false)).toBe(
       '“Old” is off, and the widget now uses “New”, the oldest active web chat row.',
     );
   });
 
   it('says when the widget stayed where it was', () => {
-    expect(switchNotice(rows(['Old', true], ['New', true]), 'new', false)).toBe(
+    expect(noticeFor(rows(['Old', true], ['New', true]), 'new', false)).toBe(
       '“New” is off. The widget still uses “Old”.',
     );
-    expect(switchNotice(rows(['Old', true], ['New', false]), 'new', true)).toBe(
+    expect(noticeFor(rows(['Old', true], ['New', false]), 'new', true)).toBe(
       '“New” is on, but the widget still uses “Old”, the oldest active web chat row, so nothing is filed under this one.',
     );
   });
 
   it('says when a row switched on took the widget over', () => {
-    expect(switchNotice(rows(['Old', false, false], ['New', true]), 'old', true)).toBe(
+    expect(noticeFor(rows(['Old', false, false], ['New', true]), 'old', true)).toBe(
       '“Old” is on, and the widget now uses it, as the oldest active web chat row. It lists no FAQ questions yet, so the widget shows the most-read articles until some are chosen under Chat widget.',
     );
   });
@@ -94,21 +100,23 @@ describe('switchNotice', () => {
 describe('webchatStateKey', () => {
   // The page compares its own rows with the ones a switch answered about, so
   // the key moves with everything an answer says, and with nothing else.
-  it('moves when a row goes on or off, gains questions, or is added', () => {
+  it('moves when a row goes on or off, gains questions, is added or is renamed', () => {
     const before = webchatStateKey(rows(['Old', true], ['New', true, false]));
     expect(webchatStateKey(rows(['Old', false], ['New', true, false]))).not.toBe(before);
     expect(webchatStateKey(rows(['Old', true], ['New', true, true]))).not.toBe(before);
     expect(webchatStateKey(rows(['Old', true], ['New', true, false], ['Third', true]))).not.toBe(
       before,
     );
+    // The notice names rows, so a rename makes it name one that is gone.
+    const renamed = rows(['Old', true], ['New', true, false]).map((row) =>
+      row.id === 'new' ? { ...row, name: 'Spare' } : row,
+    );
+    expect(webchatStateKey(renamed)).not.toBe(before);
   });
 
-  it('is the same whatever order the rows come in, and whatever they are called', () => {
+  it('is the same whatever order the rows come in', () => {
     const list = rows(['Old', true], ['New', false]);
     expect(webchatStateKey([...list].reverse())).toBe(webchatStateKey(list));
-    expect(webchatStateKey(list.map((row) => ({ ...row, name: 'Renamed' })))).toBe(
-      webchatStateKey(list),
-    );
   });
 
   // The page reads config off the list's rows and the switch off its own read;

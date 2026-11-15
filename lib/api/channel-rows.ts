@@ -63,36 +63,42 @@ export function apiSwitch<T extends ApiRow>(rows: readonly T[], id: string): Api
 }
 
 /**
- * The `api` rows as a switch's answer speaks about them: which are on. The
- * action answers with it as the switch left them and the page draws it from
- * its own rows, so a row's switch shows its answer only while the two agree —
- * "the app now uses B" is no longer true once another switch has moved it, nor
- * "no row is on" once one has been added. Order-free, since only the states
- * are compared.
+ * The `api` rows as a switch's answer speaks about them: which are on, and what
+ * each is called. The action answers with it as the switch left them and the
+ * page draws it from its own rows, so a row's switch shows its answer only
+ * while the two agree — "the app now uses B" is no longer true once another
+ * switch has moved it, nor "no row is on" once one has been added, and it names
+ * a row that is no longer called "B" once another admin has renamed it. The
+ * name is encoded, so no name can forge the separators. Order-free, since only
+ * the states are compared.
  */
 export function apiStateKey(rows: readonly ApiRow[]): string {
   return rows
-    .map((row) => `${row.id}:${row.isActive ? 'on' : 'off'}`)
+    .map((row) => `${row.id}:${row.isActive ? 'on' : 'off'}:${encodeURIComponent(row.name)}`)
     .sort()
     .join(',');
 }
 
 /**
  * What the admin is told once a row has been switched. `rows` are as they were
- * before the switch, `active` is what the row was switched to.
+ * before the switch and `switched` as it leaves them (`switchRow` works them
+ * out once), `active` is what the row was switched to.
  *
  * The last row going off says what that does and what it does not, since it
  * is the one switch here that changes what a customer can do: the app opens no
  * new ticket, and the tickets it has go on.
  */
-export function apiSwitchNotice(rows: readonly ApiRow[], id: string, active: boolean): string {
+export function apiSwitchNotice(
+  rows: readonly ApiRow[],
+  switched: readonly ApiRow[],
+  id: string,
+  active: boolean,
+): string {
   const row = rows.find((candidate) => candidate.id === id);
   if (!row) return '';
   const name = `“${row.name}”`;
   const before = appRow(rows);
-  const after = appRow(
-    rows.map((candidate) => (candidate.id === id ? { ...candidate, isActive: active } : candidate)),
-  );
+  const after = appRow(switched);
 
   if (!active) {
     if (!after) {

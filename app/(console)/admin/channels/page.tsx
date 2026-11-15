@@ -293,30 +293,12 @@ export default async function ChannelsPage() {
                   <Badge tone="warning">No business account</Badge>
                 ) : null}
                 <span className="ms-auto text-xs text-(--color-text-secondary)">
-                  {coexistence
-                    ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
-                        coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
-                      }${account ? ` · ${account.name}` : ''}`
-                    : isWhatsApp
-                      ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
-                          account ? ` · ${account.name}` : ''
-                        }`
-                      : isMetaChannel(channel.type)
-                        ? 'hardcoded in server environment variables'
-                        : channel.type === 'webchat'
-                          ? channel.id === webchat?.id
-                            ? 'the widget'
-                            : 'not the widget’s row'
-                          : channel.type === 'api'
-                            ? channel.id === app?.id
-                              ? 'the app’s row'
-                              : app
-                                ? 'not the app’s row'
-                                : // Every row is off, which is the switch
-                                  // doing its job: said, so it reads as a
-                                  // choice rather than a missing setting.
-                                  'none on: the app opens no new tickets'
-                            : (channel.config.address as string) || 'no address'}
+                  {rowDetail(channel, {
+                    coexistence,
+                    accountName: account?.name ?? null,
+                    widgetRowId: webchat?.id ?? null,
+                    appRowId: app?.id ?? null,
+                  })}
                 </span>
                 {coexistence && canConnect && channel.isActive && !stillConnecting
                   ? SYNC_TYPES.map((type) => {
@@ -639,4 +621,41 @@ function NumberOwnerLine({
       />
     </div>
   );
+}
+
+/**
+ * The line beside a row saying what it is, one branch per kind, each with its
+ * reason beside it. It was one ternary five levels deep, a level added for each
+ * kind with a label of its own, with a comment in the middle of the expression.
+ */
+function rowDetail(
+  channel: { id: string; type: string; config: Record<string, unknown> },
+  row: {
+    coexistence: ReturnType<typeof parseCoexistence>;
+    accountName: string | null;
+    widgetRowId: string | null;
+    appRowId: string | null;
+  },
+): string {
+  const account = row.accountName ? ` · ${row.accountName}` : '';
+  if (row.coexistence) {
+    const { displayPhoneNumber, verifiedName } = row.coexistence;
+    const number = displayPhoneNumber ?? (channel.config.phoneNumberId as string);
+    return `${number}${verifiedName ? ` · ${verifiedName}` : ''}${account}`;
+  }
+  if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') {
+    return `${(channel.config.phoneNumberId as string) || 'no phone number id'}${account}`;
+  }
+  if (isMetaChannel(channel.type)) return 'hardcoded in server environment variables';
+  switch (channel.type) {
+    case 'webchat':
+      return channel.id === row.widgetRowId ? 'the widget' : 'not the widget’s row';
+    case 'api':
+      if (channel.id === row.appRowId) return 'the app’s row';
+      // Every row is off, which is the switch doing its job: said, so it reads
+      // as a choice rather than a missing setting.
+      return row.appRowId ? 'not the app’s row' : 'none on: the app opens no new tickets';
+    default:
+      return (channel.config.address as string) || 'no address';
+  }
 }

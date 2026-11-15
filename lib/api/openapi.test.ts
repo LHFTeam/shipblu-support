@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { once, openApiDocumentJson } from './openapi';
+import { FAILED_BUILD_KEPT_MS, memoised, openApiDocumentJson } from './openapi';
 import { ERROR_STATUS, ErrorCode } from './schemas';
 
 /**
@@ -104,23 +104,34 @@ function answerRoots(): unknown[] {
   return [...answers, ...unreferenced];
 }
 
-describe('once', () => {
-  // The document's memo: a failed build is kept as well, so a broken document
-  // costs one build per process, not one per request.
-  it('runs its build once, success or failure, and throws a kept failure again', () => {
+describe('memoised', () => {
+  // The document's memo: a failed build is kept for a minute, so a broken
+  // document costs one build a minute, not one per request, and a passing
+  // failure is not a `500` until the instance restarts.
+  it('keeps a success for good, and a failure for a minute before building again', () => {
+    let clock = 0;
     let builds = 0;
-    const broken = once(() => {
-      builds += 1;
-      throw new Error('an example no longer passes its schema');
-    });
-    expect(broken).toThrow('an example no longer passes its schema');
-    expect(broken).toThrow('an example no longer passes its schema');
+    let failing = true;
+    const document = memoised(
+      () => {
+        builds += 1;
+        if (failing) throw new Error('an example no longer passes its schema');
+        return { built: builds };
+      },
+      () => clock,
+    );
+    expect(document).toThrow('an example no longer passes its schema');
+    clock += FAILED_BUILD_KEPT_MS - 1;
+    expect(document).toThrow('an example no longer passes its schema');
     expect(builds).toBe(1);
 
-    let made = 0;
-    const fine = once(() => ({ n: (made += 1) }));
-    expect(fine()).toBe(fine());
-    expect(made).toBe(1);
+    failing = false;
+    clock += 1;
+    const built = document();
+    expect(built).toEqual({ built: 2 });
+    clock += 10 * FAILED_BUILD_KEPT_MS;
+    expect(document()).toBe(built);
+    expect(builds).toBe(2);
   });
 });
 

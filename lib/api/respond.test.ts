@@ -30,7 +30,7 @@ describe('apiError', () => {
     expect(answer.headers.has('retry-after')).toBe(false);
   });
 
-  it('does not compile a 429 without Retry-After, nor Retry-After on another code', () => {
+  it('does not compile a 429 without Retry-After, a wait that skipped the rounding, nor Retry-After on another code', () => {
     // Never called: each line is here for the type checker to refuse.
     const unnarrowed = 'internal' as ErrorCode;
     const refused = () => [
@@ -40,6 +40,10 @@ describe('apiError', () => {
       apiError('internal', 'Failed.', { requestId: 'r', retryAfterSeconds: 5 }),
       // @ts-expect-error a code not narrowed may be `rate_limited`.
       apiError(unnarrowed, 'Failed.', { requestId: 'r' }),
+      // @ts-expect-error a wait that skipped the rounding: `Retry-After: 0` says ask again now.
+      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 0 }),
+      // @ts-expect-error nor a fraction, which no `Retry-After` may carry.
+      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 0.25 }),
     ];
     expect(refused).toBeTypeOf('function');
   });

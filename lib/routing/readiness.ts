@@ -17,7 +17,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured } from '@/lib/typesafe/client';
-import { filedYet, filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
+import { filingGap, filingRowFor, ownedByActiveAgent } from './filing';
 import { routingModeOf, routingStartFor, type RoutingMode, type RoutingStart } from './mode';
 import { routingLock, type RoutingLock } from './mode-copy';
 
@@ -287,7 +287,8 @@ function assessReadiness(input: {
     const mode = routingModeOf(channel);
     const filingRow = filingRowFor(channel, input.channels);
     const owned = ownedByActiveAgent(channel) ? (channel.ownerName ?? 'its owner') : null;
-    const files = filesRoutableTickets(channel, input.channels);
+    const gap = filingGap(channel, input.channels);
+    const files = gap === null;
     const starts = files ? routingStartFor(mode, classifier.mode) : null;
     const base = {
       id: channel.id,
@@ -308,8 +309,11 @@ function assessReadiness(input: {
       warnings.push({ kind: 'never_routes', reason: lock });
       return { ...base, warnings };
     }
-    if (!channel.isActive) warnings.push({ kind: 'inactive' });
-    else if (!filedYet(channel.type)) warnings.push({ kind: 'not_filed_yet' });
+    // In `filingGap`'s order: a type nothing files under yet is that reason
+    // whether or not the row is on, since "a ticket held under it before it
+    // went off" describes tickets no such row has ever had.
+    if (gap === 'not_filed_yet') warnings.push({ kind: 'not_filed_yet' });
+    else if (gap === 'inactive') warnings.push({ kind: 'inactive' });
     else if (filingRow && filingRow !== channel) {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }

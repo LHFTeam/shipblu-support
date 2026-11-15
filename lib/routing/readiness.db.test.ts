@@ -300,9 +300,10 @@ describe('routingReadiness', () => {
   });
 
   // Nothing files under a myBlu app row until the stage that opens the app's
-  // tickets (`filedYet`), so no app row routes yet, and every active one says
-  // so — a second row too, since no row of the type files anything; an
-  // inactive row keeps its own reason.
+  // tickets (`filedYet`), so no app row routes yet, and every one says so — a
+  // second row too, since no row of the type files anything, and one switched
+  // off, whose own reason ("a ticket held under it before it went off") would
+  // describe tickets no app row has ever had.
   it('judges the myBlu app’s rows by the row the app files under, which files nothing yet', async () => {
     const recipients = await group('Recipients');
     await member(recipients, 'Here', {});
@@ -334,7 +335,10 @@ describe('routingReadiness', () => {
       routesInApply: false,
       warnings: [{ kind: 'not_filed_yet' }],
     });
-    expect(of(readiness, off)).toMatchObject({ starts: null, warnings: [{ kind: 'inactive' }] });
+    expect(of(readiness, off)).toMatchObject({
+      starts: null,
+      warnings: [{ kind: 'not_filed_yet' }],
+    });
     expect(of(readiness, spare)).toMatchObject({
       starts: null,
       warnings: [{ kind: 'not_filed_yet' }],

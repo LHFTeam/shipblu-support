@@ -45,8 +45,18 @@ export interface RowKind<R extends SwitchRow> {
   readonly stateKey: (rows: readonly R[]) => string;
   /** Why this switch must not be written, or null: web chat refuses its last active row. */
   readonly refusal?: (rows: readonly R[], id: string, active: boolean) => string | null;
-  /** The answer, worded for the rows as the switch leaves them. */
-  readonly notice: (rows: readonly R[], id: string, active: boolean) => string;
+  /**
+   * The answer, worded for the rows as the switch leaves them: `before` as
+   * read under the lock, `after` with the switched row flipped, worked out once
+   * here for the state key and the notice alike, so the two cannot disagree
+   * about the result.
+   */
+  readonly notice: (
+    before: readonly R[],
+    after: readonly R[],
+    id: string,
+    active: boolean,
+  ) => string;
   readonly log: ReturnType<typeof logger>;
   readonly logLine: string;
 }
@@ -97,6 +107,10 @@ export async function switchRow<R extends SwitchRow>(
     const after = rows.map((candidate) =>
       candidate.id === id ? { ...candidate, isActive: active } : candidate,
     );
-    return { ok: true, notice: kind.notice(rows, id, active), stateKey: kind.stateKey(after) };
+    return {
+      ok: true,
+      notice: kind.notice(rows, after, id, active),
+      stateKey: kind.stateKey(after),
+    };
   });
 }
