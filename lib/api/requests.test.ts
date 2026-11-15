@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { withTestEnv } from '@/lib/testing/env';
 import { encodeCursor } from './cursor';
 import { MAX_WIDGET_REQUEST_BYTES } from '@/lib/widget/files';
+import { retryAfterSeconds } from '@/lib/http/rate-limit';
 import {
   answerRead,
   answerSend,
@@ -557,7 +558,8 @@ describe('answerSend, for what files add', () => {
     const answer = answerSend(
       {
         kind: 'rate_limited',
-        admission: { allowed: false, resetInSeconds: 1200 },
+        // The one rounding every wait is built through, as a bucket answers it.
+        admission: { allowed: false, resetInSeconds: retryAfterSeconds(1_200_000) },
         bucket: 'uploads',
       },
       'r',
