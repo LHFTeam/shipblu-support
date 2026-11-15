@@ -121,7 +121,6 @@ async function agentReply(t: { ticketId: string; channel: 'api' | 'webchat' }) {
   return storeAgentReply(t.ticketId, t.channel, {
     authorAgentId: await agent(),
     bodyText: 'We have asked the courier to call you.',
-    deliveryStatus: 'delivered',
   });
 }
 
