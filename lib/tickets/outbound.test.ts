@@ -23,8 +23,10 @@ import {
   carrierFor,
   deliverAutomatedReply,
   lacksEmailRecipient,
+  rowIsDelivery,
   sendsByEmail,
 } from './outbound';
+import { isReadOnlyChannel } from './channel-policy';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -86,6 +88,53 @@ describe('deliverAutomatedReply', () => {
     const lastMessageAt = written.lastMessageAt as Date;
     expect(stamp!.queryChunks!.some((chunk) => chunk instanceof Date)).toBe(false);
     expect(stamp!.queryChunks!).toContain(lastMessageAt.toISOString());
+  });
+
+  const reply = (channel: 'email' | 'webchat' | 'api') =>
+    deliverAutomatedReply({
+      conversationId: 'conversation-1',
+      channel,
+      requesterEmail: 'amira@example.test',
+      bodyText: 'We received your message.',
+      bodyHtml: '<p>We received your message.</p>',
+      actorLabel: 'automation:acknowledge',
+      eventType: 'auto_replied',
+    });
+
+  // Asked of the carrier when it answered `send_email` for both, `isEmail`
+  // was true here, so an automated message on the myBlu app was
+  // stored with an HTML part and the contact's address — which can be a
+  // previous holder of the phone's — and only the queueing was skipped.
+  it.each(['webchat', 'api'] as const)(
+    'stores an automated message on %s as its delivery: no HTML part, no address, no job',
+    async (channel) => {
+      await reply(channel);
+
+      expect(mocks.insertValues.mock.calls[0]![0]).toMatchObject({
+        bodyHtml: null,
+        toAddresses: [],
+        deliveryStatus: 'delivered',
+        deliveredAt: expect.any(Date),
+      });
+      expect(mocks.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still writes an email as one, and queues its carrier', async () => {
+    await reply('email');
+
+    const values = mocks.insertValues.mock.calls[0]![0] as Record<string, unknown>;
+    expect(values).toMatchObject({
+      bodyHtml: '<p>We received your message.</p>',
+      toAddresses: ['amira@example.test'],
+      deliveryStatus: 'pending',
+    });
+    expect(values).not.toHaveProperty('deliveredAt');
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      'send_email',
+      { messageId: 'message-1' },
+      expect.objectContaining({ dedupeKey: 'send:message-1' }),
+    );
   });
 });
 
@@ -205,10 +254,10 @@ describe('automatedReplyBlocked', () => {
   });
 
   it('leaves the channels that have no window alone', () => {
-    // Email, the portal and web chat can be written to whenever — an old ticket
-    // is not a closed door there, and blocking one would silence the
-    // acknowledgement on the channel it matters most on.
-    for (const channel of ['email', 'portal', 'webchat']) {
+    // Email, the portal, web chat and the myBlu app can be written to whenever
+    // — an old ticket is not a closed door there, and blocking one would
+    // silence the acknowledgement on the channel it matters most on.
+    for (const channel of ['email', 'portal', 'webchat', 'api']) {
       expect(automatedReplyBlocked(dm(channel, ago(30 * DAY)), NOW)).toBeNull();
       expect(automatedReplyBlocked(dm(channel, null), NOW)).toBeNull();
     }
@@ -244,6 +293,68 @@ describe('carrierFor', () => {
     expect(carrierFor('facebook_comment')).toBe('send_meta');
     expect(carrierFor('instagram_comment')).toBe('send_meta');
   });
+
+  // Null, so `enqueue(carrierFor(c), …)` does not compile: a caller says
+  // what happens where nothing carries a message, rather than remembering to
+  // ask `rowIsDelivery` first.
+  it('answers null for the channels nothing carries: the two whose row is their delivery, and the bot', () => {
+    for (const channel of ['webchat', 'api'] as const) {
+      expect(carrierFor(channel)).toBeNull();
+      expect(rowIsDelivery(channel)).toBe(true);
+    }
+    expect(carrierFor('whatsapp_bot')).toBeNull();
+  });
+
+  // Every channel is exactly one of three: carried, its own delivery, or
+  // nobody's to write to. `rowIsDelivery` is derived from the other two, so a
+  // channel given no carrier is a row its customer reads unless it is
+  // read-only — never a `pending` row with nothing queued behind it.
+  it('puts every channel in exactly one of: a carrier, its own delivery, read-only', () => {
+    for (const channel of [
+      'email',
+      'portal',
+      'whatsapp',
+      'whatsapp_bot',
+      'webchat',
+      'api',
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ] as const) {
+      const ways = [
+        carrierFor(channel) !== null,
+        rowIsDelivery(channel),
+        isReadOnlyChannel(channel),
+      ];
+      expect(ways.filter(Boolean), channel).toHaveLength(1);
+    }
+    expect(rowIsDelivery('whatsapp_bot')).toBe(false);
+  });
+});
+
+describe('rowIsDelivery', () => {
+  it('is true for web chat and the myBlu app, whose clients read the row', () => {
+    expect(rowIsDelivery('webchat')).toBe(true);
+    expect(rowIsDelivery('api')).toBe(true);
+  });
+
+  // Every other channel has a carrier, or is answered by nobody. A channel
+  // added to the enum lands here until somebody says its row is its delivery.
+  it('is false for every channel a carrier takes, and for the bot', () => {
+    for (const channel of [
+      'email',
+      'portal',
+      'whatsapp',
+      'whatsapp_bot',
+      'facebook',
+      'facebook_comment',
+      'instagram',
+      'instagram_comment',
+    ] as const) {
+      expect(rowIsDelivery(channel)).toBe(false);
+    }
+  });
 });
 
 describe('sendsByEmail', () => {
@@ -268,10 +379,13 @@ describe('sendsByEmail', () => {
     }
   });
 
-  // `carrierFor` answers `send_email` for the bot, which never sends by email, so
-  // these two are pinned rather than left to whatever that arm happens to say.
-  it('writes an api message as an email, and nothing on the read-only bot channel', () => {
-    expect(sendsByEmail('api')).toBe(true);
+  // `carrierFor` answers `send_email` for these three, none of which sends by
+  // email, so they are pinned rather than left to whatever that arm happens to
+  // say. The myBlu app was written as email until its row became its delivery:
+  // an agent's reply was queued to the contact's address, or to nobody.
+  it('writes nothing as an email on the myBlu app, web chat or the read-only bot channel', () => {
+    expect(sendsByEmail('api')).toBe(false);
+    expect(sendsByEmail('webchat')).toBe(false);
     expect(sendsByEmail('whatsapp_bot')).toBe(false);
   });
 });
@@ -288,6 +402,9 @@ describe('lacksEmailRecipient', () => {
     expect(lacksEmailRecipient('portal', 'customer@example.com')).toBe(false);
     expect(lacksEmailRecipient('whatsapp', null)).toBe(false);
     expect(lacksEmailRecipient('webchat', null)).toBe(false);
+    // Not email any more, so an out-of-hours reply on the app is not skipped
+    // for a contact with no address, which most of the app's will be.
+    expect(lacksEmailRecipient('api', null)).toBe(false);
     expect(lacksEmailRecipient('facebook_comment', null)).toBe(false);
     expect(lacksEmailRecipient('instagram_comment', null)).toBe(false);
   });

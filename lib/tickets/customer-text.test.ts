@@ -198,11 +198,13 @@ describe('lastCustomerWords', () => {
 describe('subjectWords', () => {
   // A chat ticket's subject is its opening message's first line.
   it('keeps a subject somebody wrote and drops one that is our label', () => {
-    expect(subjectWords('فين شحنتي')).toBe('فين شحنتي');
-    expect(subjectWords('Re: [SB-1234] where is my order')).toBe('Re: [SB-1234] where is my order');
-    expect(subjectWords('[voice note]')).toBeNull();
-    expect(subjectWords('[image]')).toBeNull();
-    expect(subjectWords(null)).toBeNull();
+    expect(subjectWords('فين شحنتي', 'whatsapp')).toBe('فين شحنتي');
+    expect(subjectWords('Re: [SB-1234] where is my order', 'whatsapp')).toBe(
+      'Re: [SB-1234] where is my order',
+    );
+    expect(subjectWords('[voice note]', 'whatsapp')).toBeNull();
+    expect(subjectWords('[image]', 'whatsapp')).toBeNull();
+    expect(subjectWords(null, 'whatsapp')).toBeNull();
   });
 
   // Made into a subject the way ingest makes one: the first line, cut to 80.
@@ -235,18 +237,46 @@ describe('subjectWords', () => {
     for (const label of [pin, edit, document]) {
       const subject = subjectFrom(label);
       expect(subject.endsWith(']'), subject).toBe(false);
-      expect(subjectWords(subject), subject).toBeNull();
+      expect(subjectWords(subject, 'whatsapp'), subject).toBeNull();
     }
-    expect(subjectWords('[urgent] where is my COD')).toBe('[urgent] where is my COD');
-    expect(subjectWords('[document] missing from my parcel')).toBe(
+    expect(subjectWords('[urgent] where is my COD', 'whatsapp')).toBe('[urgent] where is my COD');
+    expect(subjectWords('[document] missing from my parcel', 'whatsapp')).toBe(
       '[document] missing from my parcel',
     );
   });
 
   it('drops the name ingest gives a ticket whose opening message has no first line', () => {
-    expect(subjectWords(subjectFrom(''))).toBeNull();
-    for (const name of Object.values(UNNAMED_SUBJECT)) expect(subjectWords(name), name).toBeNull();
-    expect(subjectWords('Facebook comment about my order')).toBe('Facebook comment about my order');
+    expect(subjectWords(subjectFrom(''), 'whatsapp')).toBeNull();
+    const namedOn = {
+      email: 'email',
+      webchat: 'webchat',
+      api: 'api',
+      whatsapp: 'whatsapp',
+      facebook: 'facebook',
+      instagram: 'instagram',
+      facebookComment: 'facebook_comment',
+      instagramComment: 'instagram_comment',
+    } as const;
+    for (const [key, name] of Object.entries(UNNAMED_SUBJECT)) {
+      const channel = namedOn[key as keyof typeof namedOn];
+      expect(subjectWords(name, channel), name).toBeNull();
+    }
+    expect(subjectWords('Facebook comment about my order', 'whatsapp')).toBe(
+      'Facebook comment about my order',
+    );
+  });
+
+  // The names are words a customer can write, and only ours where ingest wrote them.
+  it('keeps a name of ours a customer wrote on another channel', () => {
+    expect(subjectWords('myBlu app', 'email')).toBe('myBlu app');
+    expect(subjectWords('myBlu app', 'whatsapp')).toBe('myBlu app');
+    expect(subjectWords('myBlu app', 'api')).toBeNull();
+    expect(subjectWords('Facebook', 'webchat')).toBe('Facebook');
+    expect(subjectWords('(no subject)', 'portal')).toBe('(no subject)');
+    // Rolled back, Stage 1.2 files a comment on its platform's channel, under its comment name.
+    expect(subjectWords('Facebook comment', 'facebook')).toBeNull();
+    expect(subjectWords('Instagram comment', 'instagram')).toBeNull();
+    expect(subjectWords('Facebook comment', 'instagram')).toBe('Facebook comment');
   });
 });
 

@@ -11,6 +11,7 @@ import type { StatusCategory } from '@/lib/tickets/vocabulary';
 import { commentIdOf } from '@/lib/meta/comments';
 import {
   isCommentTicket,
+  withholdsCustomerName,
   isReadOnlyChannel,
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
@@ -197,11 +198,12 @@ async function send(
     locale: await requesterLocale(conversationId),
     holiday,
     ticketNumber: ticket.number,
-    // Never published under a post. The contact's name can have come from
-    // another channel — a merge with the customer's email contact, an agent's
-    // edit — and the commenter may never have used it in public; a greeting
-    // without one closes its gap (`substitute`).
-    customerName: isComment ? null : ticket.contactName,
+    // Never under a post: `withholdsCustomerName` says why, for every sender
+    // that greets by name. A greeting without one closes its gap
+    // (`substitute`).
+    customerName: withholdsCustomerName(ticket.channel, ticket.externalId)
+      ? null
+      : ticket.contactName,
   };
 
   const body = pickBody(rule, context);

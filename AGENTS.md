@@ -731,19 +731,35 @@ survey and the survey's thanks after a tapped rating — at **24 hours** on a
 Facebook or Instagram direct message, not at seven days. The seven days belong
 to a human.
 It refuses the customer bot's tickets outright, whatever the clock says:
-nobody on the team writes there, and `carrierFor` would queue the message as
-an email. The engine asked only this guard, so until it refused the bot an
-`on_update` rule's reply on a bot ticket was written and queued. The
-acknowledgement and the survey turn the bot away themselves, and the survey
+nobody on the team writes there, and nothing carries the message
+(`carrierFor` answers null; it once queued it as an email). The engine asked
+only this guard, so until it refused the bot an `on_update` rule's reply on a
+bot ticket was written and queued. The acknowledgement and the survey turn the
+bot away themselves, and the survey
 asks this guard only on Meta's channels, so the door refuses it as well:
 `writeAutomatedReply` throws on a read-only channel before the row exists, for
 any sender that did not refuse it first. The guard is shared with WhatsApp's
 template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
-that permanently failed. Route a new automated sender through it and through
-`carrierFor`, which is the same lesson twice — `send_csat` kept private copies
-of both and so surveyed Facebook tickets by email.
+that permanently failed. Route a new automated sender through it, through
+`carrierFor` and through `rowIsDelivery`, which is the same lesson three times —
+`send_csat` kept private copies of the first two and so surveyed Facebook tickets
+by email. `carrierFor` answers null for web chat and the myBlu app (`api`),
+whose row is the delivery — written `delivered` with no HTML part and no
+address and queued nowhere — and for the bot, which nobody answers, so
+`enqueue(carrierFor(c), …)` does not compile until a caller says what happens
+then. `rowIsDelivery` says what status the row is written with — derived from
+`carrierFor`, no carrier and not read-only, so the two cannot disagree — and
+`storeAgentReply` writes an agent's with it, so no sender states one; and
+`sendsByEmail` whether it carries an HTML part and an address, at every sender —
+never a test naming one channel, which is how the code queued an `api` reply as
+an email at every place that set web chat aside by name, back when
+`carrierFor` answered `send_email` for both. A sender that greets the customer
+by name asks `withholdsCustomerName` (`lib/tickets/channel-policy.ts`) first:
+never under a public comment. The myBlu app is greeted by name, by the owner's
+decision: a number rarely changes hands, and the name is the one the app sends,
+kept current.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and
