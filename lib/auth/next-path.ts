@@ -15,6 +15,13 @@ export function safePath(next: unknown, fallback: string): string {
 }
 
 /**
+ * The console sign-in's `from` when the help centre's sign-in sent an agent
+ * there from the help centre's own host, which serves no console. One constant
+ * for the sender and the page, so the page cannot stop recognising it.
+ */
+export const HELP_CENTRE_SIGN_IN = 'help-centre';
+
+/**
  * The same, narrowed to somewhere a customer can actually go.
  *
  * A customer often arrives at the sign-in form carrying a `next` the console

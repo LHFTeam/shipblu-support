@@ -3,6 +3,7 @@ import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
 import { FRESHDESK_FOLDER, freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
+import { isHelpCentreHost } from '@/lib/kb/site';
 
 /**
  * Two jobs, both of which have to happen before anything touches a database.
@@ -178,8 +179,6 @@ function isPublic(pathname: string): boolean {
 
 export default function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const host = request.headers.get('host')?.split(':')[0]?.toLowerCase() ?? '';
-  const kbHost = process.env.KB_PUBLIC_HOST?.toLowerCase();
 
   // --- Legacy Freshdesk links ---------------------------------------------
   // An article, a folder or a category: each names a row, so finding where it
@@ -238,7 +237,11 @@ export default function proxy(request: NextRequest) {
   }
 
   // --- Help centre hostname ------------------------------------------------
-  if (kbHost && host === kbHost) {
+  // `isHelpCentreHost`, which the help centre's sign-in asks too: a server
+  // action's redirect is rendered in the same request, without coming back
+  // through here, so the sign-in has to know for itself that this host serves
+  // no console (`app/help/[locale]/account/actions.ts`).
+  if (isHelpCentreHost(request.headers.get('host'))) {
     if (underPrefix(pathname, KB_HOST_PASSTHROUGH)) {
       return NextResponse.next();
     }

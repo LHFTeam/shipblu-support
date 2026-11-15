@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { articleLinks, articleOrigins, articleUrl, publicBaseUrl, requestBaseUrl } from './site';
+import {
+  articleLinks,
+  articleOrigins,
+  articleUrl,
+  consoleBaseUrl,
+  isHelpCentreHost,
+  publicBaseUrl,
+  requestBaseUrl,
+} from './site';
 
 /** Just enough of `Headers` for the one method `requestBaseUrl` calls. */
 function headers(entries: Record<string, string>) {
@@ -92,6 +100,49 @@ describe('articleOrigins', () => {
       read: 'http://localhost:3000',
       send: 'https://shipblu-support.onrender.com',
     });
+  });
+});
+
+describe('isHelpCentreHost', () => {
+  withTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+  // The proxy asks this to decide which host is the help centre's alone, and the
+  // help centre's sign-in asks it to decide whether an agent can stay; read
+  // differently, the sign-in would draw the inbox where the proxy 404s it.
+  it('is the host KB_PUBLIC_HOST names, whatever its case or port', () => {
+    expect(isHelpCentreHost('support.shipblu.com')).toBe(true);
+    expect(isHelpCentreHost('Support.ShipBlu.com:443')).toBe(true);
+  });
+
+  it('is no other host, and no host at all', () => {
+    expect(isHelpCentreHost('shipblu-support.onrender.com')).toBe(false);
+    expect(isHelpCentreHost(null)).toBe(false);
+    expect(isHelpCentreHost('')).toBe(false);
+  });
+
+  it('is nothing while KB_PUBLIC_HOST is unset, when every host serves the console', () => {
+    setTestEnv({ KB_PUBLIC_HOST: undefined });
+
+    expect(isHelpCentreHost('support.shipblu.com')).toBe(false);
+  });
+});
+
+describe('consoleBaseUrl', () => {
+  withTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
+
+  it("is APP_URL's origin", () => {
+    setTestEnv({ APP_URL: 'https://shipblu-support.onrender.com/' });
+
+    expect(consoleBaseUrl()).toBe('https://shipblu-support.onrender.com');
+  });
+
+  // A redirect to localhost would leave an agent on a dead page in production,
+  // and one to the help centre's host back on the 404 it was sent away from.
+  it('is nowhere when APP_URL is unset, or names the help centre’s host', () => {
+    expect(consoleBaseUrl()).toBeNull();
+
+    setTestEnv({ APP_URL: 'https://support.shipblu.com' });
+    expect(consoleBaseUrl()).toBeNull();
   });
 });
 

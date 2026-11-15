@@ -9143,6 +9143,38 @@ found"}` and not Next's page. The same route called by its own URL
       cannot be derived is the clocks' state: a `next_response_due_at`
       cleared, and the breach an answered ticket was spared.
 
+119.  **An admin signed in on the help centre's host saw the inbox, and every
+      group view in it answered 404.** _2026-11-15._ `KB_PUBLIC_HOST` names
+      `support.shipblu.com`, so the proxy serves that host as the help centre
+      only and rewrites `/inbox` there under `/help`, where nothing answers.
+      The help centre's sign-in, `portalSignIn`, sends an agent to `/inbox`
+      with `redirect()`. A server action's redirect to a path on its own
+      origin is rendered in the same response, without passing the proxy, so
+      the POST to `/ar/account/login` answered with the console's inbox, 18 KB
+      in 1.1 s, on the help centre's host. The first click then did go through
+      the proxy: Render's log for 14:00 UTC shows
+      `/inbox?group=6e77af13-…&_rsc=…` answered 200 with 2 KB, the help
+      centre's not-found, and the full load after it 404. The same person's
+      plain `/inbox` and `/inbox/new` on that host answered 404 too. On
+      `shipblu-support.onrender.com` every one of those answers 200.
+
+      Reproduced and fixed against a production build in Chromium, with
+      `127.0.0.1` as the help centre's host and `localhost` as the console's.
+      An agent's right password where no console is served now starts no
+      session there (`signInWithPassword`'s `agent_elsewhere`): the session
+      cookie is host-only, so it would open nothing. The help centre's form
+      sends them to the console's own sign-in on `APP_URL`
+      (`consoleBaseUrl`), where a notice says why the password is asked
+      again. Whether a host serves the console is one function,
+      `isHelpCentreHost` in `lib/kb/site.ts`, which the proxy asks too.
+
+      **The trap is general:** the proxy's host routing does not apply to the
+      page a server action redirects to on its own origin. That page is
+      rendered as though the proxy had let it through, and only the next
+      navigation finds out. An action that can run on the help centre's host
+      and sends somebody to the console builds an absolute URL on the
+      console's origin.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

@@ -93,4 +93,26 @@ describe('signInWithPassword', () => {
     expect(await signInWithPassword('omar@shipblu.test', 'pw', 'ar')).toBe('agent');
     expect(calls).toEqual(['authenticate', 'clearLoginAttempts', 'createSession a1', 'lastSeenAt']);
   });
+
+  // The help centre's own host serves no console, and the session cookie is
+  // host-only: a session started there opened an inbox whose every click
+  // answered 404. The password was right, so the attempts are cleared all the
+  // same.
+  it('starts no agent session where no console is served', async () => {
+    principal = { kind: 'agent', agentId: 'a1' };
+
+    expect(
+      await signInWithPassword('omar@shipblu.test', 'pw', 'ar', { consoleServedHere: false }),
+    ).toBe('agent_elsewhere');
+    expect(calls).toEqual(['authenticate', 'clearLoginAttempts']);
+  });
+
+  it('still signs a customer in there, whose portal is the help centre', async () => {
+    principal = { kind: 'customer', identityId: 'i1' };
+
+    expect(
+      await signInWithPassword('amira@example.test', 'pw', 'ar', { consoleServedHere: false }),
+    ).toBe('customer');
+    expect(calls).toContain('createCustomerSession i1');
+  });
 });
