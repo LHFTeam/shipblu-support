@@ -637,8 +637,8 @@ a screen is open and is woken by a push while it is not.
   pages back with `before`. It has no `after`: a ticket that gets a message
   moves to the top, so the list is polled by re-reading its first page and
   merging by `id`. `?trackingNumber=` finds the tickets opened with a parcel's
-  number, exactly as it was sent, so a shipment screen finds its ticket after a
-  reinstall; `unreadTotal` still counts every ticket, whatever the filter or the
+  number, whatever its case and hyphens, so a shipment screen finds its ticket
+  after a reinstall; `unreadTotal` still counts every ticket, whatever the filter or the
   page. A user with no tickets gets an empty list, never a `404`.
 - A cursor is opaque. Send it back as it came; one this server did not mint is
   `400 invalid_cursor`, never a first page. A cursor is signed, so one built by

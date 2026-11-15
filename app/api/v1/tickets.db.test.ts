@@ -1918,6 +1918,28 @@ describe('a revoke', () => {
     expect(row!.statusId).toBe(resolved);
   });
 
+  it('refuses a read marker whose session was signed out while it waited, and marks nothing', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: opening } = await opened(token);
+    const reply = await teamRow(opening.id, { authorAgentId: await agent() });
+
+    const hold = holdNextTransaction('after');
+    const revoking = revoke(user, 'signed_out');
+    await hold.atHold;
+    const marking = markRead(token, opening.id, reply);
+    expect(await untilWaitingOnALock(db)).toBe(true);
+    hold.release();
+    await revoking;
+
+    expect(await refusal(await marking)).toMatchObject({ status: 401, code: 'unauthenticated' });
+    const [row] = await db
+      .select({ readAt: messages.readAt })
+      .from(messages)
+      .where(eq(messages.id, reply));
+    expect(row!.readAt).toBeNull();
+  });
+
   it('refuses a reply on a session signed out while it waited, though the ticket stays in the app', async () => {
     await appRow();
     const token = await minted();
@@ -2151,8 +2173,16 @@ describe('GET /tickets', () => {
     expect(idsOf(two)).toEqual([ab1.ticket.id]);
     expect(two.olderCursor).toBeNull();
 
+    // Whatever its case and hyphens, as the platform's numbers are read
+    // everywhere; answered as it was sent.
+    for (const number of ['ab-12', 'AB12', 'aB-1-2']) {
+      const found = await listed(token, `?trackingNumber=${number}`);
+      expect(idsOf(found)).toEqual([ab2.ticket.id, ab1.ticket.id]);
+      expect(found.tickets.map((t) => t.trackingNumber)).toEqual(['AB-12', 'AB-12']);
+    }
+
     // No row to carry the badge: it is read on its own, still unfiltered.
-    for (const number of ['ZZ-99', 'ab-12', 'EF-56']) {
+    for (const number of ['ZZ-99', 'AB-123', 'EF-56']) {
       expect(await listed(token, `?trackingNumber=${number}`)).toEqual({
         tickets: [],
         olderCursor: null,
@@ -2548,6 +2578,45 @@ describe('POST /tickets/{id}/read', () => {
  * ticket's requester, and a marker reading the gate's contact answered `404` —
  * which the SDK meets by dropping the ticket and failing its outbox.
  */
+describe('a ticket gone between the read marker’s write and its answer', () => {
+  // A spam mark, a delete or a merge committed between the marker's write and
+  // its read of the answer leaves no ticket to answer. Stood in for here by a
+  // trigger that marks the ticket spam inside the marker's own write, so the
+  // answer's read, a statement later on the same transaction, finds no ticket
+  // exactly as it would after another transaction's commit.
+  it('answers 404 and marks nothing, rather than commit what it marked', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: opening } = await opened(token);
+    const reply = await teamRow(opening.id, { authorAgentId: await agent() });
+
+    await db.execute(sql`
+      create function test_spam_on_read() returns trigger language plpgsql as $$
+      begin
+        update conversations set is_spam = true where id = new.conversation_id;
+        return new;
+      end $$`);
+    await db.execute(sql`
+      create trigger test_spam_on_read after update of read_at on messages
+      for each row execute function test_spam_on_read()`);
+    try {
+      expect(await refusal(await markRead(token, opening.id, reply))).toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
+    } finally {
+      await db.execute(sql`drop trigger test_spam_on_read on messages`);
+      await db.execute(sql`drop function test_spam_on_read()`);
+    }
+
+    const [row] = await db
+      .select({ readAt: messages.readAt, deliveryStatus: messages.deliveryStatus })
+      .from(messages)
+      .where(eq(messages.id, reply));
+    expect(row).toEqual({ readAt: null, deliveryStatus: 'delivered' });
+  });
+});
+
 describe('a contact merge between the gate and the read marker', () => {
   async function survivorContact(): Promise<string> {
     const { contactId } = await resolveContact({

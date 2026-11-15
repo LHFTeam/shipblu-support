@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { DateTime } from 'luxon';
+import { describe, expect, it, vi } from 'vitest';
 import { cairo as at, inCairo } from '@/lib/testing/time';
 import type { WeeklySchedule } from '@/db/schema/config';
 import {
@@ -141,6 +142,52 @@ describe('nextOpeningAt', () => {
       schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
     };
     expect(nextOpeningAt(never, at('2026-08-17T12:00'))).toBeNull();
+  });
+
+  // A year of lookahead, as `GET /config` asks, on a schedule that can never
+  // open: a week of days answers it, where the whole year was scanned.
+  it('stops after a week of days on a schedule that never opens, whatever the lookahead', () => {
+    const unreadable: HoursConfig = {
+      ...config,
+      schedule: {
+        ...CAIRO,
+        sun: [{ start: '9am', end: '5pm' }],
+        mon: [],
+        tue: [],
+        wed: [],
+        thu: [],
+      },
+    };
+    const days = vi.spyOn(DateTime.prototype, 'startOf');
+    try {
+      expect(nextOpeningAt(unreadable, at('2026-08-17T12:00'), 366)).toBeNull();
+      expect(days.mock.calls.length).toBeLessThan(10);
+    } finally {
+      days.mockRestore();
+    }
+  });
+
+  it('never stops early on a weekday every holiday ahead has shut', () => {
+    // Open on Mondays alone, and the next five Mondays are holidays: every
+    // other weekday is shut, Monday is not, and the sixth Monday opens.
+    const mondays: HoursConfig = {
+      timezone: 'Africa/Cairo',
+      schedule: {
+        sun: [],
+        mon: [{ start: '09:00', end: '17:00' }],
+        tue: [],
+        wed: [],
+        thu: [],
+        fri: [],
+        sat: [],
+      },
+      holidays: ['2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'].map(
+        (date) => ({
+          date,
+        }),
+      ),
+    };
+    expect(inCairo(nextOpeningAt(mondays, at('2026-08-17T12:00'), 366))).toBe('2026-09-28T09:00');
   });
 });
 

@@ -1,11 +1,9 @@
 import { clientPlane } from '@/lib/api/auth';
 import { apiChannel } from '@/lib/api/channel';
-import { configFor, supportHoursAt } from '@/lib/api/config';
+import { configFor, supportFor } from '@/lib/api/config';
 import { answering, rateLimited } from '@/lib/api/errors';
 import { admitRead } from '@/lib/api/limits';
 import { apiJson, newRequestId } from '@/lib/api/respond';
-import { loadHoursCatalog } from '@/lib/hours/catalog';
-import { groupHours } from '@/lib/hours/resolve';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,9 +18,11 @@ const ROUTE = 'GET /config';
  * No write: the session with its identity and contact, the `api` channel row
  * that says whether a ticket can be opened, and the hours catalog
  * (`loadHoursCatalog`, memoised for thirty seconds) for `support`, the hours of
- * that row's group. The catalog is read after the row and never beside it: a
- * cold catalog is three concurrent queries of its own, and the pool's admission
- * gate holds eight places (§6.91). One `now` for the gate and the hours.
+ * that row's group (`supportFor`, which leaves `support` out rather than fail
+ * this answer when the hours cannot be read). The catalog is read after the
+ * row and never beside it: a cold catalog is three concurrent queries of its
+ * own, and the pool's admission gate holds eight places (§6.91). One `now` for
+ * the gate and the hours.
  *
  * So `support` follows a schedule edit within the catalog's thirty seconds, and
  * not at once: the admin's save clears the console's copy of the memo, and this
@@ -40,9 +40,7 @@ export async function GET(request: Request): Promise<Response> {
     if (!reads.allowed) return rateLimited(requestId, reads, 'Too many reads for this user');
 
     const channel = await apiChannel();
-    const hours = groupHours(await loadHoursCatalog(), channel?.defaultGroupId ?? null);
-    return apiJson(configFor(gate.caller, channel !== null, supportHoursAt(hours, now)), {
-      requestId,
-    });
+    const support = await supportFor(channel, now);
+    return apiJson(configFor(gate.caller, channel !== null, support), { requestId });
   });
 }

@@ -291,8 +291,9 @@ export async function lookupSession(token: string, now: Date): Promise<SessionLo
  * live — revoked or expired, read on the transaction — and otherwise the caller
  * with its contact read again and held (`holdRequester`).
  *
- * Taken first by the transactions that open a ticket and write on one
- * (`createApiTicket`, `sendApiMessage`), so a write and a revoke for one
+ * Taken first by every transaction of the client plane that writes — opening
+ * a ticket, writing on one and marking one read (`createApiTicket`,
+ * `sendApiMessage`, `markTicketRead`) — so a write and a revoke for one
  * account are ordered as a mint and a revoke are.
  * Without it, a revoke with `account_deleted` deletes the account's ownership
  * rows while a create is between its gate and its commit, and the create's row,
@@ -356,7 +357,7 @@ const REQUESTER_HOPS = 3;
  * contacts first — so a send holding a ticket's row never waits on a merge
  * that is waiting for that row.
  */
-export async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
+async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
   let followed: string | null = null;
   for (let hop = 0; hop < REQUESTER_HOPS; hop++) {
     const [identity] = await tx

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WeeklySchedule } from '@/db/schema/config';
 import type { HoursConfig } from '@/lib/hours';
-import { emptyCatalog, groupHours } from '@/lib/hours/resolve';
+import { emptyCatalog, groupHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { cairo } from '@/lib/testing/time';
-import { configFor, POLL_LIST_SECONDS, supportHoursAt } from './config';
+import { configFor, POLL_LIST_SECONDS, supportFor, supportHoursAt } from './config';
 import { Config, SupportHours } from './schemas';
 
 /**
@@ -147,7 +147,81 @@ describe('supportHoursAt', () => {
   });
 });
 
+describe('supportFor', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const catalog = (): HoursCatalog => {
+    const loaded = emptyCatalog();
+    loaded.schedules.set('default', cairoWeek);
+    loaded.schedules.set('sales', { ...cairoWeek, schedule: { ...PRODUCTION, sat: [] } });
+    loaded.defaultId = 'default';
+    loaded.overrides.set('inbound-sales', 'sales');
+    return loaded;
+  };
+  const saturday = cairo('2026-11-14T12:00');
+
+  it("tells the app its row's group's hours, and the default with no row on", async () => {
+    const load = () => Promise.resolve(catalog());
+    expect(await supportFor({ defaultGroupId: 'inbound-sales' }, saturday, load)).toMatchObject({
+      online: false,
+      opensAt: cairo('2026-11-15T10:00').toISOString(),
+    });
+    expect(await supportFor(null, saturday, load)).toMatchObject({ online: true });
+  });
+
+  // `GET /config` checks every token the SDK mints: a 500 for the hours
+  // refused every request the app made while they could not be read.
+  it('answers null and logs it, without the failure’s detail, when the hours cannot be read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failed = Object.assign(new Error('Failed query: select … params: secret-value'), {
+      cause: Object.assign(new Error('canceling statement due to statement timeout'), {
+        code: '57014',
+      }),
+    });
+
+    expect(await supportFor(null, saturday, () => Promise.reject(failed))).toBeNull();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = warn.mock.calls[0]!.map((part) =>
+      part instanceof Error ? `${part.message}\n${part.stack}` : String(part),
+    ).join(' ');
+    expect(line).toContain('could not read the support hours');
+    expect(line).toContain('57014');
+    expect(line).not.toContain('secret-value');
+  });
+
+  it('answers null for a schedule edited by hand into a shape the hours throw on', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const broken = catalog();
+    broken.schedules.set('default', {
+      ...cairoWeek,
+      schedule: null as unknown as WeeklySchedule,
+    });
+    expect(await supportFor(null, saturday, () => Promise.resolve(broken))).toBeNull();
+  });
+});
+
 describe('configFor', () => {
+  it('leaves support out when the hours could not be read', () => {
+    const config = Config.parse(
+      configFor(
+        {
+          identityId: '0b7e9c2a-1f3d-4e5a-9b6c-7d8e9f0a1b2c',
+          contactId: 'c',
+          externalUserId: 'u_83412',
+          tokenHash: 'h',
+          platform: 'ios',
+          appVersion: '5.4.1',
+        },
+        true,
+        null,
+      ),
+    );
+    expect('support' in config).toBe(false);
+  });
+
   it('carries the hours it is given and the list’s poll', () => {
     const support = supportHoursAt(cairoWeek, cairo('2026-11-15T12:00'));
     const config = Config.parse(

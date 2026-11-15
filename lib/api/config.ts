@@ -1,6 +1,9 @@
 import { IANAZone } from 'luxon';
 import type { z } from 'zod';
 import { isWithinBusinessHours, nextOpeningAt, type HoursConfig } from '@/lib/hours';
+import { loadHoursCatalog } from '@/lib/hours/catalog';
+import { groupHours, type HoursCatalog } from '@/lib/hours/resolve';
+import { logger } from '@/lib/log';
 import {
   MAX_WIDGET_FILES,
   MAX_WIDGET_FILE_BYTES,
@@ -9,9 +12,12 @@ import {
   WIDGET_CONTENT_TYPES,
   WIDGET_EXTENSIONS,
 } from '@/lib/widget/files';
+import { scrubbed } from './errors';
 import { MAX_OPEN_TICKETS } from './limits';
 import type { Config, SupportHours } from './schemas';
 import type { Caller } from './sessions';
+
+const log = logger('api_config');
 
 /**
  * What a screen polls at before its first answer's `pollAfterSeconds`: five
@@ -59,6 +65,36 @@ export function supportHoursAt(hours: HoursConfig | null, now: Date): z.input<ty
 }
 
 /**
+ * `support` for `GET /config`: the hours of the group the app's new tickets
+ * start in — the oldest active `api` row's default group (`apiChannel`), its
+ * own schedule else the default — and with no active row the default, so the
+ * app can still say when the team works while it offers no new ticket. Asked
+ * at the route's one `now`.
+ *
+ * Null when the hours cannot be read: the catalog's queries failing on a cold
+ * memo, or a `business_hours.schedule` edited by hand into a shape `lib/hours`
+ * throws on. `GET /config` is the SDK's check of every token it mints, so a
+ * `500` here refused every app request for as long as the hours could not be
+ * read; `support` is optional in the contract, and an answer without it is
+ * drawn as nothing, as a server before stage 5 is. Logged scrubbed, as every
+ * `/api/v1` failure is.
+ *
+ * `load` is the catalog's, and a parameter only so a test can make it fail.
+ */
+export async function supportFor(
+  channel: { defaultGroupId: string | null } | null,
+  now: Date,
+  load: () => Promise<HoursCatalog> = loadHoursCatalog,
+): Promise<z.input<typeof SupportHours> | null> {
+  try {
+    return supportHoursAt(groupHours(await load(), channel?.defaultGroupId ?? null), now);
+  } catch (error) {
+    log.warn('could not read the support hours; answering without them', scrubbed(error));
+    return null;
+  }
+}
+
+/**
  * `GET /config`, built fresh from a named field list as every answer of this
  * API is, so nothing the session row or the contact holds can ride along.
  *
@@ -71,17 +107,15 @@ export function supportHoursAt(hours: HoursConfig | null, now: Date): z.input<ty
  *   its button rather than failing a send.
  * - `limits` are the widget's, because the files are judged by the widget's
  *   own functions, and they move with `proxyClientMaxBodySize`.
- * - `support`, the team's hours (`supportHoursAt`), present from stage 5: the
- *   hours of the oldest active `api` row's default group — its own schedule,
- *   else the default — and with no active row the default, so the app can
- *   still say when the team works while it offers no new ticket. Required
- *   here, so no answer from this build can leave it out; a server before
- *   stage 5 answers without it, which a client already handles.
+ * - `support`, the team's hours (`supportFor`), present from stage 5 unless
+ *   they could not be read, when it is left out: a client draws nothing for
+ *   it, as it does for a server before stage 5, and the token check that reads
+ *   this answer never depends on the hours.
  */
 export function configFor(
   caller: Caller,
   canCreate: boolean,
-  support: z.input<typeof SupportHours>,
+  support: z.input<typeof SupportHours> | null,
 ): z.input<typeof Config> {
   return {
     user: { id: caller.identityId, externalId: caller.externalUserId },
@@ -94,7 +128,7 @@ export function configFor(
       contentTypes: [...WIDGET_CONTENT_TYPES],
       extensions: [...WIDGET_EXTENSIONS],
     },
-    support,
+    ...(support ? { support } : {}),
     polling: { threadSeconds: POLL_THREAD_SECONDS, listSeconds: POLL_LIST_SECONDS },
   };
 }

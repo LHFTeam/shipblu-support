@@ -16,6 +16,7 @@ import { preview } from '@/lib/html/sanitize';
 import type { Admission } from '@/lib/http/rate-limit';
 import { shownLabelSql } from '@/lib/portal/tickets';
 import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
+import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { subjectWords, UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { latest } from '@/lib/tickets/latest';
 import { isMediaStandIn } from '@/lib/tickets/message-media';
@@ -32,7 +33,7 @@ import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
 import type { Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
-import { holdAccount, holdRequester, requesterNow, type Caller } from './sessions';
+import { holdAccount, requesterNow, type Caller } from './sessions';
 
 /**
  * The myBlu app's tickets (`plans/myblu-ticket-api.md`, _What the app can
@@ -599,9 +600,13 @@ export type TicketsListPage = {
  * few rows per user, rather than walk every app ticket in
  * `conversations_channel_idx` order. `ownedTicket` stays whole: it is the one
  * copy of the scope, and the ownership row joined here is immutable, so naming
- * it twice can never disagree. The tracking number is matched as stored, on
- * that same row, and never read from `conversation_shipments`, which also
- * holds numbers an agent typed in a note.
+ * it twice can never disagree. The tracking number is matched on that same
+ * row, and never read from `conversation_shipments`, which also holds numbers
+ * an agent typed in a note; matched as the shipments code reads a number
+ * everywhere (`normaliseTrackingNumber`), whatever its case and hyphens, since
+ * a number typed in the composer as `sb-ab12` is the platform's `SB-AB12`
+ * and a shipment screen asking with the one must find a ticket opened with
+ * the other. Stored and answered as sent: only the comparison is folded.
  *
  * The badge rides in the same statement, uncorrelated and so computed once,
  * so it and every `unreadCount` on the page are one snapshot; it reads every
@@ -625,7 +630,7 @@ export function listStatement(caller: Caller, asked: ListAsked) {
         ownedTicket(caller),
         asked.trackingNumber === null
           ? undefined
-          : eq(apiTickets.trackingNumber, asked.trackingNumber),
+          : sql`upper(replace(${apiTickets.trackingNumber}, '-', '')) = ${normaliseTrackingNumber(asked.trackingNumber)}`,
         asked.cursor === null
           ? undefined
           : vsCursor('<', asked.cursor, conversations.lastMessageAt, conversations.id),
@@ -666,8 +671,17 @@ export type ReadOutcome =
   | { kind: 'not_found' }
   /** `upTo` is not a message this API returns on this ticket. */
   | { kind: 'not_on_ticket' }
-  /** The identity names no live contact any more (`holdRequester`). */
+  /**
+   * The session was no longer live once the marker held the account, or the
+   * identity names no live contact any more (`holdAccount`).
+   */
   | { kind: 'revoked' };
+
+/**
+ * Thrown inside the marker's transaction when the ticket is gone by the time
+ * its answer is read, so the rows it marked roll back with it.
+ */
+class GoneAfterMarking extends Error {}
 
 /**
  * The marker's write: the ticket's unread replies (`unreadReply`) at or before
@@ -715,7 +729,9 @@ export function markStatement(executor: Executor, caller: Caller, ticketId: stri
  * ticket and the new badge. One transaction, read and written on `tx`
  * throughout — a pooled read inside it is §6.91's self-deadlock:
  *
- * 1. **The requester, held** (`holdRequester`), as both sends hold it: a contact
+ * 1. **The account, then the requester, held** (`holdAccount`), as both sends
+ *    hold them: a marker that comes after a revoke for the account, a sign-out
+ *    included, finds its session no longer live and marks nothing; a contact
  *    merge committed since the gate is followed, and one not yet begun waits,
  *    so the marker never answers `404` for the user's own ticket — the answer
  *    the SDK meets by dropping the ticket and failing its outbox. Contact
@@ -733,6 +749,11 @@ export function markStatement(executor: Executor, caller: Caller, ticketId: stri
  *    ticket deleted, merged or marked spam since step 2 marks nothing.
  * 4. **The answer**, after the write and in the same transaction, so it sees
  *    it: a data-modifying CTE would read the snapshot from before the update.
+ *    Each statement reads its own snapshot, so a spam mark, a delete or a
+ *    merge committed between the write and this read leaves no ticket to
+ *    answer: the transaction then rolls back (`GoneAfterMarking`) and answers
+ *    `404`, so a request the app is told failed marks nothing the agent sees
+ *    as Read.
  *
  * `created_at` is not commit order, so a reply stamped before `upTo` and
  * committed after the app's last poll is marked with it, a moment before the
@@ -745,41 +766,47 @@ export async function markTicketRead(
   ticketId: string,
   upTo: string,
 ): Promise<ReadOutcome> {
-  return db.transaction(async (tx) => {
-    const holder = await holdRequester(tx, caller);
-    if (!holder) return { kind: 'revoked' as const };
+  const now = new Date();
+  try {
+    return await db.transaction(async (tx) => {
+      const holder = await holdAccount(tx, caller, now);
+      if (!holder) return { kind: 'revoked' as const };
 
-    // The message by its primary key, so the join is at most one row. A join
-    // rather than a scalar subquery in the select list: drizzle writes a
-    // one-table select's fields unqualified, and `conversation_id = id` there
-    // compared the message with itself.
-    const [found] = await tx
-      .select({ upToTime: sql<string | null>`${messages.createdAt}::text` })
-      .from(conversations)
-      .leftJoin(
-        messages,
-        and(
-          eq(messages.id, upTo),
-          eq(messages.conversationId, conversations.id),
-          eq(messages.kind, 'reply'),
-          notReaction(),
-        ),
-      )
-      .where(and(eq(conversations.id, ticketId), ownedTicket(holder)))
-      .limit(1);
-    if (!found) return { kind: 'not_found' as const };
-    if (found.upToTime === null) return { kind: 'not_on_ticket' as const };
+      // The message by its primary key, so the join is at most one row. A join
+      // rather than a scalar subquery in the select list: drizzle writes a
+      // one-table select's fields unqualified, and `conversation_id = id` there
+      // compared the message with itself.
+      const [found] = await tx
+        .select({ upToTime: sql<string | null>`${messages.createdAt}::text` })
+        .from(conversations)
+        .leftJoin(
+          messages,
+          and(
+            eq(messages.id, upTo),
+            eq(messages.conversationId, conversations.id),
+            eq(messages.kind, 'reply'),
+            notReaction(),
+          ),
+        )
+        .where(and(eq(conversations.id, ticketId), ownedTicket(holder)))
+        .limit(1);
+      if (!found) return { kind: 'not_found' as const };
+      if (found.upToTime === null) return { kind: 'not_on_ticket' as const };
 
-    const marked = await markStatement(tx, holder, ticketId, { time: found.upToTime, id: upTo });
-    const after = await ownedTicketRow(holder, ticketId, { withTotal: true, executor: tx });
-    if (!after) return { kind: 'not_found' as const };
-    return {
-      kind: 'read' as const,
-      ticket: ticketView(after),
-      unreadTotal: after.unreadTotal,
-      marked: marked.length,
-    };
-  });
+      const marked = await markStatement(tx, holder, ticketId, { time: found.upToTime, id: upTo });
+      const after = await ownedTicketRow(holder, ticketId, { withTotal: true, executor: tx });
+      if (!after) throw new GoneAfterMarking();
+      return {
+        kind: 'read' as const,
+        ticket: ticketView(after),
+        unreadTotal: after.unreadTotal,
+        marked: marked.length,
+      };
+    });
+  } catch (error) {
+    if (error instanceof GoneAfterMarking) return { kind: 'not_found' };
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------

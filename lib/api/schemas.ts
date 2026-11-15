@@ -442,7 +442,7 @@ export const Config = z
         'What a send may carry. They move with the server, so a client checks against these rather than numbers of its own.',
       ),
     support: SupportHours.optional().describe(
-      "The support team's hours. Absent until the stage that carries them ships; a client draws nothing for it then.",
+      "The support team's hours. Absent until the stage that carries them ships, and from an answer whose hours the server could not read; a client draws nothing for it then.",
     ),
     polling: z
       .looseObject({
@@ -868,7 +868,7 @@ export const ListTicketsQuery = z
     before: Cursor.optional().describe('An `olderCursor`: the next, older page.'),
     limit: PageLimit,
     trackingNumber: TrackingNumber.optional().describe(
-      'Only tickets opened with this tracking number, so a shipment screen finds its ticket after a reinstall.',
+      'Only tickets opened with this tracking number, whatever its case and hyphens (`sb-ab12` finds a ticket opened with `SBAB12`), so a shipment screen finds its ticket after a reinstall.',
     ),
   })
   .describe("Which page of the user's tickets.");
