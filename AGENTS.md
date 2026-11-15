@@ -179,6 +179,7 @@ app/(console)/   agent console: inbox, contacts, kb, reports, settings (admin/)
 app/(auth)/      login, first-admin setup, invites
 app/help/        public help centre and customer portal (served on its own host)
 app/api/         webhooks, SSE, widget, attachments, health
+app/api/v1/      the myBlu ticket API; its shapes are lib/api/schemas.ts
 app/widget/      the embeddable chat widget iframe
 lib/<domain>/    all business logic, one directory per domain
 components/      shared UI primitives (ui.tsx) and small client components
@@ -214,6 +215,21 @@ The layers point one way, and `npm run lint` holds them: `lib/` and `worker/`
 never import from `app/`, and `components/` never import from `db/` — not even a
 type, since a component that needs a row's shape can take it from the `lib/`
 function that reads it.
+
+**The myBlu API's contract is `lib/api/schemas.ts`.** Every shape `/api/v1`
+reads or answers, its webhook and its push payload are zod schemas there, and
+`lib/api/openapi.ts` publishes them as `docs/myblu-api.openapi.json`, committed
+because the app's developers, their mock and the SDK read it before the routes
+behind it exist. `npm run api:openapi` rewrites the file from the schemas;
+`lib/api/openapi.test.ts` fails when the two disagree, when an answer is a
+closed object, when an enum in an answer does not say that values are added, or
+when a union in an answer that a field tells apart, as the webhook's `type`
+tells its events apart, has no arm open on that field. The API changes by
+addition: what an app build depends on is fixed, a breaking
+change is `/api/v2`, and every change is a dated line in
+`docs/myblu-api-changelog.md`, whose newest date is the document's version.
+`docs/myblu-api.md` is the guide for myBlu's teams; `plans/myblu-ticket-api.md`
+is the reasoning.
 
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
