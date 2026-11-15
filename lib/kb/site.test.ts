@@ -5,6 +5,7 @@ import {
   articleOrigins,
   articleUrl,
   consoleBaseUrl,
+  isConsoleHost,
   isHelpCentreHost,
   publicBaseUrl,
   requestBaseUrl,
@@ -143,6 +144,27 @@ describe('consoleBaseUrl', () => {
 
     setTestEnv({ APP_URL: 'https://support.shipblu.com' });
     expect(consoleBaseUrl()).toBeNull();
+  });
+});
+
+describe('isConsoleHost', () => {
+  withTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com', APP_URL: 'https://desk.shipblu.com' });
+
+  it("is the host APP_URL names, whatever the Host header's case or port", () => {
+    expect(isConsoleHost('desk.shipblu.com')).toBe(true);
+    expect(isConsoleHost('Desk.ShipBlu.com:443')).toBe(true);
+  });
+
+  it('is no other host', () => {
+    expect(isConsoleHost('support.shipblu.com')).toBe(false);
+    expect(isConsoleHost('shipblu-support.onrender.com')).toBe(false);
+    expect(isConsoleHost(null)).toBe(false);
+  });
+
+  // One host for both: its `/` is the public front door.
+  it('is nothing while KB_PUBLIC_HOST is unset', () => {
+    setTestEnv({ KB_PUBLIC_HOST: undefined });
+    expect(isConsoleHost('desk.shipblu.com')).toBe(false);
   });
 });
 

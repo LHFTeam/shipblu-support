@@ -1131,6 +1131,13 @@ is where the console is served once `KB_PUBLIC_HOST` names the domain, and
 every request to `/api/webhooks/*` in the logs since 2026-11-12 reached it.
 Staging has no custom domain.
 
+**It is being retired** (decided 2026-11-15). The console, `APP_URL` and the
+webhooks move to **`desk.shipblu.com`**, the help centre's widget script tag
+to support.shipblu.com, and the Render subdomain is switched off last.
+`plans/console-host.md` has the order, each step's check and its way back. On
+2026-11-15 desk.shipblu.com did not resolve and `APP_URL` still named the
+Render host. Update this paragraph as each step lands.
+
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
 2026-09-25 the running service dropped the middle one while the blueprint

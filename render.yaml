@@ -320,7 +320,9 @@ projects:
             # every webhook (/api/webhooks/*) is delivered to it. Stated
             # rather than left out, though an omitted value keeps the current
             # one: a sync then puts it back if the dashboard switch is ever
-            # turned off by mistake.
+            # turned off by mistake. It is being retired: the console and the
+            # webhooks move to desk.shipblu.com first, and this turns to
+            # `disabled` only at the last step of plans/console-host.md.
             renderSubdomainPolicy: enabled
             scaling:
               minInstances: 1

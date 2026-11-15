@@ -102,6 +102,40 @@ describe('the myBlu API', () => {
   });
 });
 
+/**
+ * The console's own address, once it has one apart from the help centre's.
+ * Without this, an agent typing desk.shipblu.com was greeted by the Arabic
+ * help centre, the front door every other host keeps.
+ */
+describe("the console's hostname", () => {
+  const CONSOLE_HOST = 'desk.shipblu.com';
+
+  beforeEach(() => setTestEnv({ KB_PUBLIC_HOST: KB_HOST, APP_URL: `https://${CONSOLE_HOST}` }));
+
+  it('opens the inbox at the bare address', () => {
+    const response = visit(`https://${CONSOLE_HOST}/`);
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get('location') ?? '', 'https://x').pathname).toBe('/inbox');
+  });
+
+  it('keeps the front door on every other host', () => {
+    // The help centre's host rewrites it, and a host APP_URL does not name
+    // (the Render address, while it lasts) passes it to `app/page.tsx`.
+    expect(rewrittenTo(visit(`https://${KB_HOST}/`))).toBe('/help');
+    expect(visit('https://shipblu-support.onrender.com/').status).not.toBe(307);
+  });
+
+  it('keeps the front door while the help centre has no host of its own', () => {
+    // Development and staging: one host serves both, and its `/` is public.
+    setTestEnv({ KB_PUBLIC_HOST: undefined });
+    expect(visit(`https://${CONSOLE_HOST}/`).status).not.toBe(307);
+  });
+
+  it('serves the help centre beneath it as any host does', () => {
+    expect(rewrittenTo(visit(`https://${CONSOLE_HOST}/ar/a/x`))).toBe('/help/ar/a/x');
+  });
+});
+
 describe('every other hostname', () => {
   it('still rewrites a locale-prefixed path under /help', () => {
     expect(rewrittenTo(visit('https://shipblu-support.onrender.com/ar'))).toBe('/help/ar');

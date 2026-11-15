@@ -61,6 +61,26 @@ export function consoleBaseUrl(): string | null {
 }
 
 /**
+ * Whether a request's `Host` is the console's own address, `APP_URL`'s, on a
+ * deployment whose help centre has a host of its own (`KB_PUBLIC_HOST`).
+ *
+ * Asked about the bare address alone (`proxy.ts`). Everywhere else the
+ * console's host serves what any host does, the help centre's locale paths
+ * included. Its `/` is the exception: on the help centre's host, or on a
+ * deployment with one host for both, `/` is the public site's front door
+ * (`app/page.tsx` says why), but somebody typing the console's own address
+ * (desk.shipblu.com) is an agent, and the Arabic help centre is not what they
+ * came for. False while `KB_PUBLIC_HOST` is unset, so development and staging
+ * keep the front door they have.
+ */
+export function isConsoleHost(host: string | null | undefined): boolean {
+  if (!process.env.KB_PUBLIC_HOST || !host) return false;
+  const origin = consoleBaseUrl();
+  if (!origin) return false;
+  return new URL(origin).hostname === host.split(':')[0]?.toLowerCase();
+}
+
+/**
  * Typed on the one method it uses, so a server component can pass
  * `await headers()` and a route handler can pass `request.headers`. Copied from
  * `clientIpFrom` in `lib/http/rate-limit.ts` for the same reason it exists there: the
