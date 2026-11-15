@@ -218,12 +218,19 @@ describe('the Meta channels', () => {
   });
 
   // The one place a sender asks before it greets by name: a comment's reply is
-  // public, and the app's contact can be a previous holder of the phone.
-  it('withhold the customer’s name on a comment thread, however it is filed, and in the myBlu app', () => {
-    expect(withholdsCustomerName('api', null)).toBe(true);
+  // public. The myBlu app greets by name, its name kept current from the app.
+  it('withhold the customer’s name on a comment thread, however it is filed, and nowhere else', () => {
     expect(withholdsCustomerName('facebook_comment', null)).toBe(true);
     expect(withholdsCustomerName('instagram', 'instagram:comment:17890')).toBe(true);
-    for (const channel of ['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'portal']) {
+    for (const channel of [
+      'email',
+      'whatsapp',
+      'webchat',
+      'facebook',
+      'instagram',
+      'portal',
+      'api',
+    ]) {
       expect(withholdsCustomerName(channel, null), channel).toBe(false);
     }
   });

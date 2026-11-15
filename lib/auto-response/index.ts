@@ -198,9 +198,9 @@ async function send(
     locale: await requesterLocale(conversationId),
     holiday,
     ticketNumber: ticket.number,
-    // Never under a post, nor into the myBlu app: `withholdsCustomerName`
-    // says why each, for every sender that greets by name. A greeting without
-    // one closes its gap (`substitute`).
+    // Never under a post: `withholdsCustomerName` says why, for every sender
+    // that greets by name. A greeting without one closes its gap
+    // (`substitute`).
     customerName: withholdsCustomerName(ticket.channel, ticket.externalId)
       ? null
       : ticket.contactName,

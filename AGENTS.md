@@ -754,8 +754,9 @@ never a test naming one channel, which is how the code queued an `api` reply as
 an email at every place that set web chat aside by name, back when
 `carrierFor` answered `send_email` for both. A sender that greets the customer
 by name asks `withholdsCustomerName` (`lib/tickets/channel-policy.ts`) first:
-never under a public comment, and never into the app, whose contact's name can
-be a previous holder of the phone's.
+never under a public comment. The myBlu app is greeted by name, by the owner's
+decision: a number rarely changes hands, and the name is the one the app sends,
+kept current.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and

@@ -425,10 +425,8 @@ describe('maybeSendAutoResponse after the message: the hold, the status, an agen
 /**
  * The myBlu app (`api`), and web chat beside it: the customer's own client reads
  * the row, so the acknowledgement is stored delivered, with no HTML part and
- * no address, and queued nowhere (`rowIsDelivery`). And on the app it greets
- * nobody by name, as a comment reply does not: the contact was found by the
- * phone the app vouched for, and its name can be a previous holder of the
- * number's (`plans/myblu-ticket-api.md`, _Identity_).
+ * no address, and queued nowhere (`rowIsDelivery`). Both greet the customer by
+ * name; only a comment reply leaves it out (`withholdsCustomerName`).
  */
 describe('maybeSendAutoResponse where the row is the delivery', () => {
   /** A ticket on `channel`, from a contact named Amira, and her message. */
@@ -479,7 +477,7 @@ describe('maybeSendAutoResponse where the row is the delivery', () => {
 
   // A contact with no address too: asked as email, `lacksEmailRecipient`
   // skipped the acknowledgement for one, which most of the app's will be.
-  it('acknowledges a myBlu ticket in the row, by no name, whether or not its contact has an address', async () => {
+  it('acknowledges a myBlu ticket in the row, by name, whether or not its contact has an address', async () => {
     await db.insert(autoResponses).values({
       bodyEn: 'Hi {{customer_name}}, we are closed and will reply when we open.',
     });
@@ -492,7 +490,7 @@ describe('maybeSendAutoResponse where the row is the delivery', () => {
     for (const trigger of [withAddress, without]) {
       expect(await stored(trigger.conversationId)).toEqual([
         {
-          bodyText: 'Hi, we are closed and will reply when we open.',
+          bodyText: 'Hi Amira, we are closed and will reply when we open.',
           bodyHtml: null,
           toAddresses: [],
           deliveryStatus: 'delivered',
@@ -502,8 +500,8 @@ describe('maybeSendAutoResponse where the row is the delivery', () => {
     expect(await db.select({ type: jobs.type }).from(jobs)).toEqual([]);
   });
 
-  // The control: the row is web chat's delivery as well, and its contact's
-  // name is the one the visitor gave the widget, so it is still used.
+  // The row is web chat's delivery as well, and its contact's name is the one
+  // the visitor gave the widget.
   it('acknowledges a web chat ticket in the row the same way, greeting the visitor by name', async () => {
     await db.insert(autoResponses).values({
       bodyEn: 'Hi {{customer_name}}, we are closed and will reply when we open.',

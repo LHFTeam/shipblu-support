@@ -427,10 +427,17 @@ follows the document would get a 401.
   later WhatsApp contact can be suggested against it.
 - No `whatsapp` identity is ever written from a session. Holding a SIM today
   says nothing about a WhatsApp account.
-- A contact's name is never overwritten by the name the backend sends, and the
-  out-of-hours reply on an `api` ticket leaves `{{customer_name}}` blank as
-  the comment path does (`lib/auto-response/index.ts`, the one place a name is
-  interpolated): the stored name can be a previous holder's.
+- A contact's name follows the name the backend sends: a new contact takes
+  it, and an existing one is brought up to date with it whenever a session is
+  minted and the two differ, so a name the user changes in the app reaches the
+  console within a day. It renames the contact everywhere, WhatsApp included,
+  and replaces a name an agent typed. And the out-of-hours reply on an `api`
+  ticket fills `{{customer_name}}` with it (`lib/auto-response/index.ts`, the
+  one place a name is interpolated). Both were the other way at first — the
+  name never overwritten, the greeting left blank as on a comment — because
+  the stored name can be a previous holder's of the number. The owner decided
+  otherwise on 2026-11-15: a number rarely changes hands, and a new holder sets
+  their own name in the app, which then replaces the old one.
 
 ### What the app can read
 
@@ -1365,8 +1372,7 @@ its route ships changes in this file first.
 
 **1. `api` stops being email.** No schema, no variable, no job.
 `rowIsDelivery()` at its five sites and `isEmail`; `channelSwitch('api')`
-null, and the toggle's hint; `UNNAMED_SUBJECT`; the blank `{{customer_name}}`
-on `api` and its hint in `PLACEHOLDERS`; the label, the glyph, and the CSAT
+null, and the toggle's hint; `UNNAMED_SUBJECT`; the label, the glyph, and the CSAT
 and contact pages reading the label; the comments in `outbound.ts` and
 `channel-policy.ts` that say `api` goes out by email. Verified by the
 `outbound` and `decision` tests changed, and a `*.db.test.ts`: an agent's
