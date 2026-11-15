@@ -2088,7 +2088,6 @@ describe('GET /tickets', () => {
     await storeAgentReply(a.ticket.id, 'api', {
       authorAgentId: await agent(),
       bodyText: 'We have asked the courier.',
-      deliveryStatus: 'delivered',
     });
     const answered = await listed(token);
     expect(idsOf(answered)).toEqual([a.ticket.id, b.ticket.id]);
