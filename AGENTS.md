@@ -1406,7 +1406,9 @@ number's advisory lock, no other account's contact holds the number; otherwise
 a contact of the account's own, with `primary_phone` only for a number nobody
 holds, decided under the same lock, so two accounts on one phone are never
 offered to an agent as a merge. No `whatsapp` identity is ever written from a
-session, and no contact's name is overwritten. A mint and a revoke for one
+session. A contact's name is the backend's, brought up to date at every mint
+where the two differ (`keepNameCurrent`), by the owner's decision: it renames a
+joined WhatsApp contact too, and replaces an agent's edit. A mint and a revoke for one
 account each take the account's advisory lock first (`lockAccount` in
 `lib/api/sessions.ts`), so a revoke ends a session a mint wrote while it ran
 rather than missing an uncommitted row, and a mint reads the contact through

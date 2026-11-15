@@ -67,6 +67,15 @@ async function whatsappContact(phone = PHONE, name = 'Amira from WhatsApp') {
   return contactId;
 }
 
+/** Each identity's own name for the contact, by channel. */
+async function displayNames(contactId: string): Promise<Record<string, string | null>> {
+  const rows = await db
+    .select({ channel: contactIdentities.channel, displayName: contactIdentities.displayName })
+    .from(contactIdentities)
+    .where(eq(contactIdentities.contactId, contactId));
+  return Object.fromEntries(rows.map((r) => [r.channel, r.displayName]));
+}
+
 async function whatsappIdentities(): Promise<number> {
   return (
     await db
@@ -91,13 +100,20 @@ describe('resolving a myBlu account', () => {
     expect(await whatsappIdentities()).toBe(0);
   });
 
-  it("joins the number's WhatsApp contact, and leaves its name as it was", async () => {
+  // The owner's decision of 2026-11-15: myBlu's name for the user is the
+  // contact's, on every channel (`keepNameCurrent` in `lib/api/sessions.ts`).
+  it("joins the number's WhatsApp contact, and names it as the app does", async () => {
     const amira = await whatsappContact();
 
     await mint('u_1');
 
     expect((await identityOf('u_1')).contactId).toBe(amira);
-    expect(await contact(amira)).toEqual({ name: 'Amira from WhatsApp', primaryPhone: PHONE });
+    expect(await contact(amira)).toEqual({ name: 'Nour Adel', primaryPhone: PHONE });
+    // What WhatsApp calls them stays WhatsApp's.
+    expect(await displayNames(amira)).toEqual({
+      api: 'Nour Adel',
+      whatsapp: 'Amira from WhatsApp',
+    });
     expect(await whatsappIdentities()).toBe(1);
     expect((await db.select({ id: contacts.id }).from(contacts)).length).toBe(1);
   });
@@ -156,7 +172,8 @@ describe('resolving a myBlu account', () => {
     const after = await identityOf('u_1');
     expect(after).toEqual(before);
     expect(after.contactId).not.toBe(other);
-    expect(await contact(after.contactId)).toEqual({ name: 'Nour Adel', primaryPhone: PHONE });
+    // The name follows the app (`keepNameCurrent`); the contact's number does not.
+    expect(await contact(after.contactId)).toEqual({ name: 'A new name', primaryPhone: PHONE });
 
     // The number each mint vouched for is kept on its own session row.
     const phones = (
@@ -251,6 +268,57 @@ describe('two mints at once', () => {
     expect(a.identityId).toBe(b.identityId);
     expect((await db.select({ id: contacts.id }).from(contacts)).length).toBe(1);
     expect((await db.select({ hash: apiSessions.tokenHash }).from(apiSessions)).length).toBe(2);
+  });
+});
+
+/**
+ * The name myBlu's backend sends is the contact's, brought up to date at every
+ * mint where the two differ (`keepNameCurrent`): the owner's decision of
+ * 2026-11-15, so a name changed in the app reaches the console and the
+ * out-of-hours greeting within a day.
+ */
+describe("a myBlu account's name", () => {
+  it('brings a name changed in the app to the contact and its identity at the next mint', async () => {
+    await mint('u_1', PHONE, 'Nour Adel');
+    const { contactId } = await identityOf('u_1');
+    // An agent's correction meanwhile: myBlu's account is the better word.
+    await db.update(contacts).set({ name: 'Nour (merchant)' }).where(eq(contacts.id, contactId));
+
+    await mint('u_1', PHONE, '  Nour A. Hassan ');
+
+    expect((await contact(contactId)).name).toBe('Nour A. Hassan');
+    expect(await displayNames(contactId)).toEqual({ api: 'Nour A. Hassan' });
+  });
+
+  it('leaves the name as it is when the backend sends none, or a blank one', async () => {
+    await mint('u_1', PHONE, 'Nour Adel');
+    const { contactId } = await identityOf('u_1');
+
+    await mint('u_1', PHONE, null);
+    await mint('u_1', PHONE, '   ');
+
+    expect((await contact(contactId)).name).toBe('Nour Adel');
+    expect(await displayNames(contactId)).toEqual({ api: 'Nour Adel' });
+  });
+
+  it('renames nothing for a blocked contact, whose mint is refused', async () => {
+    await mint('u_1', PHONE, 'Nour Adel');
+    const { contactId } = await identityOf('u_1');
+    await db.update(contacts).set({ isBlocked: true }).where(eq(contacts.id, contactId));
+
+    const outcome = await mintSession({
+      externalUserId: 'u_1',
+      phone: PHONE,
+      name: 'Somebody Else',
+      platform: 'ios',
+      appVersion: '5.4.1',
+      forwardedFor: null,
+      now: new Date(),
+    });
+
+    expect(outcome.kind).toBe('blocked');
+    expect((await contact(contactId)).name).toBe('Nour Adel');
+    expect(await displayNames(contactId)).toEqual({ api: 'Nour Adel' });
   });
 });
 

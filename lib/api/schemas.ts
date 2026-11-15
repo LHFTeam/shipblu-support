@@ -707,7 +707,8 @@ export const Platform = z.enum(['ios', 'android']).describe('The platform the ap
 /**
  * Minted by myBlu's backend when its app asks for support, never by the app:
  * a value compiled into an app binary is extractable, and whoever extracts it
- * is every recipient. The name is used only for a contact this creates.
+ * is every recipient. The name is the contact's, brought up to date at every
+ * mint (`keepNameCurrent` in `./sessions.ts`).
  */
 export const CreateSessionRequest = z
   .object({
@@ -719,7 +720,7 @@ export const CreateSessionRequest = z
       // publishes it for a client to read, since only the backend sends it, so
       // the description is where the backend learns which count decides.
       .describe(
-        "The user's name, used only when this creates the contact; a name the contact already has is never overwritten. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
+        "The user's name as the app holds it. A new contact takes it, and an existing one is brought up to date with it on every mint where the two differ, so send the current name each time: it is what the support team sees and what an automated reply greets the user by. Absent or blank, the contact's name is left as it is. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
       ),
     client: z
       .object({

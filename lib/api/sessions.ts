@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { apiSessions, contactIdentities, contacts, type ApiSessionEndReason } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
@@ -105,6 +105,10 @@ export type MintOutcome =
  * holds until the app restarts. An identity gone by then was purged with its
  * contact mid-mint: that throws, a `500` the backend retries, and the retry
  * resolves the account afresh.
+ *
+ * A session that is minted brings the backend's name for the user to the
+ * contact and the identity (`keepNameCurrent`), so the console and the
+ * out-of-hours greeting follow a name changed in the app.
  */
 export async function mintSession(input: MintInput): Promise<MintOutcome> {
   const identifier = mybluIdentifier(input.externalUserId);
@@ -119,13 +123,14 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
     const { identityId } = await resolveApiContactIn(tx, pending);
 
     const [contact] = await tx
-      .select({ isBlocked: contacts.isBlocked, deletedAt: contacts.deletedAt })
+      .select({ id: contacts.id, isBlocked: contacts.isBlocked, deletedAt: contacts.deletedAt })
       .from(contactIdentities)
       .innerJoin(contacts, eq(contacts.id, contactIdentities.contactId))
       .where(eq(contactIdentities.id, identityId))
       .limit(1);
     if (!contact) throw new Error('The account was purged while its session was minted');
     if (refused(contact)) return { kind: 'blocked', identityId };
+    await keepNameCurrent(tx, contact.id, identityId, input.name);
 
     const token = `${TOKEN_PREFIX}${generateToken()}`;
     const expiresAt = new Date(input.now.getTime() + SESSION_TTL_SECONDS * 1000);
@@ -141,6 +146,49 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
     });
     return { kind: 'minted', token, expiresAt, identityId };
   });
+}
+
+/**
+ * The backend's name for the user, written to the contact and to this identity
+ * wherever it differs: the owner's decision of 2026-11-15
+ * (`plans/myblu-ticket-api.md`, _Identity_). A name changed in the app reaches
+ * the console, and the out-of-hours greeting, at the next mint, within a day.
+ * It renames the contact on every channel, a WhatsApp contact the account
+ * joined included, and replaces a name an agent typed: myBlu's account is
+ * taken as the better word on what the person is called.
+ *
+ * It was the other way first — used only for a contact the mint created —
+ * because a number that changed hands joins the new holder to a contact named
+ * for the previous one, and an agent's correction would be lost. The owner
+ * weighed both: numbers rarely change hands, and the new holder's own name
+ * replaces the old one once they set it in the app.
+ *
+ * A blank or absent name changes nothing, since the backend saying nothing is
+ * not the user clearing their name. And only a differing name is written, in
+ * the `WHERE`, so the daily mint of a user whose name agrees writes no row.
+ * After the blocked check, so a refused mint writes nothing to the contact.
+ */
+async function keepNameCurrent(
+  tx: Tx,
+  contactId: string,
+  identityId: string,
+  given: string | null,
+): Promise<void> {
+  const name = given?.trim();
+  if (!name) return;
+  await tx
+    .update(contacts)
+    .set({ name })
+    .where(and(eq(contacts.id, contactId), or(isNull(contacts.name), ne(contacts.name, name))));
+  await tx
+    .update(contactIdentities)
+    .set({ displayName: name })
+    .where(
+      and(
+        eq(contactIdentities.id, identityId),
+        or(isNull(contactIdentities.displayName), ne(contactIdentities.displayName, name)),
+      ),
+    );
 }
 
 /**

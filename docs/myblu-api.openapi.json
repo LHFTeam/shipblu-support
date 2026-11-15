@@ -4951,7 +4951,7 @@
             "$ref": "#/components/schemas/Phone"
           },
           "name": {
-            "description": "The user's name, used only when this creates the contact; a name the contact already has is never overwritten. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
+            "description": "The user's name as the app holds it. A new contact takes it, and an existing one is brought up to date with it on every mint where the two differ, so send the current name each time: it is what the support team sees and what an automated reply greets the user by. Absent or blank, the contact's name is left as it is. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
             "type": "string",
             "maxLength": 200,
             "pattern": "^[^\\u0000]*$"

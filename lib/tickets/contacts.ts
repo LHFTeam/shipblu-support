@@ -229,9 +229,10 @@ export async function resolveContactIn(tx: Tx, pending: PendingContact): Promise
  * WhatsApp contact is the same person.
  *
  * No `whatsapp` identity is ever written: holding a SIM today says nothing
- * about a WhatsApp account. And a contact's name is never overwritten — the
- * backend's name is used only for a contact this creates, since the stored one
- * can be an agent's correction, or a previous holder's.
+ * about a WhatsApp account. A contact this creates takes the backend's name;
+ * one it joins keeps its own here, and the mint brings the backend's to it
+ * afterwards (`keepNameCurrent` in `lib/api/sessions.ts`), where the reasons
+ * for overwriting a stored name are given.
  *
  * In two halves, as `pendingContact` and `resolveContactIn` are and for their
  * reason: the reads on the pool before the caller's transaction, the writes
@@ -243,7 +244,7 @@ export type ApiContactInput = {
   identifier: string;
   /** The phone the backend vouched for, as digits without its plus. */
   phone: string;
-  /** The backend's name for the user, used only for a contact this creates. */
+  /** The backend's name for the user: a contact this creates takes it, and the mint brings it to any other. */
   name: string | null;
 };
 
