@@ -166,6 +166,19 @@ describe('webhookTarget', () => {
     });
   });
 
+  // A secret pasted into the dashboard with a newline keyed the HMAC with it,
+  // and every delivery was refused by a receiver holding the secret alone.
+  it('signs with the secrets as set, whatever whitespace surrounds them', () => {
+    setTestEnv({
+      MYBLU_WEBHOOK_SECRET: `  ${SECRET}\n`,
+      MYBLU_WEBHOOK_SECRET_PREVIOUS: `${PREVIOUS}\r\n`,
+    });
+    expect(webhookTarget()).toEqual({
+      kind: 'ready',
+      target: { url: RECEIVER, secrets: [SECRET, PREVIOUS] },
+    });
+  });
+
   it('is off while the URL is unset or blank', () => {
     setTestEnv({ MYBLU_WEBHOOK_URL: undefined });
     expect(webhookTarget()).toEqual({ kind: 'off' });
@@ -231,7 +244,7 @@ function subject(overrides: Partial<MessageSubject> = {}): MessageSubject {
 
 describe('decideMessageCreated', () => {
   it('sends a reply from the team on an app ticket its owner can read, as the contract shapes it', () => {
-    const decision = decideMessageCreated(subject(), NOW);
+    const decision = decideMessageCreated(subject(), NOW, true);
 
     expect(decision).toEqual({
       kind: 'send',
@@ -253,12 +266,12 @@ describe('decideMessageCreated', () => {
   });
 
   it('calls a reply nobody on the team wrote `system`, as the thread does', () => {
-    const decision = decideMessageCreated(subject({ byAgent: false }), NOW);
+    const decision = decideMessageCreated(subject({ byAgent: false }), NOW, true);
     expect(decision).toMatchObject({ kind: 'send', event: { message: { from: 'system' } } });
   });
 
   it('sends the status the ticket has now', () => {
-    expect(decideMessageCreated(subject({ status: 'resolved' }), NOW)).toMatchObject({
+    expect(decideMessageCreated(subject({ status: 'resolved' }), NOW, true)).toMatchObject({
       event: { ticket: { status: 'resolved' } },
     });
   });
@@ -270,13 +283,27 @@ describe('decideMessageCreated', () => {
     ['a web chat reply', { channel: 'webchat' }],
     ['a WhatsApp reply', { channel: 'whatsapp' }],
   ])('refuses %s, whatever the ticket is like', (_, overrides) => {
-    expect(decideMessageCreated(subject({ ...overrides, withdrawn: true }), NOW)).toMatchObject({
+    expect(
+      decideMessageCreated(subject({ ...overrides, withdrawn: true }), NOW, true),
+    ).toMatchObject({
+      kind: 'refuse',
+    });
+  });
+
+  // Unsetting MYBLU_API_TOKEN is the API's way back: every request the app
+  // makes is then 503, so a push would point at nothing it can open.
+  it('sends nothing while the API is switched off, and refuses what is never a push all the same', () => {
+    expect(decideMessageCreated(subject(), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'api_off',
+    });
+    expect(decideMessageCreated(subject({ kind: 'note' }), NOW, false)).toMatchObject({
       kind: 'refuse',
     });
   });
 
   it('sends nothing on a ticket deleted, marked spam or merged away', () => {
-    expect(decideMessageCreated(subject({ withdrawn: true }), NOW)).toEqual({
+    expect(decideMessageCreated(subject({ withdrawn: true }), NOW, true)).toEqual({
       kind: 'quiet',
       reason: 'withdrawn',
     });
@@ -295,7 +322,7 @@ describe('decideMessageCreated', () => {
       },
     ],
   ])('sends nothing for %s', (_, overrides) => {
-    expect(decideMessageCreated(subject(overrides), NOW)).toEqual({
+    expect(decideMessageCreated(subject(overrides), NOW, true)).toEqual({
       kind: 'quiet',
       reason: 'not_in_app',
     });
@@ -303,11 +330,15 @@ describe('decideMessageCreated', () => {
 
   it('sends nothing to a user every request of whose is refused', () => {
     const owner = subject().owner!;
-    expect(decideMessageCreated(subject({ owner: { ...owner, isBlocked: true } }), NOW)).toEqual({
+    expect(
+      decideMessageCreated(subject({ owner: { ...owner, isBlocked: true } }), NOW, true),
+    ).toEqual({
       kind: 'quiet',
       reason: 'refused',
     });
-    expect(decideMessageCreated(subject({ owner: { ...owner, deletedAt: NOW } }), NOW)).toEqual({
+    expect(
+      decideMessageCreated(subject({ owner: { ...owner, deletedAt: NOW } }), NOW, true),
+    ).toEqual({
       kind: 'quiet',
       reason: 'refused',
     });
@@ -315,10 +346,10 @@ describe('decideMessageCreated', () => {
 
   it('sends nothing for an event older than its day allows, and sends one on the edge', () => {
     const edge = new Date(NOW.getTime() - MAX_EVENT_AGE_MS);
-    expect(decideMessageCreated(subject({ createdAt: edge }), NOW).kind).toBe('send');
-    expect(decideMessageCreated(subject({ createdAt: new Date(edge.getTime() - 1) }), NOW)).toEqual(
-      { kind: 'quiet', reason: 'stale' },
-    );
+    expect(decideMessageCreated(subject({ createdAt: edge }), NOW, true).kind).toBe('send');
+    expect(
+      decideMessageCreated(subject({ createdAt: new Date(edge.getTime() - 1) }), NOW, true),
+    ).toEqual({ kind: 'quiet', reason: 'stale' });
   });
 });
 

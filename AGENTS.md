@@ -569,7 +569,11 @@ refuses an event older than twenty-three hours (`MAX_EVENT_AGE_MS`), which holds
 the bound when the queue itself is late. The default of five would give up five
 minutes in, inside a receiver's own deploy. Each attempt has a ten-second
 deadline and follows no redirect. A receiver that refuses is a plain error and
-the queue's retry, never `PermanentJobError`.
+the queue's retry, never `PermanentJobError`. A dead delivery resent by hand
+(`npm run job -- notify_myblu event=message.created messageId=…`) therefore
+sends only in the six hours or so between the job's death and the event's
+twenty-third hour; after that it logs `nothing sent: older than a day` at
+`warn` and exits 0, and the push is gone, on purpose.
 
 **A Facebook or Instagram batch is retried whole when any item in it fails**
 (`process-meta-webhook.ts`), so the items that worked run again on every retry,

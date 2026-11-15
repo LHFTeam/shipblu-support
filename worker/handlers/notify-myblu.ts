@@ -1,3 +1,4 @@
+import { apiSwitchedOn } from '@/lib/api/auth';
 import {
   decideMessageCreated,
   deliverWebhook,
@@ -20,17 +21,23 @@ const log = logger('notify_myblu');
  * In this order, each answer final for the attempt:
  *
  * 1. **The switch, read now.** `MYBLU_WEBHOOK_URL` unset completes the job with
- *    nothing sent, so unsetting it stops the jobs already queued — the way
- *    back. Set but unusable — not `https`, userinfo or a query string in it,
- *    no secret of 32 characters — fails the attempt by name, a plain error the
- *    queue retries, so a value corrected within the job's day still sends.
+ *    nothing sent, before any query, so unsetting it stops the jobs already
+ *    queued — the way back — whatever their messages became.
  * 2. **The message, re-read.** Gone is `subjectGone`. Not a reply from the team
  *    on the myBlu app is `PermanentJobError`, since only a payload written by
  *    hand names one, and sending it would carry a note's existence out.
- * 3. **Whether the app could open what the push points at**, and whether it is
- *    still within its day (`decideMessageCreated`): otherwise the job completes
- *    with nothing sent, and says why.
- * 4. **One signed attempt.** Anything but a `2xx` within ten seconds is a plain
+ * 3. **Whether the app could open what the push points at**, whether the API
+ *    itself is on (`apiSwitchedOn`), and whether it is still within its day
+ *    (`decideMessageCreated`): otherwise the job completes with nothing sent,
+ *    and says why — a stale one at `warn`, since that is how a delivery
+ *    resent by hand too late (`lib/queue/payloads.ts`) says it sent nothing.
+ * 4. **The target**, only now there is something to send. Set but unusable —
+ *    not `https`, userinfo or a query string in it, no secret of 32
+ *    characters — fails the attempt by name, a plain error the queue retries,
+ *    so a value corrected within the job's day still sends. Asked before the
+ *    message, it sent to `dead`, over a wrong value, jobs whose only outcome
+ *    was nothing sent: a purged message, a withdrawn ticket, a stale event.
+ * 5. **One signed attempt.** Anything but a `2xx` within ten seconds is a plain
  *    error and the queue's retry, never `PermanentJobError`.
  *
  * It never writes to the message: a push that never lands leaves the reply
@@ -45,22 +52,26 @@ export async function notifyMyblu(job: ClaimedJob): Promise<void> {
     log.info('MYBLU_WEBHOOK_URL is unset — nothing sent', { messageId });
     return;
   }
-  if (target.kind === 'refused') {
-    throw new Error(`notify_myblu: ${target.reason} — nothing sent`);
-  }
 
   const subject = await readMessageSubject(messageId);
   if (!subject) throw subjectGone('notify_myblu', `message ${messageId}`);
 
   const now = new Date();
-  const decision = decideMessageCreated(subject, now);
+  const decision = decideMessageCreated(subject, now, apiSwitchedOn());
   switch (decision.kind) {
     case 'refuse':
       throw new PermanentJobError(`notify_myblu: message ${messageId} is ${decision.reason}`);
     case 'quiet':
-      log.info('nothing sent', { messageId, reason: decision.reason });
+      if (decision.reason === 'stale') {
+        log.warn(`nothing sent: older than a day messageId=${messageId} reason=stale`);
+      } else {
+        log.info('nothing sent', { messageId, reason: decision.reason });
+      }
       return;
     case 'send':
+      if (target.kind === 'refused') {
+        throw new Error(`notify_myblu: ${target.reason} — nothing sent`);
+      }
       await deliverWebhook(target.target, decision.event, now);
       return;
   }

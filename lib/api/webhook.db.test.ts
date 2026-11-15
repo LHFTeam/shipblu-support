@@ -37,12 +37,15 @@ withCleanDatabase();
 
 const RECEIVER = 'https://myblu.example.test/support/webhook/';
 const SECRET = 'db-test-webhook-secret-0123456789-abcdef';
+/** The API switched on: with no usable token, the job sends nothing (`api_off`). */
+const API_TOKEN = 'db-test-myblu-api-token-0123456789-abcdef';
 
 let errors: MockInstance;
 
 beforeEach(() => {
   vi.stubEnv('MYBLU_WEBHOOK_URL', RECEIVER);
   vi.stubEnv('MYBLU_WEBHOOK_SECRET', SECRET);
+  vi.stubEnv('MYBLU_API_TOKEN', API_TOKEN);
   resetEnvCache();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -389,6 +392,43 @@ describe('notify_myblu', () => {
 
     await notifyMyblu(await jobFor(messageId));
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing while the API itself is switched off, and completes', async () => {
+    const messageId = await agentReply(await ticket());
+    vi.stubEnv('MYBLU_API_TOKEN', '');
+    resetEnvCache();
+    const fetchMock = receiver();
+
+    await notifyMyblu(await jobFor(messageId));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // A wrong value fails only a job with something to send: asked first, it
+  // sent to `dead` jobs whose only outcome was nothing sent, and the queue
+  // held a pile of them once the value was put right.
+  it('completes a job with nothing to send while the target is unusable, and fails only one that would send', async () => {
+    const spam = await ticket('api', 'u_spam');
+    const onSpam = await agentReply(spam);
+    await db.update(conversations).set({ isSpam: true }).where(eq(conversations.id, spam.ticketId));
+    const late = await ticket('api', 'u_late');
+    const lateReply = await agentReply(late);
+    await db
+      .update(messages)
+      .set({ createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000) })
+      .where(eq(messages.id, lateReply));
+    const sendable = await agentReply(await ticket());
+    vi.stubEnv('MYBLU_WEBHOOK_SECRET', 'too-short');
+    resetEnvCache();
+    const fetchMock = receiver();
+
+    for (const id of [onSpam, lateReply]) await notifyMyblu(await jobFor(id));
+    const failure = await notifyMyblu(await jobFor(sendable)).catch((error: unknown) => error);
+
+    expect((failure as Error).message).toMatch(/MYBLU_WEBHOOK_SECRET is unset or shorter than 32/);
+    expect(failure).not.toBeInstanceOf(PermanentJobError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

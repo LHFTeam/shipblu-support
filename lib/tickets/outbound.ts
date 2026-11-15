@@ -274,10 +274,12 @@ export async function writeAutomatedReply(
 }
 
 /**
- * Queues the carrier for a message `writeAutomatedReply` wrote: on the pool
- * once it has committed, or on the transaction that wrote it (`on`), so the
- * two commit together. Keyed on the message, which is once-ever for it, so a
- * second call queues nothing.
+ * Queues the delivery of a reply from the team: one `writeAutomatedReply`
+ * wrote, or an agent's (`storeAgentReply`), the one door both go through so a
+ * channel or an event added here reaches both. On the pool once the reply has
+ * committed, or on the transaction that wrote it (`on`), so the two commit
+ * together. Keyed on the message, which is once-ever for it, so a second call
+ * queues nothing.
  *
  * No carrier where the row is the delivery (`rowIsDelivery`). On the myBlu
  * app the push is queued in its place (`enqueueMessageCreated`, which does

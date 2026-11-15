@@ -14,6 +14,7 @@ import { env } from '@/lib/env';
 import { isTimeout } from '@/lib/http/deadline';
 import { logger } from '@/lib/log';
 import { messageFrom } from './from';
+import { MIN_SECRET_CHARS, usableSecret } from './secrets';
 import type { MessageCreatedEvent } from './schemas';
 import { contactRefused, externalUserIdOf } from './sessions';
 
@@ -59,13 +60,6 @@ export const WEBHOOK_TIMEOUT_MS = 10_000;
  */
 export const MAX_EVENT_AGE_MS = 23 * 60 * 60 * 1000;
 
-/**
- * Below this a secret counts as unset, the rule `MYBLU_API_TOKEN` follows
- * (`lib/api/auth.ts`): a signing secret short enough to have been typed by
- * hand, or cut off when pasted, signs nothing rather than signing weakly.
- */
-const MIN_SECRET_CHARS = 32;
-
 type Target = { url: string; secrets: string[] };
 
 export type TargetResolution =
@@ -106,10 +100,6 @@ function urlRefusal(raw: string): string | null {
   return null;
 }
 
-function usableSecret(value: string | undefined): string | null {
-  return value && value.length >= MIN_SECRET_CHARS ? value : null;
-}
-
 /**
  * Where the webhook goes and what signs it, read from the environment when a
  * job runs. The URL is posted to exactly as it is set: the receiver registers
@@ -126,7 +116,9 @@ export function webhookTarget(): TargetResolution {
   const refusal = urlRefusal(url);
   if (refusal) return { kind: 'refused', reason: refusal };
 
-  const current = usableSecret(e.MYBLU_WEBHOOK_SECRET);
+  // Trimmed, and a short one reported by name, as the API's own token is
+  // (`usableSecret`): the secret keys the HMAC byte for byte.
+  const current = usableSecret('MYBLU_WEBHOOK_SECRET', e.MYBLU_WEBHOOK_SECRET);
   if (!current) {
     return {
       kind: 'refused',
@@ -135,7 +127,9 @@ export function webhookTarget(): TargetResolution {
   }
   // The previous secret only ever signs beside the current one, as
   // `MYBLU_API_TOKEN_PREVIOUS` is only ever accepted beside its own.
-  const previous = usableSecret(e.MYBLU_WEBHOOK_SECRET_PREVIOUS);
+  // A previous secret cut short is dropped with a warning naming it, so a
+  // rotation the receiver has not followed yet fails with a cause in the log.
+  const previous = usableSecret('MYBLU_WEBHOOK_SECRET_PREVIOUS', e.MYBLU_WEBHOOK_SECRET_PREVIOUS);
   return { kind: 'ready', target: { url, secrets: previous ? [current, previous] : [current] } };
 }
 
@@ -262,7 +256,12 @@ export type QuietReason =
   /** The owner's contact is blocked or deleted: every request of theirs is refused, so a push is one they cannot open. */
   | 'refused'
   /** Older than `MAX_EVENT_AGE_MS`. */
-  | 'stale';
+  | 'stale'
+  /**
+   * The API is switched off (`apiSwitchedOn`): every request the app makes
+   * answers `503 not_configured`, so a push would point at nothing it can open.
+   */
+  | 'api_off';
 
 export type Decision =
   | { kind: 'send'; event: z.input<typeof MessageCreatedEvent> }
@@ -277,19 +276,23 @@ export type Decision =
 
 /**
  * Whether to send `message.created` for this message now, and the body if so.
- * Pure, so every branch is a test rather than a database fixture.
+ * Pure, so every branch is a test rather than a database fixture: whether the
+ * API is on is asked by the caller (`apiSwitchedOn`) and handed in, required,
+ * so no caller can decide without it.
  *
  * The refusal is checked first, so a payload naming a note is refused whatever
- * the ticket is like; then the states in which the app could not open what the
- * push points at, in the order `ownedTicket` would refuse it; then the age.
+ * the ticket is like; then the API itself, since while it is off the app opens
+ * nothing; then the states in which the app could not open what the push
+ * points at, in the order `ownedTicket` would refuse it; then the age.
  */
-export function decideMessageCreated(subject: MessageSubject, now: Date): Decision {
+export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: boolean): Decision {
   if (subject.direction !== 'outbound' || subject.kind !== 'reply') {
     return { kind: 'refuse', reason: 'not a reply from the team' };
   }
   if (subject.channel !== 'api') {
     return { kind: 'refuse', reason: `a reply on ${subject.channel}, not on the myBlu app` };
   }
+  if (!apiOn) return { kind: 'quiet', reason: 'api_off' };
   if (subject.withdrawn) return { kind: 'quiet', reason: 'withdrawn' };
 
   const owner = subject.owner;
