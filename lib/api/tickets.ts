@@ -31,6 +31,7 @@ import { encodeCursor, THREAD_START, type Cursor } from './cursor';
 import { finishInRequest, oweFinish } from './finish';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
+import { trackingFoldSql } from './tracking-fold';
 import type { Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -606,7 +607,9 @@ export type TicketsListPage = {
  * everywhere (`normaliseTrackingNumber`), whatever its case and hyphens, since
  * a number typed in the composer as `sb-ab12` is the platform's `SB-AB12`
  * and a shipment screen asking with the one must find a ticket opened with
- * the other. Stored and answered as sent: only the comparison is folded.
+ * the other. Stored and answered as sent: only the comparison is folded, and
+ * the stored side only as far as `TrackingNumber` lets it vary
+ * (`trackingFoldSql`, whose test holds the two folds together).
  *
  * The badge rides in the same statement, uncorrelated and so computed once,
  * so it and every `unreadCount` on the page are one snapshot; it reads every
@@ -630,7 +633,7 @@ export function listStatement(caller: Caller, asked: ListAsked) {
         ownedTicket(caller),
         asked.trackingNumber === null
           ? undefined
-          : sql`upper(replace(${apiTickets.trackingNumber}, '-', '')) = ${normaliseTrackingNumber(asked.trackingNumber)}`,
+          : sql`${trackingFoldSql(apiTickets.trackingNumber)} = ${normaliseTrackingNumber(asked.trackingNumber)}`,
         asked.cursor === null
           ? undefined
           : vsCursor('<', asked.cursor, conversations.lastMessageAt, conversations.id),

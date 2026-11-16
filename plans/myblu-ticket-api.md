@@ -736,10 +736,15 @@ default:
   null join is `400`. Then the `UPDATE`, with the id and `ownedTicket` in its
   own `WHERE`, so a ticket deleted, merged or marked spam in between marks
   nothing. Then the answer, read in the same transaction after the write.
-- **It holds the requester first** (`holdRequester`), as the two sends do, so
-  a contact merge committed since the gate is followed and one in flight is
-  waited out: answered `404`, the SDK would drop the user's ticket and fail
-  its outbox. The list and stage 4's poll still read the gate's contact, so a
+- **It holds the account, then the requester** (`holdAccount`), as the two
+  sends do. The account's advisory lock comes first, so a mark waits its turn
+  behind every send, create, mint, revoke and other mark on the account, and
+  one that comes after a revoke or a sign-out finds its session no longer live
+  and marks nothing. Then the requester, so a contact merge committed since
+  the gate is followed and one in flight is waited out: answered `404`, the
+  SDK would drop the user's ticket and fail its outbox. Two marks on one
+  ticket at once therefore cannot deadlock on its replies: both queue on the
+  account before either touches `messages`. The list and stage 4's poll still read the gate's contact, so a
   merge landing in that moment answers a poll `404` or a list a ticket short;
   closing that for every read is stage 4's owner's call (stage 5's open
   questions), because the obvious fix reads the contact through the identity

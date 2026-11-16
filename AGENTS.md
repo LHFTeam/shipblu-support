@@ -1503,8 +1503,10 @@ Unread is `unreadReply()` in `lib/api/tickets.ts`, the one predicate
 that route is the only writer of `messages.read_at` on `api`, scoped by
 `ownedTicket` in its own `UPDATE`, guarded by `read_at is null` so it never
 moves or unsets one, and it sets `read` only from `sent` or `delivered`, so a
-failure keeps its receipt. Its transaction holds the requester first
-(`holdRequester`), as the sends do. The API changes by addition, and what
+failure keeps its receipt. Its transaction holds the account, then the
+requester (`holdAccount`), as the sends do, so a mark waits its turn behind
+every send, create, mint, revoke and other mark on the account, and one after a
+revoke or a sign-out marks nothing. The API changes by addition, and what
 `docs/myblu-api.md` says a field means is fixed once an app build depends on
 it.
 
