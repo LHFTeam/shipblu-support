@@ -529,7 +529,7 @@ export const MessagesPage = z
       .array(Message)
       .describe('Ascending by `(createdAt, id)` whichever way was asked. Merge by `id`.'),
     olderCursor: Cursor.nullable().describe(
-      'Send as `before` for the page before this one; null at the start of the thread.',
+      'Send as `before` for the page before this one; null at the start of the thread, and always null on a poll (`after`), which never pages back: page back from the `olderCursor` of the newest page, or of the `before` page, read last.',
     ),
     newerCursor: Cursor.describe(
       'Send as `after` to poll for newer messages. Never null, and unchanged when nothing is new; a full page means ask again at once.',
@@ -740,7 +740,7 @@ export const CreateSessionRequest = z
 export const RevokeReason = z
   .enum(['signed_out', 'phone_changed', 'account_deleted', 'number_released', 'other'])
   .describe(
-    "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good.",
+    "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good: they stay with the support team, and an open one is resolved there.",
   );
 
 export const RevokeSessionsRequest = z

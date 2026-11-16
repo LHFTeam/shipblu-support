@@ -599,6 +599,21 @@ describe('getTicket', () => {
       { from: 'agent', body: 'Today.' },
     ]);
   });
+
+  // The list leaves a merged ticket out, so the page must too: the
+  // conversation goes on in the survivor.
+  it('does not open a ticket merged into another', async () => {
+    const contactId = await customer();
+    const survivor = await createTicket(contactId, { subject: 'Kept', body: 'First.' });
+    const folded = await createTicket(contactId, { subject: 'Folded', body: 'Second.' });
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: survivor.conversationId })
+      .where(eq(conversations.id, folded.conversationId));
+
+    expect(await getTicket(contactId, folded.number)).toBeNull();
+    expect((await getTicket(contactId, survivor.number))?.number).toBe(survivor.number);
+  });
 });
 
 describe('a myBlu app ticket', () => {
@@ -802,6 +817,27 @@ describe('appendReply', () => {
         .where(eq(conversations.id, created.conversationId));
 
       await refused(contactId, created.number, created.conversationId);
+    });
+
+    // Answered here, the reply landed on the folded ticket, reopening it,
+    // while agents worked the survivor.
+    it('a ticket merged into another, even resolved', async () => {
+      const contactId = await customer();
+      const survivor = await createTicket(contactId, { subject: 'Kept', body: 'First.' });
+      const folded = await createTicket(contactId, { subject: 'Folded', body: 'Second.' });
+      await setStatus(folded.conversationId, 'Resolved');
+      await db
+        .update(conversations)
+        .set({ mergedIntoId: survivor.conversationId })
+        .where(eq(conversations.id, folded.conversationId));
+
+      await refused(contactId, folded.number, folded.conversationId);
+      const [row] = await db
+        .select({ category: ticketStatuses.category })
+        .from(conversations)
+        .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+        .where(eq(conversations.id, folded.conversationId));
+      expect(row?.category).toBe('resolved');
     });
 
     // The myBlu app's tickets belong to the app identity that opened them, and

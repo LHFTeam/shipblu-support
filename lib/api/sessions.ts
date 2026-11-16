@@ -1,14 +1,9 @@
 import { and, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  apiSessions,
-  apiTickets,
-  contactIdentities,
-  contacts,
-  type ApiSessionEndReason,
-} from '@/db/schema';
+import { apiSessions, contactIdentities, contacts, type ApiSessionEndReason } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { findIdentity, pendingApiContact, resolveApiContactIn } from '@/lib/tickets/contacts';
+import { afterRelease, releaseTickets, releasesTickets } from './release';
 
 /**
  * The myBlu API's sessions (`plans/myblu-ticket-api.md`, _The session_): minted
@@ -390,6 +385,18 @@ async function holdRequester(tx: Tx, caller: Caller): Promise<Caller | null> {
 }
 
 /**
+ * The caller with the contact its identity names now, read through the
+ * identity on a short transaction of its own, for a replay: what an
+ * `Idempotency-Key` was spent on is read through `ownedTicket`, which compares
+ * the ticket's requester with the caller's contact, and the gate's contact is
+ * stale exactly when a merge landed during the request (`replay` in
+ * `tickets.ts`). Null as `holdRequester` is.
+ */
+export async function requesterNow(caller: Caller): Promise<Caller | null> {
+  return db.transaction((tx) => holdRequester(tx, caller));
+}
+
+/**
  * What `DELETE /session` runs: the presented token and nothing else, stamped
  * rather than deleted, so the row still says who was vouched for. The
  * statement itself, which the route awaits, so a test can read its parameters
@@ -437,15 +444,18 @@ export function revokeStatement(
  * session is stamped with the rest; a mint that comes after waits, and is a
  * session minted after the revoke.
  *
- * With `account_deleted` or `number_released` it also deletes the identity's
- * ownership rows (`api_tickets`), in the same transaction, so the account's
- * tickets leave the app for good — every read is scoped by those rows
- * (`ownedTicket`) — while they stay on the contact for agents: nothing else is
- * touched. The person behind the account has changed or is gone, and a new
+ * With `account_deleted` or `number_released` the account's tickets also
+ * leave the app for good, in the same transaction (`releaseTickets`): each is
+ * marked `released_from_app` for the agents who still have it, an open or
+ * pending one is resolved by the system, and the ownership rows go, so every
+ * read scoped by them (`ownedTicket`) answers `404` while the tickets stay on
+ * the contact. The person behind the account has changed or is gone, and a new
  * session minted later for the same `externalUserId` must not read what the
- * last one wrote. The other reasons end sessions and leave the tickets, since
- * the same person signs in again. A create racing this takes the same lock
- * (`holdAccount`), so its row is either deleted here or never written.
+ * last one wrote. The resolved tickets' clocks stop once it commits
+ * (`afterRelease`). The other reasons end sessions and leave the tickets,
+ * since the same person signs in again. A create or a reply racing this takes
+ * the same lock (`holdAccount`), so what it writes is either released here or
+ * never written.
  */
 export async function revokeSessions(
   externalUserId: string,
@@ -453,28 +463,24 @@ export async function revokeSessions(
   now: Date,
 ): Promise<{ identityId: string | null; revoked: number; ticketsReleased: number }> {
   const identifier = mybluIdentifier(externalUserId);
-  return db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx) => {
     await lockAccount(tx, identifier);
     const identity = await findIdentity('api', identifier, tx);
-    if (!identity) return { identityId: null, revoked: 0, ticketsReleased: 0 };
+    if (!identity) return { identityId: null, revoked: 0, released: null };
 
     const result = await revokeStatement(tx, identity.identityId, reason, now);
-    const released = RELEASES_TICKETS.has(reason)
-      ? await tx.delete(apiTickets).where(eq(apiTickets.identityId, identity.identityId))
+    const released = releasesTickets(reason)
+      ? await releaseTickets(tx, identity.identityId, reason)
       : null;
-    return {
-      identityId: identity.identityId,
-      revoked: result.count,
-      ticketsReleased: released?.count ?? 0,
-    };
+    return { identityId: identity.identityId, revoked: result.count, released };
   });
+  if (outcome.released) await afterRelease(outcome.released);
+  return {
+    identityId: outcome.identityId,
+    revoked: outcome.revoked,
+    ticketsReleased: outcome.released?.count ?? 0,
+  };
 }
-
-/** The revoke reasons after which the account's tickets leave the app. */
-const RELEASES_TICKETS: ReadonlySet<ApiSessionEndReason> = new Set([
-  'account_deleted',
-  'number_released',
-]);
 
 /**
  * The nightly sweep (`cleanup`): rows thirty days past their expiry. On the

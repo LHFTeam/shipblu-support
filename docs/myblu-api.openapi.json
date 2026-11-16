@@ -4358,7 +4358,7 @@
                 "type": "null"
               }
             ],
-            "description": "Send as `before` for the page before this one; null at the start of the thread."
+            "description": "Send as `before` for the page before this one; null at the start of the thread, and always null on a poll (`after`), which never pages back: page back from the `olderCursor` of the newest page, or of the `before` page, read last."
           },
           "newerCursor": {
             "type": "string",
@@ -4887,7 +4887,7 @@
       "RevokeReason": {
         "type": "string",
         "enum": ["signed_out", "phone_changed", "account_deleted", "number_released", "other"],
-        "description": "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good."
+        "description": "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good: they stay with the support team, and an open one is resolved there."
       },
       "ExternalUserId": {
         "type": "string",

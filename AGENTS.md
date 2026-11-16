@@ -1471,14 +1471,22 @@ app holds, once; the app drops each and reads the newest page, as
 its cursor, because `created_at` is not commit order, and never lets that
 re-read fill a page, or a full page whose cursor did not move would send the
 client round for the same rows forever. `createApiTicket` is an ingest path, not
-a parameter on `createTicket`: the pool's reads, one `now`, one transaction
-holding the routing window in its insert and `startRouting` on `tx`, then the
-ingest lifecycle. It takes the account's lock first (`holdAccount`), as a mint
-and a revoke do, and re-reads the key and counts the open tickets under it.
-Both writes file under the contact read through the identity inside their
-transaction and held `FOR KEY SHARE` (`holdRequester`), never the gate's: a
-contact merge committed between the two left a create on the folded contact,
-`201` and then `404` for good. The
+a parameter on `createTicket`: the pool's reads, one transaction holding the
+routing window in its insert and `startRouting` on `tx`, then the ingest
+lifecycle. It takes the account's lock first (`holdAccount`), as a mint and a
+revoke do, and re-reads the key and counts the open tickets under it. Both
+writes take their one `now` once they hold every lock they wait on, so a
+message's `created_at` is never older than its commit by a wait, which
+`after`'s few seconds of overlap could not cover. Both file under the contact
+read through the identity inside their transaction and held `FOR KEY SHARE`
+(`holdRequester`), never the gate's: a contact merge committed between the two
+left a create on the folded contact, `201` and then `404` for good — and a
+replay reads through the contact the identity names then (`requesterNow`), for
+the same reason. The work after the commit is owed in the transaction, as a
+`finish_api_message` job due a minute on, which the request takes and runs
+(`lib/api/finish.ts`): a request that ended after its commit was retried, the
+retry answered as a replay, and the ticket kept none of its rules, its policy,
+its assignee or its out-of-hours reply. The
 `Idempotency-Key` is stored as `messages.channel_message_id =
 'api:<identityId>:<key>'`, pre-checked on the pool with the unique index as the
 backstop, and every message the user wrote returns it as `clientId` on every

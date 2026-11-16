@@ -175,6 +175,18 @@ export function Header({
               {conversation.openedFromApp ? ` · ${conversation.openedFromApp}` : ''}
             </Badge>
           ) : null}
+          {/*
+              The app no longer shows this ticket (`lib/api/release.ts`), and
+              `api` has no other carrier: a reply written here is stored and
+              read by nobody. Said beside the line above rather than in place
+              of it, since who opened the ticket is still true.
+            */}
+          {conversation.releasedFromApp !== null ? (
+            <Badge tone="warning">
+              Not in the myBlu app any more: {conversation.releasedFromApp} · nobody reads a reply
+              here
+            </Badge>
+          ) : null}
           {/* The 24-hour window only bounds a reply sent from here, so on a
                 channel not answered from here the countdown measures nothing. */}
           {whatsappWindow ? (

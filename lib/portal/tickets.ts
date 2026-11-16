@@ -147,6 +147,9 @@ export async function getTicket(
         eq(conversations.requesterContactId, contactId),
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
+        // Merged away: the conversation goes on in the survivor, as the list
+        // above leaves it out, and a reply here would land where nobody works.
+        isNull(conversations.mergedIntoId),
         notInArray(conversations.channel, notOnThePortal()),
       ),
     )
@@ -443,6 +446,10 @@ export async function appendReply(
           eq(conversations.requesterContactId, contactId),
           isNull(conversations.deletedAt),
           eq(conversations.isSpam, false),
+          // Merged away: answered here, the reply landed on the folded ticket
+          // — reopening it when it was resolved — while agents worked the
+          // survivor, where the page above no longer sends anybody.
+          isNull(conversations.mergedIntoId),
           notInArray(conversations.channel, notOnThePortal()),
         ),
       )

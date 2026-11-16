@@ -73,8 +73,23 @@ export async function requireDefaultOpenStatusId(tx: typeof db): Promise<string>
  * was never seeded.
  */
 export async function requireResolvedStatusId(tx: typeof db): Promise<string> {
+  return (await requireResolvedStatus(tx)).id;
+}
+
+/**
+ * The status `requireResolvedStatusId` names, with what a move into it writes
+ * to the timeline and the clocks: for a writer that resolves rather than files,
+ * as the myBlu app's release does (`lib/api/release.ts`).
+ */
+export async function requireResolvedStatus(
+  tx: typeof db,
+): Promise<{ id: string; name: string; stopsSlaClock: boolean }> {
   const [status] = await tx
-    .select({ id: ticketStatuses.id })
+    .select({
+      id: ticketStatuses.id,
+      name: ticketStatuses.name,
+      stopsSlaClock: ticketStatuses.stopsSlaClock,
+    })
     .from(ticketStatuses)
     .where(eq(ticketStatuses.category, 'resolved'))
     .orderBy(desc(ticketStatuses.isDefault), asc(ticketStatuses.position))
@@ -82,5 +97,5 @@ export async function requireResolvedStatusId(tx: typeof db): Promise<string> {
   if (!status) {
     throw new Error('No resolved ticket status configured — run `npm run db:seed`');
   }
-  return status.id;
+  return status;
 }

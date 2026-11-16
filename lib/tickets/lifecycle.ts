@@ -9,7 +9,7 @@ import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { beginRouting } from '@/lib/routing/begin';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
-import { logger } from '@/lib/log';
+import { logger, scrubbed } from '@/lib/log';
 
 const log = logger('lifecycle');
 
@@ -181,7 +181,10 @@ export async function afterTicketResolved(conversationId: string): Promise<void>
  * linking.
  *
  * Failures are logged and swallowed. A detection bug must never fail an ingest
- * job — the job would retry, re-running everything downstream of it.
+ * job — the job would retry, re-running everything downstream of it. Each is
+ * logged `scrubbed`, never whole: every step here reads the message's words,
+ * and a failed query carries them, a tracking number included, in its
+ * parameters.
  */
 export type StoredMessage = {
   conversationId: string;
@@ -206,7 +209,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await linkShipmentsFromMessage(message);
   } catch (error) {
-    log.error(`shipment linking failed for message ${message.messageId}`, error);
+    log.error(`shipment linking failed for message ${message.messageId}`, scrubbed(error));
   }
 
   // Its own try/catch rather than sharing one: a bug in shipment detection must
@@ -216,7 +219,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await subcategoriseFromMessage(message, 'notify');
   } catch (error) {
-    log.error(`subcategorisation failed for message ${message.messageId}`, error);
+    log.error(`subcategorisation failed for message ${message.messageId}`, scrubbed(error));
   }
 
   // Only queued here; the provider call is a job (`classify_priority`). Every
@@ -228,7 +231,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await enqueuePriorityClassification(message, ticket);
   } catch (error) {
-    log.error(`could not queue priority classification for ${message.messageId}`, error);
+    log.error(`could not queue priority classification for ${message.messageId}`, scrubbed(error));
   }
 
   // The category classifier's own job (`classify_category`), in its own
@@ -237,6 +240,6 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await enqueueCategoryClassification(message, ticket);
   } catch (error) {
-    log.error(`could not queue category classification for ${message.messageId}`, error);
+    log.error(`could not queue category classification for ${message.messageId}`, scrubbed(error));
   }
 }

@@ -20,8 +20,8 @@ type TicketColumns = Record<
  * Built here and nowhere else, and taking the caller as a required argument,
  * as `readableByRole(role)` takes its role: there is no form of it that
  * forgets who is asking, so a new read cannot leave it out and still compile.
- * Not lifted from the portal's queries, whose `getTicket` and `appendReply`
- * carry no `merged_into_id` filter.
+ * Not lifted from the portal's queries, which are keyed on the contact alone
+ * and so cannot say which identity opened a ticket.
  *
  * Each half closes what the others leave open:
  *

@@ -20,6 +20,7 @@ import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rehostKbImages } from './rehost-kb-images';
 import { settleRoutingJob } from './settle-routing';
+import { finishApiMessage } from './finish-api-message';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
 import { rotateWhatsAppCredentials } from './rotate-whatsapp-credentials';
@@ -63,6 +64,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   classify_priority: (job) => classifyPriority(job),
   classify_category: (job) => classifyCategory(job),
   settle_routing: (job) => settleRoutingJob(job),
+  finish_api_message: (job) => finishApiMessage(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   complete_coexistence_onboarding: completeCoexistenceOnboarding,

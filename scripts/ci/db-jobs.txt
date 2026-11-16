@@ -54,6 +54,7 @@ skip: sync_shipment — needs a tracking number, and calls api.shipblu.com
 skip: classify_priority — needs an inbound message, and calls TypeSafe; lib/priority-ai/run.db.test.ts runs its SQL
 skip: classify_category — needs an inbound message, and calls TypeSafe; lib/category-ai/run.db.test.ts runs its SQL
 skip: settle_routing — needs a routed ticket, and fails a conversation id that names no row (`subjectGone`); lib/routing/settle.db.test.ts runs its SQL
+skip: finish_api_message — needs a stored myBlu app message, and fails a message id that names no row (`subjectGone`); app/api/v1/tickets.db.test.ts runs it
 skip: notify_low_rating — needs a low answer, and fails a survey id that names no row (`subjectGone`); lib/csat/low-rating.db.test.ts runs its SQL
 skip: subscribe_meta_webhooks — has no SQL; it only calls Graph, with the app credential
 skip: complete_coexistence_onboarding — needs an onboarding attempt and a credential for its account, and calls Graph; its SQL is planned by lib/whatsapp/onboarding.db.test.ts

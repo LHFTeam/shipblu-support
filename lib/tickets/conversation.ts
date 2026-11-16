@@ -34,7 +34,7 @@ import {
 } from './channel-policy';
 import { assignmentVisibility } from './visibility';
 import { metaIndex } from './message-media';
-import { appBuild, describeActorLabel } from './event-labels';
+import { appBuild, describeActorLabel, releaseReason } from './event-labels';
 import {
   foldReactions,
   type PlacedReaction,
@@ -232,6 +232,13 @@ export type ConversationDetail = {
    */
   openedFromApp: string | null;
   /**
+   * Why the ticket left the myBlu app — `the account was deleted` — read off
+   * its `released_from_app` event, so the header can say that nobody reads a
+   * reply here any more; null while the app still shows it, and on every
+   * ticket the app did not open.
+   */
+  releasedFromApp: string | null;
+  /**
    * What this ticket is about, and why it happened.
    *
    * Loaded here rather than by the sidebar because the resolve control needs the
@@ -358,7 +365,11 @@ export async function getConversation(
     .where(
       and(
         eq(conversationEvents.conversationId, row.conversation.id),
-        inArray(conversationEvents.type, ['unverified_submitter', 'opened_from_app']),
+        inArray(conversationEvents.type, [
+          'unverified_submitter',
+          'opened_from_app',
+          'released_from_app',
+        ]),
       ),
     )
     .orderBy(asc(conversationEvents.createdAt))
@@ -366,6 +377,8 @@ export async function getConversation(
   const unverifiedSubmitter = provenance.some((event) => event.type === 'unverified_submitter');
   const opened = provenance.find((event) => event.type === 'opened_from_app');
   const openedFromApp = opened ? (appBuild(opened.data) ?? '') : null;
+  const released = provenance.find((event) => event.type === 'released_from_app');
+  const releasedFromApp = released ? (releaseReason(released.data) ?? 'it left the app') : null;
 
   // A Meta direct message's platform, or null: worked out once, because it
   // decides both whether the switch of default app is read (in the reads below)
@@ -526,6 +539,7 @@ export async function getConversation(
       : null,
     unverifiedSubmitter,
     openedFromApp,
+    releasedFromApp,
     metaThread,
     subcategories,
     rootCauseId: row.conversation.rootCauseId,

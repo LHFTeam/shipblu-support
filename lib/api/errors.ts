@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { Admission } from '@/lib/http/rate-limit';
-import { logger } from '@/lib/log';
+import { logger, scrubbed } from '@/lib/log';
 import { apiError } from './respond';
 
 /**
@@ -95,29 +95,5 @@ export async function answering(
   }
 }
 
-/**
- * The failure's kind, its SQLSTATE when it has one, the first line of the
- * underlying message and the stack frames: what a reader needs to find the
- * fault, and none of the query, its parameters or Postgres's `detail`. Every
- * `/api/v1` line that logs a caught failure logs it through this, the work
- * after a route has answered included: a tracking number in a failed query's
- * parameters is the one credential guarding a parcel's recipient (AGENTS.md,
- * _The delivery platform_).
- */
-export function scrubbed(error: unknown): Error {
-  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-  const name = cause instanceof Error ? cause.name : typeof cause;
-  const code =
-    typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
-      ? ` ${cause.code}`
-      : '';
-  const message = cause instanceof Error ? (cause.message.split('\n')[0] ?? '') : '';
-
-  const out = new Error(`${name}${code}: ${message}`);
-  const frames =
-    error instanceof Error
-      ? (error.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line))
-      : [];
-  out.stack = [`Error: ${out.message}`, ...frames].join('\n');
-  return out;
-}
+/** `lib/log.ts`'s, where every path that logs a customer's words reaches it. */
+export { scrubbed };

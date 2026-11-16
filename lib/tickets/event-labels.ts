@@ -108,6 +108,17 @@ export function appBuild(data: Record<string, unknown>): string | null {
   return [platform, version].filter(Boolean).join(' ') || null;
 }
 
+/**
+ * Why a `released_from_app` event took a ticket out of the myBlu app, as an
+ * agent reads it, or null for a reason it does not record. The header and the
+ * timeline say it through this one function.
+ */
+export function releaseReason(data: Record<string, unknown>): string | null {
+  if (data.reason === 'account_deleted') return 'the account was deleted';
+  if (data.reason === 'number_released') return 'the number changed hands';
+  return null;
+}
+
 export function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
     // The whole point of the event. Without a case here it fell through to the
@@ -128,6 +139,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     case 'opened_from_app': {
       const build = appBuild(data);
       return `opened this ticket in the myBlu app, phone vouched for by the app${build ? ` (${build})` : ''}`;
+    }
+    // The revoke that took it out of the app (`lib/api/release.ts`): nobody
+    // reads a reply here from now on, which is the line an agent needs.
+    case 'released_from_app': {
+      const why = releaseReason(data);
+      return `took this ticket out of the myBlu app${why ? `: ${why}` : ''}; nobody there reads a reply`;
     }
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;

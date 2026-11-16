@@ -14,13 +14,10 @@ import {
 import { isUniqueViolation } from '@/lib/db/errors';
 import { preview } from '@/lib/html/sanitize';
 import type { Admission } from '@/lib/http/rate-limit';
-import { logger } from '@/lib/log';
 import { shownLabelSql } from '@/lib/portal/tickets';
 import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
-import { linkClaimedTrackingNumber } from '@/lib/shipments/links';
 import { subjectWords, UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { latest } from '@/lib/tickets/latest';
-import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { isMediaStandIn } from '@/lib/tickets/message-media';
 import { notReaction } from '@/lib/tickets/not-reaction';
 import { reopenResolved } from '@/lib/tickets/reopen';
@@ -30,12 +27,12 @@ import { isUuid } from '@/lib/http/uuid';
 import { afterPage } from './after-page';
 import { apiChannel } from './channel';
 import { encodeCursor, THREAD_START, type Cursor } from './cursor';
-import { scrubbed } from './errors';
+import { finishInRequest, oweFinish } from './finish';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
 import type { Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
-import { holdAccount, type Caller } from './sessions';
+import { holdAccount, requesterNow, type Caller } from './sessions';
 
 /**
  * The myBlu app's tickets (`plans/myblu-ticket-api.md`, _What the app can
@@ -58,8 +55,6 @@ import { holdAccount, type Caller } from './sessions';
  * fresh here, as `publicTracking()` builds its answer, so a column added to
  * either table cannot ride along.
  */
-
-const log = logger('api_tickets');
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -274,11 +269,21 @@ function unreadTotalSql(caller: Caller): SQL<number> {
   return sql<number>`(${unread})`;
 }
 
+/**
+ * The tracking number the app claimed when it opened the ticket. A correlated
+ * scalar subquery rather than a join, so `ownedTicket`'s `EXISTS` is the one
+ * probe of `api_tickets` a read makes: joined, every five-second poll and every
+ * send's answer read the table twice for one row.
+ */
+const trackingNumberSql = sql<
+  string | null
+>`(select ${apiTickets.trackingNumber} from ${apiTickets} where ${apiTickets.conversationId} = ${conversations.id})`;
+
 const ticketColumns = {
   id: conversations.id,
   number: conversations.number,
   subject: conversations.subject,
-  trackingNumber: apiTickets.trackingNumber,
+  trackingNumber: trackingNumberSql,
   status: ticketStatuses.category,
   statusLabel: shownLabelSql,
   createdAt: conversations.createdAt,
@@ -341,7 +346,6 @@ async function ownedTicketRow(caller: Caller, ticketId: string, { withTotal = fa
       unreadTotal: withTotal ? unreadTotalSql(caller) : sql<number>`0`,
     })
     .from(conversations)
-    .innerJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .where(and(eq(conversations.id, ticketId), ownedTicket(caller)))
     .limit(1);
@@ -375,11 +379,16 @@ function threadSelect(caller: Caller, ticketId: string, fresh: boolean, ...more:
 
 /**
  * How far before its cursor `after` reads again. `created_at` is not commit
- * order — a message is stamped when its request took its `now`, and committed
- * when its transaction ends, after the rules and the routing the insert waits
- * on — so a row stamped before the cursor can commit after the page that minted
- * it was read. Re-reading a few seconds back finds it, and the client merges by
- * `id`, so a row it holds already costs nothing but bytes.
+ * order — a message is stamped when its writer took its `now`, and committed
+ * when its transaction ends — so a row stamped before the cursor can commit
+ * after the page that minted it was read. Re-reading a few seconds back finds
+ * it, and the client merges by `id`, so a row it holds already costs nothing
+ * but bytes. The app's own writes take their `now` once they hold every lock
+ * they wait on (`createApiTicket`, `sendApiMessage`), so what lies between
+ * their stamp and their commit is their own statements, never a wait on a
+ * merge or another request: stamped before the locks, a reply that waited out
+ * a contact merge committed older than the overlap, behind a cursor another
+ * device had already polled past, and no poll returned it.
  */
 const AFTER_OVERLAP_SECONDS = 5;
 
@@ -462,14 +471,15 @@ export function afterStatement(
  *   long conversation's new replies.
  * - **Before** a cursor pages back. One row more than the page is read, so
  *   `olderCursor` is null exactly when nothing is left before the page.
- * - **After** a cursor polls forward, re-reading `AFTER_OVERLAP_SECONDS` before
- *   it, in one statement of two halves: the rows after the cursor, up to the
- *   page, and the newest of those in the overlap. The overlap fills only what
+ * - **After** a cursor polls forward, re-reading `AFTER_OVERLAP_SECONDS`
+ *   before it, in one statement of two halves: the rows after the cursor, up to
+ *   the page, and the newest of those in the overlap. The overlap fills only what
  *   the page leaves, and never the page's last place, so a full page always
  *   means rows after the cursor are still unread and the cursor moved: filled
  *   by the overlap, a page whose cursor did not move would tell the client to
  *   ask again at once, for the same rows, for good. `newerCursor` is the newest
- *   row after the cursor, or the cursor itself, as it came, when nothing is.
+ *   row after the cursor, or the cursor itself, as it came, when nothing is;
+ *   `olderCursor` is null, since a poll never pages back.
  */
 export async function readMessages(
   caller: Caller,
@@ -490,7 +500,11 @@ export async function readMessages(
     const { page, newest } = afterPage(rows, asked.limit);
     return answer({
       messages: page.map((row) => messageView(caller, row)),
-      olderCursor: page[0] ? cursorOf(page[0]) : asked.text,
+      // A poll never pages back. Its first row is as often one the overlap
+      // re-read as the oldest after the cursor, so a cursor taken from it was
+      // not null at the start of the thread, and a client offered "load older"
+      // there paged back to nothing (the contract's `olderCursor`).
+      olderCursor: null,
       newerCursor: newest ? cursorOf(newest) : asked.text,
     });
   }
@@ -597,7 +611,14 @@ async function replay(
 ): Promise<SendOutcome> {
   if (keyed.operation !== operation) return { kind: 'key_reused' };
   if (ticketId !== undefined && keyed.conversationId !== ticketId) return { kind: 'key_reused' };
-  return answerSent(caller, keyed.conversationId, keyed.messageId, true);
+  // Under the contact the identity names now, never the gate's: a key is spent
+  // twice exactly when two requests race, which is when a merge can have moved
+  // the contact the first one filed its message under, and the gate's then
+  // answered `404` for a ticket holding the user's message, which the SDK
+  // read as gone and dropped.
+  const holder = await requesterNow(caller);
+  if (!holder) return { kind: 'revoked' };
+  return answerSent(holder, keyed.conversationId, keyed.messageId, true);
 }
 
 async function answerSent(
@@ -677,14 +698,17 @@ async function openTickets(tx: Executor, caller: Caller): Promise<number> {
  *
  * Shaped like an ingest path, and not a parameter on `createTicket`, the forms'
  * function: the pool's reads first — the key, the channel row, `planRouting` —
- * then one `now`, then one transaction that writes the ticket with the routing
- * window spread into its insert, the message, the ownership row, the
+ * then one transaction that takes one `now` once it holds the account and the
+ * requester, writes the ticket with the routing window spread into its insert,
+ * the message, the ownership row, the work owed after it (`oweFinish`), the
  * `opened_from_app` event and `startRouting`, and reads nothing on the pool
- * (AGENTS.md, _postgres.js must never pipeline…_). After the commit, the
- * claimed tracking number is linked, then `afterMessageStored` and
- * `afterInboundMessage` run the on-create rules, the first SLA selection,
+ * (AGENTS.md, _postgres.js must never pipeline…_). After the commit the
+ * request takes that work and runs it (`finishInRequest`): the claimed
+ * tracking number's link, then the on-create rules, the first SLA selection,
  * `beginRouting`, assignment and the out-of-hours reply in the order every
- * other path runs them.
+ * other path runs them. A request that ends before it leaves the work to the
+ * worker, a minute on, rather than to a retry that is answered as a replay
+ * (`lib/api/finish.ts`).
  *
  * The new-ticket bucket is charged only for a ticket opened. Asked on the pool
  * once the key is known to be unspent (`newTicketFits`, which spends nothing),
@@ -704,8 +728,8 @@ async function openTickets(tx: Executor, caller: Caller): Promise<number> {
  * under the same key has committed, and this one is its replay, never a refusal
  * for the ticket that first one opened — and then the open tickets are counted,
  * so ten is ten. The unique index on the key is the backstop, and a `23505`
- * rolls this transaction back, its `settle_routing` key with it, and answers
- * what the first request stored.
+ * rolls this transaction back, its `settle_routing` and `finish_api_message`
+ * keys with it, and answers what the first request stored.
  *
  * Everything the transaction writes is filed under the contact `holdAccount`
  * read through the identity and holds, never the one the gate read: a contact
@@ -733,21 +757,23 @@ export async function createApiTicket(
   // Before the transaction, which must read nothing on the pool (`lib/routing/start.ts`).
   const routing = await planRouting(channel);
 
-  const now = new Date();
+  // When the session must still be live: the request's own moment. The rows
+  // are stamped later, once the transaction holds what it waits on.
+  const asked = new Date();
   const conversationId = randomUUID();
   const messageId = randomUUID();
 
   let written:
-    | { kind: 'created'; as: Caller }
+    | { kind: 'created'; as: Caller; now: Date }
     | { kind: 'revoked' | 'too_many_open' }
     | { kind: 'rate_limited'; admission: Admission }
-    | { kind: 'spent'; keyed: Keyed; as: Caller };
+    | { kind: 'spent'; keyed: Keyed };
   try {
     written = await db.transaction(async (tx) => {
-      const holder = await holdAccount(tx, caller, now);
+      const holder = await holdAccount(tx, caller, asked);
       if (!holder) return { kind: 'revoked' as const };
       const first = await findKeyed(tx, holder, sent.key);
-      if (first) return { kind: 'spent' as const, keyed: first, as: holder };
+      if (first) return { kind: 'spent' as const, keyed: first };
       if ((await openTickets(tx, holder)) >= MAX_OPEN_TICKETS) {
         return { kind: 'too_many_open' as const };
       }
@@ -755,6 +781,10 @@ export async function createApiTicket(
       // token between the pool's question and this lock.
       const admission = admitNewTicket(holder.identityId);
       if (!admission.allowed) return { kind: 'rate_limited' as const, admission };
+      // Once the account and the requester are held, so the ticket's and the
+      // message's instants are not older than their commit by a lock's wait
+      // (`AFTER_OVERLAP_SECONDS`); the routing window counts from it too.
+      const now = new Date();
 
       const statusId = await requireDefaultOpenStatusId(tx);
       await tx.insert(conversations).values({
@@ -793,6 +823,8 @@ export async function createApiTicket(
         trackingNumber: sent.trackingNumber,
         createdAt: now,
       });
+      // The work after the commit, owed whatever becomes of this request.
+      await oweFinish(tx, { messageId, conversationId, now });
 
       // In the creating transaction, so the on-create rules and the ticket's
       // header see it from the first moment.
@@ -809,7 +841,7 @@ export async function createApiTicket(
         { conversationId, messageId, groupId: channel.defaultGroupId },
         now,
       );
-      return { kind: 'created' as const, as: holder };
+      return { kind: 'created' as const, as: holder, now };
     });
   } catch (error) {
     const first = await keyedAfterConflict(error, caller, sent.key);
@@ -817,39 +849,19 @@ export async function createApiTicket(
     return replay(caller, first, 'createTicket');
   }
 
-  if (written.kind === 'spent') return replay(written.as, written.keyed, 'createTicket');
+  if (written.kind === 'spent') return replay(caller, written.keyed, 'createTicket');
   if (written.kind === 'rate_limited') return written;
   if (written.kind !== 'created') return { kind: written.kind };
-  const holder = written.as;
+  const { as: holder, now } = written;
 
-  // Before the rules, so a rule reading the ticket's parcels sees the link
-  // rather than racing it. Best-effort, as the detector is: a ticket is never
-  // refused, or left half-processed, over the shape of a number.
-  if (sent.trackingNumber) {
-    try {
-      await linkClaimedTrackingNumber({
-        conversationId,
-        messageId,
-        trackingNumber: sent.trackingNumber,
-      });
-    } catch (error) {
-      // Scrubbed: the number is a parameter of every query the link runs.
-      log.error(
-        `could not link a claimed tracking number conversation_id=${conversationId}`,
-        scrubbed(error),
-      );
-    }
-  }
-
-  await afterMessageStored({
+  await finishInRequest({
     conversationId,
     messageId,
     bodyText: sent.text,
-    kind: 'reply',
-    direction: 'inbound',
+    created: true,
+    at: now,
+    trackingNumber: sent.trackingNumber,
   });
-  await afterInboundMessage(conversationId, true, now, { id: messageId });
-
   return answerSent(holder, conversationId, messageId, false);
 }
 
@@ -900,8 +912,9 @@ export function customerWrote(now: Date) {
  *
  * A reply to a `resolved` ticket reopens it through `reopenResolved`, as every
  * customer's reopen does; one to a `closed` ticket is refused, and the app
- * offers a new ticket. Two retries racing under one key wait on the ticket's
- * lock in turn, and the second meets the first's message at the unique index.
+ * offers a new ticket. Two retries racing under one key wait on the account's
+ * lock in turn, and the second finds the first's message behind it and is its
+ * replay; the unique index on the key is the backstop.
  */
 export async function sendApiMessage(
   caller: Caller,
@@ -911,14 +924,25 @@ export async function sendApiMessage(
   const keyed = await findKeyed(db, caller, sent.key);
   if (keyed) return replay(caller, keyed, 'sendMessage', ticketId);
 
-  const now = new Date();
+  // As in a create: the session judged at the request's moment, the rows
+  // stamped once the transaction holds the account, the requester and the
+  // ticket.
+  const asked = new Date();
   const messageId = randomUUID();
 
-  let stored: { kind: 'stored'; as: Caller } | { kind: 'not_found' | 'ticket_closed' | 'revoked' };
+  let stored:
+    | { kind: 'stored'; as: Caller; now: Date }
+    | { kind: 'spent'; keyed: Keyed }
+    | { kind: 'not_found' | 'ticket_closed' | 'revoked' };
   try {
     stored = await db.transaction(async (tx) => {
-      const holder = await holdAccount(tx, caller, now);
+      const holder = await holdAccount(tx, caller, asked);
       if (!holder) return { kind: 'revoked' as const };
+      // Read again behind the account's lock, as a create reads it: two
+      // retries of one send wait on it in turn, and the second is the first's
+      // replay here rather than a write that meets the unique index.
+      const first = await findKeyed(tx, holder, sent.key);
+      if (first) return { kind: 'spent' as const, keyed: first };
 
       const [ticket] = await tx
         .select({
@@ -931,6 +955,13 @@ export async function sendApiMessage(
         .where(and(eq(conversations.id, ticketId), ownedTicket(holder)))
         .for('no key update', { of: conversations });
       if (!ticket) return { kind: 'not_found' as const };
+      // After the last lock this waits on — the account's, a merge's on the
+      // contact, the ticket's — so the message's `created_at` precedes its
+      // commit by this transaction's own statements, never by a wait: stamped
+      // before them, a reply that waited out a merge committed older than
+      // `AFTER_OVERLAP_SECONDS`, behind a cursor another device's poll had
+      // already moved past, and no poll returned it.
+      const now = new Date();
 
       const category = await lockedStatusCategory(tx, ticket);
       if (category === 'closed') return { kind: 'ticket_closed' as const };
@@ -957,7 +988,8 @@ export async function sendApiMessage(
       });
 
       await tx.update(conversations).set(customerWrote(now)).where(eq(conversations.id, ticketId));
-      return { kind: 'stored' as const, as: holder };
+      await oweFinish(tx, { messageId, conversationId: ticketId, now });
+      return { kind: 'stored' as const, as: holder, now };
     });
   } catch (error) {
     const first = await keyedAfterConflict(error, caller, sent.key);
@@ -965,16 +997,17 @@ export async function sendApiMessage(
     return replay(caller, first, 'sendMessage', ticketId);
   }
 
+  if (stored.kind === 'spent') return replay(caller, stored.keyed, 'sendMessage', ticketId);
   if (stored.kind !== 'stored') return { kind: stored.kind };
 
-  await afterMessageStored({
+  await finishInRequest({
     conversationId: ticketId,
     messageId,
     bodyText: sent.text,
-    kind: 'reply',
-    direction: 'inbound',
+    created: false,
+    at: stored.now,
+    trackingNumber: null,
   });
-  await afterInboundMessage(ticketId, false, now, { id: messageId });
 
   return answerSent(stored.as, ticketId, messageId, false);
 }

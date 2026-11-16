@@ -404,7 +404,9 @@ still reads them.
   the number on an account changes; `number_released` when a number is given to
   somebody new and keeps the old account; `signed_out` for a "sign out
   everywhere". `account_deleted` and `number_released` also take the user's
-  tickets out of the app for good; they stay with the support team. A sign-out
+  tickets out of the app for good; they stay with the support team, marked as
+  no longer in the app, and an open one is resolved, since nobody would read
+  the answer. A sign-out
   on one device is the SDK's `reset()`, which ends that device's session only.
 - **Push only to devices signed in as that user.** The webhook names
   `user.externalId`. Today the app registers its FCM token at
@@ -627,7 +629,9 @@ a screen is open and is woken by a push while it is not.
   `?before=<olderCursor>` returns the page before it; `olderCursor` is null at the
   start of the thread. `?after=<newerCursor>` returns what is newer; `newerCursor`
   is never null and comes back unchanged when nothing is new, so a poll always has
-  a cursor to send. Both together is `400 invalid_request`.
+  a cursor to send. A poll's `olderCursor` is always null: it never pages back,
+  so keep the `olderCursor` of the newest or `before` page read last. Both
+  together is `400 invalid_request`.
 - `messages` is ascending by `(createdAt, id)` whichever way was asked. `limit`
   is 30 by default and 100 at most. A full page means ask again at once.
 - `after` re-reads a few seconds before its cursor, because a row stamped

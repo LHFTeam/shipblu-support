@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
   apiTickets,
   attachments,
+  automationRules,
   channels,
   contactIdentities,
   contactShippingAccounts,
@@ -24,6 +25,8 @@ import { lookupSession } from '@/lib/api/sessions';
 import { afterStatement, backStatement, customerWrote } from '@/lib/api/tickets';
 import { forgetCategoryAiSettings } from '@/lib/category-ai/settings';
 import { mergeContacts } from '@/lib/contacts/merge';
+import { claimJobs } from '@/lib/queue';
+import { finishApiMessage } from '@/worker/handlers/finish-api-message';
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
@@ -63,6 +66,24 @@ vi.mock('@/lib/shipments/links', async (importOriginal) => {
       linkFailure.next = null;
       if (failure) throw failure;
       return actual.linkClaimedTrackingNumber(...args);
+    },
+  };
+});
+
+/**
+ * The queue, passed through but for one take a test makes fail: the request
+ * that stored a message never taking the work it owes (`lib/api/finish.ts`).
+ */
+const takeFailure = vi.hoisted(() => ({ next: null as Error | null }));
+vi.mock('@/lib/queue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/queue')>();
+  return {
+    ...actual,
+    takeQueuedJob: async (...args: Parameters<typeof actual.takeQueuedJob>) => {
+      const failure = takeFailure.next;
+      takeFailure.next = null;
+      if (failure) throw failure;
+      return actual.takeQueuedJob(...args);
     },
   };
 });
@@ -1037,6 +1058,9 @@ describe('reading a thread', () => {
     );
     expect(moved.messages.map((message) => message.text)).toContain('Any news?');
     expect(moved.newerCursor).not.toBe(first.newerCursor);
+    // A poll never pages back, whatever it returned.
+    expect(idle.olderCursor).toBeNull();
+    expect(moved.olderCursor).toBeNull();
     // The text Postgres printed, microseconds kept.
     expect(decodeCursor(moved.newerCursor)?.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
   });
@@ -1068,6 +1092,9 @@ describe('reading a thread', () => {
     expect(polled.messages.map((m) => m.id)).toContain(late!.id);
     // Nothing after the cursor itself: it stays where it was.
     expect(polled.newerCursor).toBe(first.newerCursor);
+    // Its first row is the overlap's, at the thread's start: a cursor taken
+    // from it offered "load older" and paged back to nothing.
+    expect(polled.olderCursor).toBeNull();
   });
 
   // Filled by rows at or before the cursor, a full page whose cursor did not
@@ -1380,6 +1407,152 @@ describe('a contact merge between the gate and the write', () => {
       authors: [survivor, survivor],
     });
   });
+
+  // A key is spent twice exactly when two requests race, which is when a
+  // merge can have moved the contact: replayed under the gate's contact, the
+  // second answered 404 for the user's own message, and the SDK dropped it.
+  it('answers a retry that raced its first across a merge with what the first stored', async () => {
+    await appRow();
+    const token = await minted();
+    const before = await caller(token);
+    const { ticket: opening } = await opened(token);
+    const survivor = await survivorContact();
+    const key = randomUUID();
+
+    // The retry's gate and key are read under the old contact; it then waits
+    // while the merge commits and the first request stores the message.
+    const hold = holdNextTransaction('before');
+    const retrying = send(token, opening.id, 'Any news?', key);
+    await hold.atHold;
+    const merged = await mergeContacts({
+      survivorId: survivor,
+      loserId: before.contactId,
+      agentId: null,
+    });
+    expect(merged.ok).toBe(true);
+    const first = await sent(await send(token, opening.id, 'Any news?', key));
+    hold.release();
+
+    const retry = await retrying;
+    const replayed = await sent(retry, 200);
+    expect(retry.headers.get('idempotent-replayed')).toBe('true');
+    expect(replayed.message.id).toBe(first.message.id);
+    expect(await filedUnder(opening.id)).toEqual({
+      requester: survivor,
+      authors: [survivor, survivor],
+    });
+  });
+
+  // Stamped before its locks, a reply that waited out a merge committed older
+  // than `after`'s overlap, behind a cursor another device had polled past.
+  it('stamps a reply once it holds its locks, not when it was asked', async () => {
+    await appRow();
+    const token = await minted();
+    const before = await caller(token);
+    const { ticket: opening } = await opened(token);
+    const survivor = await survivorContact();
+
+    const hold = holdNextTransaction('after');
+    const merging = mergeContacts({
+      survivorId: survivor,
+      loserId: before.contactId,
+      agentId: null,
+    });
+    await hold.atHold;
+    const sending = send(token, opening.id, 'Still waiting');
+    const waited = await untilWaitingOnALock(db, { rowLockIn: '^\\s*select\\M' });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    const released = Date.now();
+    hold.release();
+    expect(waited).toBe(true);
+    expect((await merging).ok).toBe(true);
+
+    const { message } = await sent(await sending);
+    expect(Date.parse(message.createdAt)).toBeGreaterThanOrEqual(released);
+  });
+});
+
+// --- The work after a stored message ----------------------------------------
+
+/**
+ * Owed in the write's own transaction and taken by the request, so a request
+ * that ends after its commit — and a retry then answered as a replay — leaves
+ * the ticket its rules, its policy and its reply all the same
+ * (`lib/api/finish.ts`).
+ */
+describe('the work after a stored message', () => {
+  async function urgentOnCreate(): Promise<void> {
+    await db.insert(automationRules).values({
+      name: 'Every new ticket is urgent',
+      trigger: 'on_create',
+      conditions: {},
+      actions: [{ type: 'set_priority', value: 'urgent' }],
+    });
+  }
+
+  async function priorityOf(conversationId: string) {
+    const [row] = await db
+      .select({ priority: conversations.priority })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.priority;
+  }
+
+  async function owed(messageId: string) {
+    const [row] = await db
+      .select({ status: jobs.status, attempts: jobs.attempts })
+      .from(jobs)
+      .where(eq(jobs.dedupeKey, `finish_api_message:${messageId}`));
+    return row ?? null;
+  }
+
+  it('is owed by every write and taken by its request, which runs it', async () => {
+    await appRow();
+    await urgentOnCreate();
+    const token = await minted();
+    const { ticket: opening, message } = await opened(token);
+
+    expect(await priorityOf(opening.id)).toBe('urgent');
+    expect(await owed(message.id)).toEqual({ status: 'completed', attempts: 0 });
+    const reply = await sent(await send(token, opening.id, 'Any news?'));
+    expect(await owed(reply.message.id)).toEqual({ status: 'completed', attempts: 0 });
+  });
+
+  it('is run by the worker when the request never took it, never by a replay, and once', async () => {
+    await appRow();
+    await urgentOnCreate();
+    const token = await minted();
+    const key = randomUUID();
+
+    takeFailure.next = new Error('Connection terminated unexpectedly');
+    const { ticket: opening, message } = await opened(token, undefined, key);
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('left to finish_api_message'),
+    ]);
+    errors.mockClear();
+    expect(await priorityOf(opening.id)).toBe('medium');
+
+    const replayed = await sent(await create(token, undefined, key), 200);
+    expect(replayed.message.id).toBe(message.id);
+    expect(await priorityOf(opening.id)).toBe('medium');
+    expect(await owed(message.id)).toEqual({ status: 'pending', attempts: 0 });
+
+    // Due a minute on; brought forward, as the minute passing would.
+    await db
+      .update(jobs)
+      .set({ runAt: new Date() })
+      .where(eq(jobs.dedupeKey, `finish_api_message:${message.id}`));
+    const job = (await claimJobs(10, 'worker-test')).find(
+      (claimed) => claimed.type === 'finish_api_message',
+    );
+    expect(job).toBeDefined();
+
+    // A second attempt follows one that may have begun the work: never run.
+    await finishApiMessage({ ...job!, attempts: 2 });
+    expect(await priorityOf(opening.id)).toBe('medium');
+    await finishApiMessage(job!);
+    expect(await priorityOf(opening.id)).toBe('urgent');
+  });
 });
 
 // --- The console ------------------------------------------------------------
@@ -1415,6 +1588,7 @@ describe('the ticket in the console', () => {
       .returning({ number: conversations.number });
 
     expect((await getConversation(admin, opening.number))?.openedFromApp).toBe('iOS 5.4.1');
+    expect((await getConversation(admin, opening.number))?.releasedFromApp).toBeNull();
     expect((await getConversation(admin, mail!.number))?.openedFromApp).toBeNull();
   });
 });
@@ -1449,6 +1623,102 @@ describe('a revoke', () => {
         .from(contactIdentities)
         .where(eq(contactIdentities.id, me.identityId)),
     ).toHaveLength(1);
+  });
+
+  // Nobody reads a reply on these any more (`api` has no other carrier), so
+  // each says so to the agents who still have it, and an open one leaves the
+  // queues, its clocks stopped, by the owner's decision on #532.
+  it('marks each released ticket, resolves an open one by the system, and surveys nobody', async () => {
+    await appRow();
+    const token = await minted();
+    const { ticket: open } = await opened(token);
+    const { ticket: done } = await opened(token);
+    const resolvedAt = new Date('2026-11-01T10:00:00Z');
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Resolved'), resolvedAt })
+      .where(eq(conversations.id, done.id));
+
+    await revoke(user, 'number_released');
+
+    const events = await db
+      .select({
+        conversationId: conversationEvents.conversationId,
+        type: conversationEvents.type,
+        actorLabel: conversationEvents.actorLabel,
+        actorAgentId: conversationEvents.actorAgentId,
+        data: conversationEvents.data,
+      })
+      .from(conversationEvents)
+      .where(inArray(conversationEvents.type, ['released_from_app', 'status_changed']))
+      .orderBy(asc(conversationEvents.type));
+    expect(events.filter((event) => event.conversationId === open.id)).toEqual([
+      {
+        conversationId: open.id,
+        type: 'released_from_app',
+        actorLabel: 'myblu',
+        actorAgentId: null,
+        data: { reason: 'number_released' },
+      },
+      {
+        conversationId: open.id,
+        type: 'status_changed',
+        actorLabel: 'myblu',
+        actorAgentId: null,
+        data: { to: 'Resolved', category: 'resolved', via: 'released_from_app' },
+      },
+    ]);
+    expect(events.filter((event) => event.conversationId === done.id)).toEqual([
+      {
+        conversationId: done.id,
+        type: 'released_from_app',
+        actorLabel: 'myblu',
+        actorAgentId: null,
+        data: { reason: 'number_released' },
+      },
+    ]);
+
+    const rows = await db
+      .select({
+        id: conversations.id,
+        category: ticketStatuses.category,
+        resolvedAt: conversations.resolvedAt,
+        resolvedBy: conversations.resolvedByAgentId,
+      })
+      .from(conversations)
+      .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId));
+    expect(rows.find((row) => row.id === open.id)).toMatchObject({
+      category: 'resolved',
+      resolvedAt: expect.any(Date),
+      resolvedBy: null,
+    });
+    // Already resolved: marked, and its resolve left as it was.
+    expect(rows.find((row) => row.id === done.id)).toMatchObject({
+      category: 'resolved',
+      resolvedAt,
+    });
+    expect(await db.select().from(jobs).where(eq(jobs.type, 'send_csat'))).toEqual([]);
+    expect(await db.select().from(apiTickets)).toEqual([]);
+
+    const [row] = await db
+      .insert(agents)
+      .values({ name: 'Omar', email: `omar.release${seq}@shipblu.test`, role: 'admin' })
+      .returning();
+    const admin = {
+      id: row!.id,
+      email: row!.email,
+      name: row!.name,
+      role: row!.role,
+      permissions: {},
+      avatarUrl: null,
+      avatarColor: row!.avatarColor,
+      isAcceptingTickets: true,
+      acceptingOffReason: null,
+      sessionIdleForMs: 0,
+    };
+    expect((await getConversation(admin, open.number))?.releasedFromApp).toBe(
+      'the number changed hands',
+    );
   });
 
   it('with signed_out ends the sessions and leaves the tickets in the app', async () => {

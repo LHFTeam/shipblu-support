@@ -164,6 +164,11 @@ export const JOB_PAYLOADS = {
   // window, keyed on the ticket; re-run by hand after it dies, so strict, and a
   // uuid because the id goes straight into a locked read.
   settle_routing: z.strictObject({ conversationId: z.uuid() }),
+  // Written in the transaction that stores a message from the myBlu app, as
+  // the backstop for the work after its commit (`lib/api/finish.ts`); run by
+  // hand only for a message that never had it, so strict. The ticket rides
+  // along for the purge, which cancels a ticket's jobs by it.
+  finish_api_message: z.strictObject({ messageId: z.uuid(), conversationId: z.uuid() }),
   // `trigger` says who asked — an agent, a rule, or the sidebar's "Send now" —
   // because the admin may switch off surveys for rule-resolved tickets, and the
   // job cannot tell a rule's resolve from an agent's off the row.
