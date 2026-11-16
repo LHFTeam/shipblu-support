@@ -123,6 +123,18 @@ export const Phone = z
   );
 
 /**
+ * Free text the server stores, refused when it holds U+0000. A Postgres `text`
+ * column refuses that character outright (SQLSTATE 22021), so a field that
+ * allows it is a `500` for a value the plan says is a `400` naming the field
+ * — and a backend that retries a `500` can never succeed. Refused rather than
+ * stripped, as every text here is refused rather than cut short. Published as
+ * a `pattern`, so a generated client refuses it before sending. A field whose
+ * own pattern names its alphabet (`ExternalUserId`, `Phone`) needs none.
+ */
+const storable = (schema: z.ZodString) =>
+  schema.regex(/^[^\u0000]*$/, 'must not contain U+0000, which the server cannot store');
+
+/**
  * A tracking number as the app holds it. A claim the user makes, given back to
  * that user and to nobody else; the server links it to a parcel only when it
  * is shaped like one of ours (`detectShipmentRefs`), and returns it as sent
@@ -695,26 +707,27 @@ export const Platform = z.enum(['ios', 'android']).describe('The platform the ap
 /**
  * Minted by myBlu's backend when its app asks for support, never by the app:
  * a value compiled into an app binary is extractable, and whoever extracts it
- * is every recipient. The name is used only for a contact this creates.
+ * is every recipient. The name is the contact's, brought up to date at every
+ * mint (`keepNameCurrent` in `./sessions.ts`).
  */
 export const CreateSessionRequest = z
   .object({
     externalUserId: ExternalUserId,
     phone: Phone,
-    name: z
-      .string()
-      .max(200)
+    name: storable(z.string().max(200))
       .optional()
       // Counted as every limit on text here is, in UTF-16 code units. Nothing
       // publishes it for a client to read, since only the backend sends it, so
       // the description is where the backend learns which count decides.
       .describe(
-        "The user's name, used only when this creates the contact; a name the contact already has is never overwritten. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`.",
+        "The user's name as the app holds it. A new contact takes it, and an existing one is brought up to date with it on every mint where the two differ, so send the current name each time: it is what the support team sees and what an automated reply greets the user by. Absent or blank, the contact's name is left as it is. At most 200 UTF-16 code units, as JavaScript's `length` counts: `maxLength` counts characters, as Python's `len` does, so a name with emoji in it can pass that and still be refused `400 invalid_request`. A name holding U+0000 is refused the same way.",
       ),
     client: z
       .object({
         platform: Platform,
-        appVersion: z.string().min(1).max(32).describe('The app version asking, e.g. `5.4.1`.'),
+        appVersion: storable(z.string().min(1).max(32)).describe(
+          'The app version asking, e.g. `5.4.1`.',
+        ),
       })
       .describe('The app the session is for.'),
   })

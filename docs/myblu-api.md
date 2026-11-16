@@ -197,8 +197,8 @@ def mint_support_session(user, platform: str, app_version: str) -> dict:
         "client": {"platform": platform, "appVersion": app_version},  # "ios" or "android"
     }
     name = user.get_full_name()
-    # At most 200 UTF-16 code units, which len() does not count; a longer one is refused.
-    if name and len(name.encode("utf-16-le")) // 2 <= 200:
+    # At most 200 UTF-16 code units, which len() does not count, and no NUL; else refused.
+    if name and "\0" not in name and len(name.encode("utf-16-le")) // 2 <= 200:
         body["name"] = name
     response = requests.post(
         f"{SUPPORT_API}/sessions",
@@ -269,8 +269,8 @@ export async function mintSupportSession(user, { platform, appVersion }) {
   const session = await serverPlane('/sessions', {
     externalUserId: user.supportId, // stable, never reused, never the phone
     phone: toE164(user.phone),
-    // At most 200 UTF-16 code units, which `length` counts; a longer one is refused.
-    ...(user.name && user.name.length <= 200 && { name: user.name }),
+    // At most 200 UTF-16 code units, which `length` counts, and no NUL; else refused.
+    ...(user.name && !user.name.includes('\0') && user.name.length <= 200 && { name: user.name }),
     client: { platform, appVersion },
   });
   // Hand these to the app and keep nothing: never log, cache or store the token.
@@ -290,7 +290,9 @@ own clock from the moment its provider answered (rule 2), so hand it to the app
 as it came. `name` is at most 200 UTF-16 code units, which JavaScript's
 `length` counts and Python's `len` does not: a longer one is
 `400 invalid_request`, so a `502` to the app, which reads it as not signed in.
-Leave such a name out.
+Leave such a name out, and one holding U+0000 (NUL), which the database cannot
+store and which is refused the same way, as is a `client.appVersion` holding
+one.
 
 `POST /sessions/revoke` answers `204` whether or not the user is known. Its
 refusals are the backend's to act on, and none is relayed: there is no app
@@ -387,6 +389,11 @@ still reads them.
   sends it to the app as well — on the profile or beside the token at sign-in —
   because the SDK's `user()` is the app saying who is signed in, and the app has
   nothing else to say it with.
+- **Send the user's current name on every mint.** It is the contact's name
+  here: a new contact takes it, and an existing one is brought up to date with
+  it whenever the two differ, so a name the user changes in the app reaches the
+  support team, and the greeting an automated reply sends, at the next mint.
+  Leave `name` out when the account has none; that changes nothing here.
 - **Phones are strict E.164 with the plus.** The app holds and sends the national
   form, `01` and nine digits, the only one its sign-in accepts; convert it to
   `+20` and the last ten digits before minting. A national number is refused
@@ -413,21 +420,21 @@ still reads them.
 
 ## Headers
 
-| Header                | Direction | When                                  | What                                                                                                                                                            |
-| --------------------- | --------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Authorization`       | request   | every request but `GET /openapi.json` | `Bearer <MYBLU_API_TOKEN>` on the server plane, `Bearer <session token>` on the client plane. No credential is ever accepted in a URL.                          |
-| `ShipBlu-Client`      | request   | every client-plane request            | `sdk-ts/0.3.0 app/5.4.1 ios/18.1`: `name/version` tokens, the SDK first, then the app, then the platform. Missing is `400 invalid_request`; it decides a `426`. |
-| `Idempotency-Key`     | request   | `POST /tickets`, `POST …/messages`    | A UUID made before a send's first attempt and reused on every retry of it. Missing or not a UUID is `400 idempotency_key_required`.                             |
-| `Content-Type`        | request   | a request with a body                 | `application/json`, or `multipart/form-data` on the two sends from stage 7.                                                                                     |
-| `Content-Length`      | request   | a multipart body                      | Required: `411 length_required` without it.                                                                                                                     |
-| `ShipBlu-Request-Id`  | answer    | every answer                          | An opaque id for the request, repeated in an error's body. Quote it in a bug report.                                                                            |
-| `Cache-Control`       | answer    | every answer                          | `no-store`. Nothing between the server and the app may cache an answer.                                                                                         |
-| `Idempotent-Replayed` | answer    | a `200` to a send                     | `true`: an earlier attempt under the same key stored the message, and this is what it stored.                                                                   |
-| `Retry-After`         | answer    | a `429`                               | Whole seconds to wait.                                                                                                                                          |
-| `X-ShipBlu-Event`     | webhook   | every delivery                        | The body's `type`.                                                                                                                                              |
-| `X-ShipBlu-Event-Id`  | webhook   | every delivery                        | The body's `id`, the same on every attempt.                                                                                                                     |
-| `X-ShipBlu-Timestamp` | webhook   | every delivery                        | Unix seconds when this attempt was signed.                                                                                                                      |
-| `X-ShipBlu-Signature` | webhook   | every delivery                        | `v1=<hex>`, or `v1=<hex>,v1=<hex>` while a secret is rotated.                                                                                                   |
+| Header                | Direction | When                                  | What                                                                                                                                                                                                    |
+| --------------------- | --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Authorization`       | request   | every request but `GET /openapi.json` | `Bearer <MYBLU_API_TOKEN>` on the server plane, `Bearer <session token>` on the client plane. No credential is ever accepted in a URL.                                                                  |
+| `ShipBlu-Client`      | request   | every client-plane request            | `sdk-ts/0.3.0 app/5.4.1 ios/18.1`: `name/version` tokens, the SDK first, then the app, then the platform. Missing is `400 invalid_request`; it decides a `426`. `DELETE /session` judges it not at all. |
+| `Idempotency-Key`     | request   | `POST /tickets`, `POST …/messages`    | A UUID made before a send's first attempt and reused on every retry of it. Missing or not a UUID is `400 idempotency_key_required`.                                                                     |
+| `Content-Type`        | request   | a request with a body                 | `application/json`, or `multipart/form-data` on the two sends from stage 7.                                                                                                                             |
+| `Content-Length`      | request   | a multipart body                      | Required: `411 length_required` without it.                                                                                                                                                             |
+| `ShipBlu-Request-Id`  | answer    | every answer                          | An opaque id for the request, repeated in an error's body. Quote it in a bug report.                                                                                                                    |
+| `Cache-Control`       | answer    | every answer                          | `no-store`. Nothing between the server and the app may cache an answer.                                                                                                                                 |
+| `Idempotent-Replayed` | answer    | a `200` to a send                     | `true`: an earlier attempt under the same key stored the message, and this is what it stored.                                                                                                           |
+| `Retry-After`         | answer    | a `429`                               | Whole seconds to wait.                                                                                                                                                                                  |
+| `X-ShipBlu-Event`     | webhook   | every delivery                        | The body's `type`.                                                                                                                                                                                      |
+| `X-ShipBlu-Event-Id`  | webhook   | every delivery                        | The body's `id`, the same on every attempt.                                                                                                                                                             |
+| `X-ShipBlu-Timestamp` | webhook   | every delivery                        | Unix seconds when this attempt was signed.                                                                                                                                                              |
+| `X-ShipBlu-Signature` | webhook   | every delivery                        | `v1=<hex>`, or `v1=<hex>,v1=<hex>` while a secret is rotated.                                                                                                                                           |
 
 The API reads no `Accept-Language`. `locale` on a write, exactly `ar` or `en`, is
 the only language it is told, and the only translated text it returns is a
@@ -440,7 +447,7 @@ survey's.
 | none   | `GET /openapi.json`                |                                                                      | `200`, the contract                                                                 |
 | Server | `POST /sessions`                   | `{ externalUserId, phone, name?, client: { platform, appVersion } }` | `201 { token, expiresAt, expiresInSeconds }`                                        |
 | Server | `POST /sessions/revoke`            | `{ externalUserId, reason }`                                         | `204`, whether or not the user is known                                             |
-| Client | `DELETE /session`                  |                                                                      | `204`                                                                               |
+| Client | `DELETE /session`                  |                                                                      | `204`, a blocked user's too                                                         |
 | Client | `GET /config`                      |                                                                      | `200`, below                                                                        |
 | Client | `POST /tickets`                    | `{ text, locale, trackingNumber? }`; multipart from stage 7          | `201 { ticket, message }`; `200` to a replay                                        |
 | Client | `GET /tickets/{id}`                |                                                                      | `200 { ticket }`                                                                    |
@@ -691,21 +698,27 @@ deploy. A refusal is `429 rate_limited` with `Retry-After`, and a refused reques
 still counts, so a client that polls through a refusal stays refused until the
 window turns.
 
-| Bucket                    | Key              | Limit                                      |
-| ------------------------- | ---------------- | ------------------------------------------ |
-| Client plane, before auth | address          | 1,200 a minute                             |
-| Bad bearer                | address          | 120 a minute                               |
-| Server plane, all calls   | the plane        | 600 a minute                               |
-| Minting                   | `externalUserId` | 10 in ten minutes                          |
-| Reads                     | identity         | 240 a minute                               |
-| Sends                     | identity         | 20 a minute                                |
-| New tickets               | identity         | 10 an hour, and 10 open or pending at once |
-| Uploaded megabytes        | identity         | 100 an hour                                |
+| Bucket                | Key              | Limit                                      |
+| --------------------- | ---------------- | ------------------------------------------ |
+| The contract          | address          | 1,200 a minute                             |
+| Bad bearer            | address          | 120 a minute                               |
+| Server plane, mints   | the plane        | 600 a minute                               |
+| Server plane, revokes | the plane        | 600 a minute                               |
+| Minting               | `externalUserId` | 10 in ten minutes                          |
+| Reads                 | identity         | 240 a minute                               |
+| Sends                 | identity         | 20 a minute                                |
+| New tickets           | identity         | 10 an hour, and 10 open or pending at once |
+| Uploaded megabytes    | identity         | 100 an hour                                |
 
 The first bucket is live with `GET /openapi.json`; the rest arrive with the
 routes they guard. The minting bucket bounds an honest app's loop and nothing
-more, since the caller chooses its key; the server plane's own bucket is what
-caps minting.
+more, since the caller chooses its key; the server plane's mint budget is what
+caps minting, and revokes have a budget of their own, so a batch of revokes
+never delays a sign-in. The bad-bearer bucket counts bearers that were refused
+and only changes how the next refusal is answered, `429` rather than `401`: a
+live session token, or `MYBLU_API_TOKEN`, is never refused for it. No address
+bucket stands in front of a session token: the address is something a caller
+can write.
 
 ## The webhook
 
@@ -935,7 +948,7 @@ API has proved the path. What each piece becomes:
 | `openSupport({ trackingNumber })` from the order screen's late-delivery card (`src/app/order/[orderId]/index.tsx`): sets the user property `tracking_number`, which the next parcel's overwrites, and opens the one conversation | `support.tickets.list({ trackingNumber })`; open the ticket it finds, or a composer that calls `support.tickets.create({ text, trackingNumber })`. One ticket per problem, and the number belongs to the ticket rather than to the user. |
 | `openSupport()` from the account tab's Support row (`src/app/(tabs)/account.tsx`)                                                                                                                                                | The ticket list, `support.tickets.list()`, with a new-ticket button that `GET /config`'s `tickets.canCreate` shows or hides.                                                                                                             |
 | `showConversationWithReferenceID('myBlu', 'myBlu')`: one endless conversation per installation                                                                                                                                   | Many tickets per user, each with its own status, and history that survives a reinstall because it is kept on the server under the user, not the installation.                                                                            |
-| `setUser` with phone, email and name, and no external id or restore id (`syncFreshchatUser` in `src/services/freshchat.ts`)                                                                                                      | The app tells the SDK nothing about the person but `user()`, the `externalUserId` signed in now. The backend vouches for the phone when it mints; the name goes with the mint, used only for a new contact. No email is sent.            |
+| `setUser` with phone, email and name, and no external id or restore id (`syncFreshchatUser` in `src/services/freshchat.ts`)                                                                                                      | The app tells the SDK nothing about the person but `user()`, the `externalUserId` signed in now. The backend vouches for the phone when it mints; the name goes with every mint and keeps the contact's name current. No email is sent.  |
 | A sign-out resets nothing: the next account on the device is the same Freshchat user                                                                                                                                             | `support.reset()` in `logout()`; and the SDK wipes a stored token for any other user on its own (rule 1).                                                                                                                                |
 | `setPushRegistrationToken(fcmToken)`                                                                                                                                                                                             | Nothing. This side holds no device token. The backend's device tokens are registered with the app's bearer, keyed by the user's id, and dropped on sign-out (the backend's rules).                                                       |
 | `isFreshchatNotification` / `handlePushNotification`, ahead of the app's routing on `data.link` (`src/services/push.ts`)                                                                                                         | `support.push.handle(message.data)` wherever a push reaches the app, on arrival and on a tap (below): null for a push that is not this API's, otherwise the ticket. The title and body are the backend's.                                |

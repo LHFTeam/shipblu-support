@@ -94,7 +94,7 @@ import {
  */
 
 /** The date of the newest line in `docs/myblu-api-changelog.md`; the test holds the two together. */
-const CONTRACT_VERSION = '2026-11-12';
+const CONTRACT_VERSION = '2026-11-13';
 
 const TITLE = 'ShipBlu Support: the myBlu ticket API';
 
@@ -535,7 +535,12 @@ const STATUS_WORDS: Record<number, string> = {
   503: 'Not available here.',
 };
 
-/** Every client-plane operation can answer these, before it reads anything of its own. */
+/**
+ * Every client-plane operation can answer these, before it reads anything of its
+ * own — but `DELETE /session`, which ends a blocked user's session rather than
+ * refusing it and judges no `ShipBlu-Client`, so answers neither `blocked`,
+ * `client_upgrade_required` nor `invalid_request`.
+ */
 const CLIENT_PLANE: readonly ErrorCode[] = [
   'invalid_request',
   'unauthenticated',
@@ -658,6 +663,13 @@ type Operation = {
   summary: string;
   description: string;
   plane: Plane;
+  /**
+   * Whether this client-plane operation judges `ShipBlu-Client`. Every one
+   * does but `DELETE /session`, which ends a session whatever build presents
+   * it (`endingPlane`): there the header is published as optional, and no
+   * `400` or `426` is listed for it.
+   */
+  judgesClient?: boolean;
   parameters?: Json[];
   body?: Json;
   answers: Json;
@@ -683,10 +695,21 @@ function operation(op: Operation): Json {
     op.stage === '0b'
       ? 'Served from stage 0b.'
       : `Served from stage ${op.stage}. Until that stage ships, the path answers \`404\` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.`;
-  const parameters = [
-    ...(op.plane === 'client' ? [{ $ref: '#/components/parameters/ShipBluClient' }] : []),
-    ...(op.parameters ?? []),
-  ];
+  const clientHeader =
+    op.judgesClient === false
+      ? {
+          ...parameter(
+            'ShipBlu-Client',
+            'header',
+            ShipBluClientHeader,
+            false,
+            'sdk-ts/0.3.0 app/5.4.1 ios/18.1',
+          ),
+          description:
+            'Sent as on every client-plane call, and not judged here: a build too old to be served, or one whose header is missing or no longer parses, still ends its session.',
+        }
+      : { $ref: '#/components/parameters/ShipBluClient' };
+  const parameters = [...(op.plane === 'client' ? [clientHeader] : []), ...(op.parameters ?? [])];
   return {
     operationId: op.operationId,
     tags: [op.tag],
@@ -813,10 +836,16 @@ function paths(): Json {
         stage: '3',
         summary: 'End this session',
         description:
-          "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed.",
+          "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed. The one client-plane call a blocked user is not refused: their session is ended and answered `204` too, since a refusal would leave it live for the rest of its day, and usable again if the block were lifted. For the same reason it judges no `ShipBlu-Client`: a build too old to be served ends its session like any other.",
         plane: 'client',
+        judgesClient: false,
         answers: answer({ status: 204, description: 'Ended.' }),
-        refuses: CLIENT_PLANE,
+        // A blocked user's session is ended, not refused, and `ShipBlu-Client`
+        // is not judged, so neither `400` nor `426` is answered (`endingPlane`).
+        refuses: CLIENT_PLANE.filter(
+          (code) =>
+            code !== 'blocked' && code !== 'client_upgrade_required' && code !== 'invalid_request',
+        ),
       }),
     },
     '/config': {
