@@ -1120,23 +1120,27 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                             |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                             |
 
-`shipblu-support` answers on one custom domain, **`support.shipblu.com`**,
-beside its `onrender.com` host. It was added in the dashboard on 2026-11-11,
+`shipblu-support` answers on two custom domains, **`support.shipblu.com`**
+and, since 2026-11-16, the console's **`desk.shipblu.com`** (below), beside
+its `onrender.com` host. The first was added in the dashboard on 2026-11-11,
 when the CNAME moved here from Freshdesk (`plans/freshdesk-disconnection.md`).
 On 2026-11-13 the dashboard listed it alone, verified, with its certificate
 issued, and the Render subdomain enabled; request logs for the 30 days to
 2026-11-12 name no other host. `render.yaml` states both, `domains:` and
-`renderSubdomainPolicy: enabled`. The `onrender.com` host has to stay on: it
-is where the console is served once `KB_PUBLIC_HOST` names the domain, and
-every request to `/api/webhooks/*` in the logs since 2026-11-12 reached it.
+`renderSubdomainPolicy: enabled`. The `onrender.com` host has to stay on
+until the move below is finished: it is where the console is served once
+`KB_PUBLIC_HOST` names the domain, and every request to `/api/webhooks/*` in
+the logs since 2026-11-12 reached it.
 Staging has no custom domain.
 
 **It is being retired** (decided 2026-11-15). The console, `APP_URL` and the
 webhooks move to **`desk.shipblu.com`**, the help centre's widget script tag
 to support.shipblu.com, and the Render subdomain is switched off last.
 `plans/console-host.md` has the order, each step's check and its way back. On
-2026-11-15 desk.shipblu.com did not resolve and `APP_URL` still named the
-Render host. Update this paragraph as each step lands.
+2026-11-16 desk.shipblu.com resolved here and the dashboard listed it beside
+support.shipblu.com, verified, with its certificate issued; `APP_URL` still
+named the Render host, and every webhook still posted to it. Update this
+paragraph as each step lands.
 
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to

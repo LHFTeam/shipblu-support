@@ -61,10 +61,19 @@ Nothing was written.
   holds rather than rebuilding it from `APP_URL`, so nothing here moves them.
 - **The widget's script tag.** Host pages still load
   `https://shipblu-support.onrender.com/widget/embed.js`, many times a minute.
-  The script frames `publicBaseUrl()`, support.shipblu.com, so the chat itself
-  and every visitor's stored conversation already live there: only the
-  `<script src>` moves, and no visitor loses a chat. The sites are the ones
-  `WIDGET_ALLOWED_ORIGINS` names, whose owners are not this repository.
+  The script frames the origin it was loaded from (`BASE` in
+  `app/widget/embed.js/route.ts`; `publicBaseUrl()` is only its fallback), so
+  the chat window, and each visitor's token in that window's storage, live on
+  the Render host too. Moving the tag moves the window to another origin, and
+  every visitor starts afresh there: the widget no longer shows their earlier
+  chat, and the next message from somebody mid-conversation opens a new ticket.
+  Nothing is lost to the team, since every conversation stays in the console,
+  and a signed identity links a visitor to their shipping account again but
+  not to the old transcript (`lib/widget/identity.ts`).
+  `docs/embedding-the-widget.md` already warns that a move does this. The
+  sites are the ones `WIDGET_ALLOWED_ORIGINS` names, whose owners are not this
+  repository. The first version of this plan said the window already lived on
+  support.shipblu.com. It does not.
 - **The myBlu API contract** lists `https://shipblu-support.onrender.com/api/v1`
   as a second production server (`lib/api/openapi.ts`). No route behind it is
   live yet.
@@ -94,26 +103,49 @@ In order. Each step says who makes it, how it is checked and what undoes it.
 Nothing is removed from the old host until the last step, so every step before
 it can be undone by putting one value back.
 
-1. **DNS (you).** A `CNAME` for `desk.shipblu.com` to
+1. **DNS (you). Done 2026-11-16.** A `CNAME` for `desk.shipblu.com` to
    `shipblu-support.onrender.com`, in the shipblu.com zone on Google Cloud DNS,
-   as support.shipblu.com's is. On 2026-11-15 the name did not exist (NXDOMAIN).
-   _Undo: delete the record._
-2. **Render (you, dashboard).** The web service's Settings → Custom Domains →
-   add `desk.shipblu.com`, and wait for Verified and a certificate. In the same
-   PR, add it under `domains:` in `render.yaml`, which describes the running
-   service. _Check:_ `https://desk.shipblu.com/api/health` answers `ok`, and
-   `/login` answers 200. _Undo: remove the domain._
-3. **Meta (you, App Dashboard), before `APP_URL` moves.** Add
-   `https://desk.shipblu.com/api/meta/unified-login/callback` to the valid OAuth
-   redirect URIs, and `desk.shipblu.com` to the JavaScript SDK's allowed domains
-   that Embedded Signup opens from. Keep the Render entries until step 9.
-4. **`APP_URL` = `https://desk.shipblu.com`** in `shipblu-support-production`
-   (me through Render's API with your go-ahead, or you in the dashboard). A
-   group change redeploys all six services. Read the current value first and
-   quote it. _Check:_ `/admin/agents` shows invite links on desk.shipblu.com;
-   signing in on support.shipblu.com's help centre as an agent lands on
-   `desk.shipblu.com/login`. _Undo: put the Render URL back._ Not in the half
-   hour before 00:00 UTC, when the nightly rollup and a redeploy could overlap.
+   as support.shipblu.com's is. On 2026-11-15 the name did not exist
+   (NXDOMAIN); on 2026-11-16 it resolved to the Render host. _Undo: delete the
+   record._
+2. **Render (you, dashboard). Done 2026-11-16.** The web service's Settings →
+   Custom Domains lists `desk.shipblu.com` beside `support.shipblu.com`, both
+   Verified with a certificate issued, and `render.yaml`'s `domains:` names
+   both. _Checked from outside:_ the certificate validates,
+   `https://desk.shipblu.com/api/health` answers `ok`, `/login` answers 200 and
+   `/inbox` sends a signed-out visitor to `/login?next=%2Finbox`. `/` still
+   answered the help centre's `/ar`, since the inbox redirect had not deployed.
+   _Undo: remove the domain._
+3. **Meta (you, App Dashboard), before `APP_URL` moves.** Each of these names
+   the console's origin, which `APP_URL` is about to change. Add the new value
+   beside the old one in each, and keep the Render entries until step 9:
+   - Instagram → API setup with Instagram login → the Unified Login tab's
+     **Redirect URL**: register
+     `https://desk.shipblu.com/api/meta/unified-login/callback`
+     (`plans/instagram-unified-login.md`, step 2). It must match character for
+     character what `unifiedLoginReadiness` builds from `APP_URL`.
+   - Facebook Login for Business → Settings → **Valid OAuth Redirect URIs**:
+     the same URL, and the console's origin, `https://desk.shipblu.com/`, which
+     `plans/whatsapp-coexistence.md` lists there for Embedded Signup.
+   - The same page's **Allowed Domains for the JavaScript SDK**:
+     `desk.shipblu.com`, which Embedded Signup's window opens from
+     (`plans/whatsapp-coexistence.md`).
+
+   Missed, "Connect Instagram" answers "URL blocked" and the Business-app
+   number's window refuses to open. Both are admin actions, and nothing a
+   customer reaches depends on them.
+
+4. **`APP_URL` = `https://desk.shipblu.com`** in the
+   `shipblu-support-production` env group (you, dashboard). Not on a service:
+   Render's API, the one this session has, sets service variables only, and a
+   service copy would shadow the group (`render.yaml` says the last one was
+   deleted on 2026-09-26) and leave the worker on the old value. A group change
+   redeploys all six services. Note the old value before changing it. _Check:_
+   Render's events show the six redeploys, `/admin/agents` builds invite links
+   on desk.shipblu.com, and once the code below has deployed, an agent signing
+   in on support.shipblu.com's help centre lands on `desk.shipblu.com/login`.
+   _Undo: put the Render URL back._ Not in the half hour before 00:00 UTC, when
+   the nightly rollup and a redeploy could overlap.
 5. **Agents (you).** Tell the team the address, desk.shipblu.com, and that
    each signs in once there. The old address keeps working until step 9.
 6. **Webhooks (you, each provider's dashboard), one at a time.**
@@ -133,8 +165,13 @@ it can be undone by putting one value back.
 
 7. **The widget's script tag (each host page's owner).**
    `<script src="https://support.shipblu.com/widget/embed.js" async>`, the
-   customer-facing host (`docs/embedding-the-widget.md`). _Check:_
-   `/widget/embed.js` requests on the old host fall away.
+   customer-facing host (`docs/embedding-the-widget.md`). Every visitor's chat
+   starts afresh with it (above), once, so make the change outside working
+   hours, when the fewest conversations are open, and let the team know that
+   the next morning's web chats may continue yesterday's under a new ticket.
+   `WIDGET_ALLOWED_ORIGINS` needs no change: it names the pages that embed the
+   widget, not the host serving it. _Check:_ `/widget/embed.js` requests on the
+   old host fall away.
 8. **The contract (a myBlu API change).** Drop the Render server from
    `lib/api/openapi.ts`'s `servers`, and refresh the SDK's pin. Its own pull
    request, under that plan's rules for changing the contract.
@@ -149,8 +186,8 @@ it can be undone by putting one value back.
 
 - **Staging** keeps `shipblu-support-staging.onrender.com`. It has no custom
   domain, it is suspended, and it is resumed only for named test windows.
-- **What customers see.** The help centre, the widget's frame, survey and
-  portal links are on support.shipblu.com already (`publicBaseUrl()`).
+- **What customers see**, but for the widget (step 7). The help centre, survey
+  and portal links are on support.shipblu.com already (`publicBaseUrl()`).
 - **The rule that support.shipblu.com serves no console.** Step 4 is what makes
   §6.119's sign-in send agents somewhere real, rather than to a Render address
   being switched off.
