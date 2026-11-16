@@ -34,6 +34,7 @@ import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-tra
 import { notifyMyblu } from '@/worker/handlers/notify-myblu';
 import { sendCsat } from '@/worker/handlers/send-csat';
 import { POST as postSession } from './sessions/route';
+import { POST as postMessage } from './tickets/[id]/messages/route';
 import { GET as getTicket } from './tickets/[id]/route';
 import { GET as getSurvey, POST as postSurvey } from './tickets/[id]/survey/route';
 import { GET as getList, POST as postTicket } from './tickets/route';
@@ -140,7 +141,8 @@ function clientRequest(
       'ShipBlu-Client': CLIENT,
       'x-forwarded-for': address(),
       ...(body !== undefined && { 'Content-Type': 'application/json' }),
-      ...(method === 'POST' && path === '/tickets' && { 'Idempotency-Key': randomUUID() }),
+      ...(method === 'POST' &&
+        (path === '/tickets' || path.endsWith('/messages')) && { 'Idempotency-Key': randomUUID() }),
     },
     ...(body !== undefined && { body: JSON.stringify(body) }),
   });
@@ -485,6 +487,44 @@ describe('GET /tickets/{id}/survey', () => {
       ).json(),
     );
     expect(second.tickets.map((t) => t.id)).toEqual([newer.id]);
+  });
+
+  // A survey asks how a resolved ticket went, and nothing expires one when the
+  // user writes again. The push withholds it then (`reopened`); the route, its
+  // POST and the summary did not, and the app prompted "rate us" in the middle
+  // of the conversation.
+  it('is no survey while the ticket is open again, and the same survey once it is resolved again', async () => {
+    const token = await minted();
+    const ticket = await surveyedTicket(token);
+    const [sent] = await rowsOf(ticket.id);
+    const reply = await postMessage(
+      clientRequest(`/tickets/${ticket.id}/messages`, token, {
+        method: 'POST',
+        body: { text: 'It still has not come', locale: 'en' },
+      }),
+      params(ticket.id),
+    );
+    expect(reply.status).toBe(201);
+    expect((await ticketOf(token, ticket.id)).status).toBe('open');
+
+    expect(await refusal(await read(token, ticket.id))).toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+    expect((await ticketOf(token, ticket.id)).survey).toBeNull();
+    expect((await listed(token)).find((t) => t.id === ticket.id)?.survey).toBeNull();
+    expect(await refusal(await answer(token, ticket.id, { rating: 5 }))).toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+    expect(await rowsOf(ticket.id)).toMatchObject([{ status: 'sent', rating: null }]);
+
+    await resolve(ticket.id);
+    expect((await survey(await read(token, ticket.id))).id).toBe(sent!.id);
+    expect((await ticketOf(token, ticket.id)).survey).toEqual({ status: 'sent' });
+    expect((await listed(token)).find((t) => t.id === ticket.id)?.survey).toEqual({
+      status: 'sent',
+    });
   });
 
   it('serves the survey the ticket has, not a newer one the team decided not to send', async () => {

@@ -47,7 +47,7 @@ import { messageFrom } from './from';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
-import { surveyGivenAtSql, surveyStatusSql } from './survey';
+import { appSurveyRow } from './survey';
 import type { AttachmentLink, Message, Ticket } from './schemas';
 import { ownedTicket, ownedTicketNow } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -309,33 +309,46 @@ const trackingNumberSql = sql<
   string | null
 >`(select ${apiTickets.trackingNumber} from ${apiTickets} where ${apiTickets.conversationId} = ${conversations.id})`;
 
+/** The ticket's survey as the app sees it: one lateral row per ticket (`appSurveyRow`). */
+type SurveyNow = ReturnType<typeof appSurveyRow>;
+
 /**
  * `lastActivityAt`: the later of the ticket's newest message and the newest
- * survey the app was given (`surveyGivenAtSql`), `greatest` passing over the
+ * survey the app was given (`survey.givenAt`), `greatest` passing over the
  * null of a ticket never surveyed. What the list is ordered and paged by, so a
  * survey written on a ticket far down the list, which no message moves, still
- * brings it to the first page the SDK re-reads. Mapped as `last_message_at` is,
- * to a `Date`; the cursor takes its text.
+ * brings it to the first page the SDK re-reads. Mapped as `last_message_at`
+ * is, to a `Date`; the cursor takes its text.
  */
-const lastActivitySql =
-  sql<Date>`greatest(${conversations.lastMessageAt}, ${surveyGivenAtSql})`.mapWith(
+function lastActivityOf(survey: SurveyNow) {
+  return sql<Date>`greatest(${conversations.lastMessageAt}, ${survey.givenAt})`.mapWith(
     conversations.lastMessageAt,
   );
+}
 
-const ticketColumns = {
-  id: conversations.id,
-  number: conversations.number,
-  subject: conversations.subject,
-  trackingNumber: trackingNumberSql,
-  status: ticketStatuses.category,
-  statusLabel: shownLabelSql,
-  createdAt: conversations.createdAt,
-  lastMessageAt: conversations.lastMessageAt,
-  lastActivityAt: lastActivitySql,
-  unreadCount: unreadCountSql,
-  preview: previewSql,
-  survey: surveyStatusSql,
-};
+/**
+ * A ticket's columns as the read model takes them, off the survey row the
+ * statement joins (`leftJoinLateral(survey, sql\`true\`)`). Built per
+ * statement, as the row is: built once at module scope, the subquery asked
+ * `db` for a builder on import, which reads the environment, and `next build`
+ * imports route modules with none.
+ */
+function ticketColumns(survey: SurveyNow) {
+  return {
+    id: conversations.id,
+    number: conversations.number,
+    subject: conversations.subject,
+    trackingNumber: trackingNumberSql,
+    status: ticketStatuses.category,
+    statusLabel: shownLabelSql,
+    createdAt: conversations.createdAt,
+    lastMessageAt: conversations.lastMessageAt,
+    lastActivityAt: lastActivityOf(survey),
+    unreadCount: unreadCountSql,
+    preview: previewSql,
+    survey: survey.status,
+  };
+}
 
 type TicketRow = {
   id: string;
@@ -396,13 +409,15 @@ async function ownedTicketRow(
   ticketId: string,
   { withTotal = false, executor = db }: { withTotal?: boolean; executor?: Executor } = {},
 ) {
+  const survey = appSurveyRow();
   const [row] = await executor
     .select({
-      ...ticketColumns,
+      ...ticketColumns(survey),
       unreadTotal: withTotal ? unreadTotalSql(caller) : sql<number>`0`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(survey, sql`true`)
     .where(and(eq(conversations.id, ticketId), ownedTicket(caller)))
     .limit(1);
   return row ?? null;
@@ -626,7 +641,7 @@ export type TicketsListPage = {
 /**
  * A page of the caller's tickets, newest first by `(lastActivityAt, id)` —
  * the later of the newest message and the newest survey the app was given
- * (`lastActivitySql`) — one row more than the page so the caller knows
+ * (`lastActivityOf`) — one row more than the page so the caller knows
  * whether anything is left, every status, and only those opened with one
  * tracking number when one is asked for. The order and the `before`
  * comparison change together, on the same expression, as the inbox's do: the
@@ -635,7 +650,9 @@ export type TicketsListPage = {
  * survey written on a ticket below the first page — one resolved long after
  * its last message — moved nothing, and the SDK, which re-reads only that page,
  * never saw its `survey` turn up. The order is computed per row, so no index
- * serves it: the identity's own tickets, a few per user, are what it sorts.
+ * serves it: the identity's own tickets, a few per user, are what it sorts,
+ * each reading its surveys once, in the lateral row the order and the cursor
+ * both name (`appSurveyRow`).
  *
  * The identity is named on the joined ownership row as well as inside
  * `ownedTicket`, so the planner can drive from `api_tickets_identity_idx`, a
@@ -659,15 +676,18 @@ export type TicketsListPage = {
  * text Postgres printed, never through a `Date`.
  */
 export function listStatement(caller: Caller, asked: ListAsked) {
+  const survey = appSurveyRow();
+  const lastActivity = lastActivityOf(survey);
   return db
     .select({
-      ...ticketColumns,
-      cursorTime: sql<string>`${lastActivitySql}::text`,
+      ...ticketColumns(survey),
+      cursorTime: sql<string>`${lastActivity}::text`,
       unreadTotal: unreadTotalSql(caller),
     })
     .from(conversations)
     .innerJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(survey, sql`true`)
     .where(
       and(
         eq(apiTickets.identityId, caller.identityId),
@@ -677,10 +697,10 @@ export function listStatement(caller: Caller, asked: ListAsked) {
           : sql`${trackingFoldSql(apiTickets.trackingNumber)} = ${normaliseTrackingNumber(asked.trackingNumber)}`,
         asked.cursor === null
           ? undefined
-          : vsCursor('<', asked.cursor, lastActivitySql, conversations.id),
+          : vsCursor('<', asked.cursor, lastActivity, conversations.id),
       ),
     )
-    .orderBy(desc(lastActivitySql), desc(conversations.id))
+    .orderBy(desc(lastActivity), desc(conversations.id))
     .limit(asked.limit + 1);
 }
 

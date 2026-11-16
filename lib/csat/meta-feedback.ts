@@ -13,7 +13,7 @@ import {
   enqueueAutomatedDelivery,
   writeAutomatedReply,
 } from '@/lib/tickets/outbound';
-import { recordAnswer, type ResponseOutcome } from '@/lib/csat';
+import { recordAnswer, TAKES_SUPERSEDED, type ResponseOutcome } from '@/lib/csat';
 import { wordingForRule } from './rules';
 
 const log = logger('csat');
@@ -73,7 +73,17 @@ export async function recordMetaFeedback(feedback: NormalisedFeedback): Promise<
   const contactId = await findContactByIdentity(feedback.platform, feedback.from);
   if (!contactId || contactId !== survey.requesterContactId) return 'not_requester';
 
-  const outcome = await recordAnswer(survey.id, feedback.rating, feedback.comment, feedback.source);
+  // The card is a message in the thread, like a link in a mail, and answers the
+  // survey it was sent with, superseded since or not, as it always has.
+  const outcome = await recordAnswer(
+    survey.id,
+    feedback.rating,
+    feedback.comment,
+    feedback.source,
+    {
+      ratable: TAKES_SUPERSEDED,
+    },
+  );
 
   // Messenger's card thanks the customer itself. A tap has nothing after it,
   // so the first one is answered — and only the first: a second tap, or the

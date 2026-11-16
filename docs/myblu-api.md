@@ -525,7 +525,11 @@ commentMaxChars, button, thanks, expiresAt }`, worded on the server in the
 survey's own locale, which can differ from the app's. `status` is `sent`
 (waiting), `answered` or `expired`, and a status the SDK does not know is drawn
 as `expired`, which offers nothing to tap. A ticket with no survey answers
-`404`, and so does one whose survey the team decided not to send. `labels` is
+`404`, and so does one whose survey the team decided not to send, and one the
+user has written on again since it was resolved: a survey asks how a resolved
+ticket went, so the ticket has none while the conversation goes on, and has it
+back once the team resolves it again. Its `POST` answers the same `404`, and
+its `survey` summary is null. `labels` is
 five words for the ratings 1 to 5. The rating is posted the moment it is
 tapped; a comment is a second `POST` carrying the same rating. The first rating
 wins whichever way it came — the app, or a link — so draw the survey `POST`

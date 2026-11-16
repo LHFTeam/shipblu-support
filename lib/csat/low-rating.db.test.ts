@@ -12,7 +12,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
-import { recordAnswer } from '@/lib/csat';
+import { recordAnswer, TAKES_SUPERSEDED } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -214,7 +214,7 @@ describe('recording a low rating', () => {
         .from(conversations)
         .where(eq(conversations.id, ticket.conversationId))
         .for('update');
-      answered = recordAnswer(ticket.surveyId, 1, null, 'page');
+      answered = recordAnswer(ticket.surveyId, 1, null, 'page', { ratable: TAKES_SUPERSEDED });
       // Until the answer is waiting on a lock — the ticket's, or with the order
       // reversed the event's foreign key after the survey's row — so the
       // supersede below contends with it rather than finishing first.

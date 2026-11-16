@@ -1871,7 +1871,7 @@ statements and nothing else; `PULLED` and `MessageDelivery` in
 `lib/csat/delivery.ts`, so a function about a message's body or link cannot be
 handed `api_pull`; `decideSurvey`'s `api` branch; `sendSurvey`'s pulled path
 in `lib/csat/index.ts`, typed so a message delivery still answers a message
-id; `lib/api/survey.ts` (`readSurvey`, `answerSurvey`, `surveyStatusSql`) and
+id; `lib/api/survey.ts` (`readSurvey`, `answerSurvey`, `appSurveyRow`) and
 `app/api/v1/tickets/[id]/survey/route.ts`; `survey` on the ticket through
 `ticketColumns`; `enqueueSurveyCreated` in `lib/api/notify.ts`;
 `readSurveySubject`, `decideSurveyCreated` and `surveyCreatedEvent` in
@@ -1889,7 +1889,16 @@ left a question:
   `notSkipped`), so a list never prompts for a survey the route does not serve.
 - **A closed ticket is surveyed as a resolved one is.** `decideSurvey` answers
   `api_pull` before the email branch, so nothing about the contact's address
-  matters, and the app reads the survey whatever the ticket's status.
+  matters, and the app reads the survey on a closed ticket as on a resolved
+  one.
+- **A ticket open or pending again has no survey** — not on the route, its
+  POST, the summary or `lastActivityAt` (`appSurvey`), as the push withholds
+  one (`reopened`). Nothing expires a survey when the user writes again, so
+  without it the list prompted "rate us" in the middle of a live
+  conversation, and a rating was recorded on it. Resolved again, the ticket
+  has its survey back, which is when to ask. A rating tapped in the moment a
+  reply reopens the ticket is still recorded: it is about the resolution the
+  user was shown.
 - **The push is queued in the transaction that writes the survey**, keyed
   `notify_myblu:survey:<id>` at the survey's carrier priority (50), so it
   exists exactly when the survey does: a `send_csat` that loses to an earlier
@@ -1900,9 +1909,12 @@ left a question:
   ticket's standing, which is `message.created`'s own (`inApp`), so the two
   events cannot disagree about whether the app could open the ticket. Its day
   counts from `sent_at`.
-- **An `expired` survey is answered as it stands.** `recordAnswer` alone takes
-  a first rating on an `expired` row, as an old link always could; the widget's
-  card refuses one, and so does the app's door, since the app draws it closed.
+- **An `expired` survey is answered as it stands.** The widget's card and the
+  app's door both draw it closed, so neither records a rating on it, and both
+  ask again under the ticket's lock: `sent` only is `recordAnswer`'s default
+  `ratable`, so a newer send landing between the read and the write cannot
+  take the rating onto the superseded survey. A link and Messenger's card take
+  a superseded survey, as they always did, and say so (`TAKES_SUPERSEDED`).
 - **The answer spends the reads bucket**, as the read marker does: it writes no
   message, and spent from the sends bucket a tap and its comment would leave
   the user's next message refused.

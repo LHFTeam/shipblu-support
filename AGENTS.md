@@ -1630,14 +1630,19 @@ holder's of the phone (`api_email_fallback`, not built). `PULLED` is kept out
 of `MessageDelivery` (`lib/csat/delivery.ts`), so a function about a message's
 body or link does not compile with it; it and `sendSurvey` share the lock, the
 re-read and the supersession (`writeSurveyRow`) and nothing after. A ticket's
-survey is its newest `api_pull` that is not `skipped` — `surveyOrder` and
-`appSurvey`, read by the route, the ticket's `survey` summary
-(`surveyStatusSql`) and its `lastActivityAt` alike, so a list never prompts for
-a survey the route does not serve, nor serves one the push refuses — and an
-`expired` one is answered unchanged, as the widget's card answers it; the
-rating is written only on a survey still `sent` under the ticket's lock
-(`recordAnswer`'s `ratable`), so a newer send landing between the read and the
-write does not leave it on the superseded one. `survey.created` is queued by `enqueueSurveyCreated` in the
+survey is its newest `api_pull` that is not `skipped`, while the ticket is
+resolved or closed — `surveyOrder` and `appSurvey`, read by the route, its
+POST, the ticket's `survey` summary and its `lastActivityAt` alike (one lateral
+row per ticket, `appSurveyRow`), so a list never prompts for a survey the route
+does not serve, nor serves one the push refuses: a ticket the user has written
+on again has no survey until it is resolved again, as the push withholds one
+(`reopened`). An `expired` one is answered unchanged, as the widget's card
+answers it; the rating is written only on a survey still `sent` under the
+ticket's lock, so a newer send landing between the read and the write does not
+leave it on the superseded one. That is `recordAnswer`'s default `ratable`,
+which the widget's card takes too; only a link and Messenger's card, which
+always took a superseded survey, pass `TAKES_SUPERSEDED`, so a new door that
+forgets the option refuses rather than lets through. `survey.created` is queued by `enqueueSurveyCreated` in the
 transaction that writes the survey, keyed `notify_myblu:survey:<id>`, so it
 exists exactly when the survey does; the job judges the ticket with
 `message.created`'s own `inApp`, so the two events cannot disagree about

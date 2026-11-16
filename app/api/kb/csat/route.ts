@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { recordAnswer, surveyByToken } from '@/lib/csat';
+import { recordAnswer, surveyByToken, TAKES_SUPERSEDED } from '@/lib/csat';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
@@ -47,7 +47,11 @@ export async function POST(request: Request) {
   // whoever is trying tokens, and the customer has nothing to do differently
   // either way.
   const survey = await surveyByToken(body.token);
-  if (survey) await recordAnswer(survey.id, body.rating, comment, 'page');
+  // A link answers the survey it was sent with, superseded since or not, as it
+  // always has.
+  if (survey) {
+    await recordAnswer(survey.id, body.rating, comment, 'page', { ratable: TAKES_SUPERSEDED });
+  }
 
   return new NextResponse(null, { status: 204 });
 }

@@ -4,8 +4,8 @@ import { contacts, conversationEvents, conversations, messages, ticketStatuses }
 import { recordSkip, sendPulledSurvey, sendSurvey, suppressedBy } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { metaSurveyMessage } from '@/lib/csat/meta-survey';
-import { wordingForTicket } from '@/lib/csat/rules';
-import { surveyText } from '@/lib/csat/wording';
+import { wordingRuleForTicket } from '@/lib/csat/rules';
+import { resolveWording, surveyText } from '@/lib/csat/wording';
 import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
 import { carriesLink, PULLED } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
@@ -150,22 +150,21 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // already read so it is not read twice.
   const locale = await requesterLocale(conversationId, ticket.contactLocale);
 
-  // The admin's wording for this ticket's group and channel, or the built-in.
-  const { ruleId, wording } = await wordingForTicket(
-    { groupId: ticket.groupId, channel: ticket.channel },
-    locale,
-  );
+  // The admin's wording rule for this ticket's group and channel, or none for
+  // the built-in: the row records it, and the survey is worded from it.
+  const rule = await wordingRuleForTicket({ groupId: ticket.groupId, channel: ticket.channel });
 
   const common = {
     conversationId,
     locale,
     snapshot,
     resurveyAfterDays: settings.resurveyAfterDays,
-    ruleId,
+    ruleId: rule?.id ?? null,
   };
   const delivery = decision.delivery;
   // The myBlu app pulls its survey and words it from the row's rule and
-  // locale when it asks (`lib/api/survey.ts`), so it is sent no body.
+  // locale when it asks (`lib/api/survey.ts`), so it is sent no body and
+  // worded nothing here: only a survey that carries a body resolves one.
   const sent =
     delivery === PULLED
       ? await sendPulledSurvey(common)
@@ -174,6 +173,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
           requesterEmail: ticket.contactEmail,
           delivery,
           body: (url) => {
+            const wording = resolveWording(rule, locale);
             if (!carriesLink(delivery)) {
               return metaSurveyMessage(wording, locale, delivery, settings);
             }

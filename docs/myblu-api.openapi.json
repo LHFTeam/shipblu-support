@@ -3210,7 +3210,7 @@
         "operationId": "getSurvey",
         "tags": ["Surveys"],
         "summary": "The ticket's survey",
-        "description": "The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none, and for a survey the team decided not to send.\n\nServed from stage 8. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
+        "description": "The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none: before it is resolved, while it is open or pending again after the user wrote, and for a survey the team decided not to send. A ticket resolved again has its survey back.\n\nServed from stage 8. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
         "x-shipblu-stage": "8",
         "security": [
           {
@@ -3462,7 +3462,7 @@
         "operationId": "answerSurvey",
         "tags": ["Surveys"],
         "summary": "Answer the survey",
-        "description": "Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers.\n\nServed from stage 8. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
+        "description": "Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers. `404 not_found` whenever `GET` is: a ticket open or pending again takes no rating.\n\nServed from stage 8. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
         "x-shipblu-stage": "8",
         "security": [
           {
@@ -3934,7 +3934,7 @@
         },
         "required": ["status"],
         "additionalProperties": {},
-        "description": "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null from a server before the survey's stage (stage 8)."
+        "description": "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null while the ticket has none, which includes while it is open or pending again after the user wrote, and from a server before the survey's stage (stage 8)."
       },
       "Ticket": {
         "type": "object",

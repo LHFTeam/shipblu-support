@@ -564,6 +564,14 @@ export async function surveyByToken(token: string): Promise<SurveyView | null> {
 export type ResponseOutcome = 'recorded' | 'comment_added' | 'ignored';
 
 /**
+ * `recordAnswer`'s `ratable` for a door that takes a superseded survey: a link
+ * in an email, which always did — the customer may answer the survey they
+ * were sent, whichever came after — and Messenger's feedback card, a message
+ * in the thread like a link in a mail.
+ */
+export const TAKES_SUPERSEDED = ['sent', 'expired'] as const;
+
+/**
  * Records an answer, whichever door it came through — the page a link opens,
  * or the card in the chat widget — so the rules below are one function's and
  * no door can answer them differently. The caller has already established
@@ -578,8 +586,9 @@ export type ResponseOutcome = 'recorded' | 'comment_added' | 'ignored';
  * - No answer yet: the rating is recorded, with where it came from. First
  *   answer wins, enforced by requiring `responded_at` to still be null, so a
  *   link forwarded to a colleague cannot overwrite what the customer said.
- *   A superseded survey still takes one, as its link always did; a skipped
- *   row never does, because there was no survey to answer.
+ *   A superseded survey takes one only through a door that says so
+ *   (`TAKES_SUPERSEDED`); a skipped row never does, because there was no
+ *   survey to answer.
  * - Already answered, comment still empty: the comment is attached without
  *   touching the score. That is the same customer finishing their sentence.
  * - Anything else: ignored.
@@ -590,14 +599,17 @@ export async function recordAnswer(
   comment: string | null,
   source: AnswerSource,
   {
-    ratable = ['sent', 'expired'],
+    ratable = ['sent'],
   }: {
     /**
      * The statuses a rating may still be recorded on, asked under the ticket's
-     * lock where the rating is written. A door that refuses a superseded
-     * survey says `['sent']` here rather than only checking a read made
-     * before it: a newer send in between makes the survey `expired`, and a
-     * check off the earlier read lets the rating land on it.
+     * lock where the rating is written. `sent` alone unless the door says
+     * otherwise: a door that draws a superseded survey closed — the widget's
+     * card, the app — and checked only a read made before this, let a newer
+     * send in between make the survey `expired` and the rating land on it
+     * anyway. The default is that guard, so a door that forgets the option
+     * refuses rather than lets through; the two that take a superseded survey,
+     * a link and Messenger's card, pass `TAKES_SUPERSEDED`.
      */
     ratable?: readonly ('sent' | 'expired')[];
   } = {},

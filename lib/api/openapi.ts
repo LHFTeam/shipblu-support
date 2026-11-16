@@ -1128,7 +1128,7 @@ function paths(): Json {
         stage: '8',
         summary: "The ticket's survey",
         description:
-          'The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none, and for a survey the team decided not to send.',
+          'The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none: before it is resolved, while it is open or pending again after the user wrote, and for a survey the team decided not to send. A ticket resolved again has its survey back.',
         plane: 'client',
         parameters: [ticketPath],
         answers: answer({
@@ -1149,7 +1149,7 @@ function paths(): Json {
         stage: '8',
         summary: 'Answer the survey',
         description:
-          'Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers.',
+          'Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers. `404 not_found` whenever `GET` is: a ticket open or pending again takes no rating.',
         plane: 'client',
         parameters: [ticketPath],
         body: jsonBody('AnswerSurveyRequest', {

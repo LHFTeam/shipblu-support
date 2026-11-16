@@ -59,10 +59,16 @@ const log = logger('notify_myblu');
  */
 export async function notifyMyblu(job: ClaimedJob): Promise<void> {
   const payload = parseJobPayload(job, 'notify_myblu');
-  const fields =
+  // The subject, named once: its id under its own key on every line, as
+  // `[notify_myblu] message key=value` — the stale line is quoted by that key
+  // in the guide and AGENTS.md — and in words in a thrown error. Read back
+  // off a fields object's first entry instead, a second field added to it
+  // would have changed the key the stale line printed, silently.
+  const about =
     payload.event === 'message.created'
-      ? { messageId: payload.messageId }
-      : { surveyId: payload.surveyId };
+      ? { key: 'messageId', id: payload.messageId, name: `message ${payload.messageId}` }
+      : { key: 'surveyId', id: payload.surveyId, name: `survey ${payload.surveyId}` };
+  const fields = { [about.key]: about.id };
 
   const target = webhookTarget();
   if (target.kind === 'off') {
@@ -73,28 +79,22 @@ export async function notifyMyblu(job: ClaimedJob): Promise<void> {
   const now = new Date();
   const apiOn = apiSwitchedOn();
   let decision: Decision<{ id: string; type: string }>;
-  let subjectName: string;
   if (payload.event === 'message.created') {
-    subjectName = `message ${payload.messageId}`;
     const subject = await readMessageSubject(payload.messageId);
-    if (!subject) throw subjectGone('notify_myblu', subjectName);
+    if (!subject) throw subjectGone('notify_myblu', about.name);
     decision = decideMessageCreated(subject, now, apiOn);
   } else {
-    subjectName = `survey ${payload.surveyId}`;
     const subject = await readSurveySubject(payload.surveyId);
-    if (!subject) throw subjectGone('notify_myblu', subjectName);
+    if (!subject) throw subjectGone('notify_myblu', about.name);
     decision = decideSurveyCreated(subject, now, apiOn);
   }
 
   switch (decision.kind) {
     case 'refuse':
-      throw new PermanentJobError(`notify_myblu: ${subjectName} is ${decision.reason}`);
+      throw new PermanentJobError(`notify_myblu: ${about.name} is ${decision.reason}`);
     case 'quiet':
       if (decision.reason === 'stale') {
-        // `[notify_myblu] message key=value`, as every line: the subject's id
-        // under its own key, which the guide and AGENTS.md quote it by.
-        const [key, id] = Object.entries(fields)[0]!;
-        log.warn(`nothing sent: older than a day ${key}=${id} reason=stale`);
+        log.warn(`nothing sent: older than a day ${about.key}=${about.id} reason=stale`);
       } else {
         log.info('nothing sent', { ...fields, reason: decision.reason });
       }

@@ -7,6 +7,7 @@ import { PULLED } from '@/lib/csat/delivery';
 import { MAX_COMMENT } from '@/lib/csat/limits';
 import { wordingForRule } from '@/lib/csat/rules';
 import { ratingLabels } from '@/lib/csat/wording';
+import { statusCategoryOf } from '@/lib/tickets/status-category';
 import type { Survey } from './schemas';
 import { ownedTicket } from './scope';
 import type { Caller } from './sessions';
@@ -17,20 +18,32 @@ import type { Caller } from './sessions';
  * as `api_pull`, read and answered by the app, which draws it itself.
  *
  * **A ticket's survey is its newest the app pulls (`api_pull`) that is not
- * `skipped`.** One rule for the route, every ticket's `survey` summary, the
- * list's `lastActivityAt` and the webhook (`decideSurveyCreated`, which refuses
- * any other delivery): an `api` ticket surveyed another way — by an email link
- * or a widget card, which only a ticket surveyed before the app's survey
- * shipped could be — is no survey to the app, rather than one the route serves
- * and the push refuses. A skipped row is a
- * survey the team decided not to send, which to the app is no survey: a ticket
- * resolved, reopened and resolved again inside the resurvey window keeps its
- * first survey and gains a `skipped` row, and the survey it has is the first.
- * A survey a newer one superseded is `expired`, and older than the newer one,
- * so the app sees the newer. `surveyOrder` and `appSurvey` are that rule, read
- * by the survey routes and by every ticket's `survey` summary
- * (`surveyStatusSql`), so a list cannot prompt for a survey the route does not
- * serve.
+ * `skipped`, while the ticket is resolved or closed.** One rule for the route,
+ * its POST, every ticket's `survey` summary, the list's `lastActivityAt` and
+ * the webhook (`decideSurveyCreated`, which refuses any other delivery, and a
+ * ticket open again as `reopened`): an `api` ticket surveyed another way — by
+ * an email link or a widget card, which only a ticket surveyed before the
+ * app's survey shipped could be — is no survey to the app, rather than one the
+ * route serves and the push refuses. A skipped row is a survey the team
+ * decided not to send, which to the app is no survey: a ticket resolved,
+ * reopened and resolved again inside the resurvey window keeps its first
+ * survey and gains a `skipped` row, and the survey it has is the first. A
+ * survey a newer one superseded is `expired`, and older than the newer one, so
+ * the app sees the newer.
+ *
+ * A ticket open or pending again has none. A survey asks how a resolved ticket
+ * went, and nothing expires one when the user writes again, so without this
+ * the list prompted "rate us" in the middle of a live conversation and the
+ * POST recorded a rating on it, while the push withheld it as `reopened`.
+ * Resolved again, the ticket has its survey back — the first, inside the
+ * resurvey window — which is when to ask. A rating tapped in the moment a
+ * reply reopens the ticket is still recorded: it is about the resolution the
+ * user was shown, and the lock it is written under is the survey's, not the
+ * status's.
+ *
+ * `surveyOrder` and `appSurvey` are that rule, read by the survey routes and
+ * by every ticket's summary (`appSurveyRow`), so a list cannot prompt for a
+ * survey the route does not serve.
  *
  * **Every statement names the caller**, through `ownedTicket` on the survey's
  * ticket in the same `WHERE`, as every other read of the API does: another
@@ -41,37 +54,50 @@ import type { Caller } from './sessions';
 /** Newest first: by when it was sent, then when the row was written, then its id. */
 const surveyOrder: SQL = sql`${csatSurveys.sentAt} desc nulls last, ${csatSurveys.createdAt} desc, ${csatSurveys.id} desc`;
 
-/** The surveys the app sees: pulled, and not a decision not to send one. */
-const appSurvey: SQL = and(eq(csatSurveys.delivery, PULLED), ne(csatSurveys.status, 'skipped'))!;
+/**
+ * The surveys the app sees: pulled, not a decision not to send one, on a
+ * ticket resolved or closed. Read only where `conversations` is in the
+ * statement, as the survey's ticket. The category through a subquery, never a
+ * join, so it reads alike in a statement that locks the ticket and one that
+ * does not (`statusCategoryOf`).
+ */
+const appSurvey: SQL = and(
+  eq(csatSurveys.delivery, PULLED),
+  ne(csatSurveys.status, 'skipped'),
+  sql`${statusCategoryOf()} in ('resolved', 'closed')`,
+)!;
 
 /**
- * The status of a ticket's survey as the app sees it, or null, as one column of
- * a statement that reads `conversations` beside another table: the ticket's
- * `survey` summary (`ticketColumns` in `lib/api/tickets.ts`). Only from such a
- * statement, because drizzle writes a one-table select's fields unqualified,
- * and `conversation_id = id` would then compare the survey with itself
- * (AGENTS.md, _Tests_); both readers join the ownership row.
+ * A ticket's survey as the app sees it, as one row a statement over
+ * `conversations` joins laterally, `leftJoinLateral(row, sql\`true\`)`: the
+ * newest one's status (`surveyOrder`), and when the app was last given one,
+ * each null for a ticket with none. An aggregate with no `GROUP BY`, so it is
+ * exactly one row per ticket, and joining it neither adds a row nor drops one.
+ *
+ * The status is the ticket's `survey` summary, and the instant feeds the
+ * list's `lastActivityAt` (`lib/api/tickets.ts`), so a ticket whose survey is
+ * written moves to the top of the page a poll re-reads, where the summary that
+ * prompts for it is. One row, computed once per ticket: they were correlated
+ * subqueries, and the list named the instant four times — the column, the
+ * cursor, the `before` comparison and the order — each evaluated on its own,
+ * over every ticket of the user's, on every poll.
+ *
+ * A fresh alias per statement, as the inbox's lateral row is built
+ * (`lastVisibleMessage`).
  */
-export const surveyStatusSql = sql<AppSurveyStatus | null>`(
-  select ${csatSurveys.status} from ${csatSurveys}
-  where ${csatSurveys.conversationId} = ${conversations.id} and ${appSurvey}
-  order by ${surveyOrder}
-  limit 1
-)`;
-
-/**
- * When the app was last given a survey on the ticket, or null: the newest
- * `sent_at` of the surveys it sees, as one column of a statement that reads
- * `conversations` beside another table, for the reason `surveyStatusSql`
- * gives. The list's `lastActivityAt` is the later of this and the newest
- * message (`lib/api/tickets.ts`), so a ticket whose survey is written moves to
- * the top of the list a poll re-reads, where the summary that prompts for it
- * is.
- */
-export const surveyGivenAtSql = sql<string | null>`(
-  select max(${csatSurveys.sentAt}) from ${csatSurveys}
-  where ${csatSurveys.conversationId} = ${conversations.id} and ${appSurvey}
-)`;
+export function appSurveyRow() {
+  return db
+    .select({
+      status:
+        sql<AppSurveyStatus | null>`(array_agg(${csatSurveys.status} order by ${surveyOrder}))[1]`.as(
+          'app_survey_status',
+        ),
+      givenAt: sql<string | null>`max(${csatSurveys.sentAt})`.as('app_survey_given_at'),
+    })
+    .from(csatSurveys)
+    .where(and(eq(csatSurveys.conversationId, conversations.id), appSurvey))
+    .as('app_survey');
+}
 
 type SurveyView = z.input<typeof Survey>;
 
@@ -173,7 +199,7 @@ export async function readSurvey(caller: Caller, ticketId: string): Promise<Surv
  * rating for it, as an old link always did. It is answered as it stands.
  *
  * "Not expired" is asked again under the ticket's lock, where the rating is
- * written (`ratable: ['sent']`), not only off the read above: a newer survey
+ * written (`recordAnswer`'s default `ratable`), not only off the read above: a newer survey
  * sent between the two supersedes this one, and a rating recorded on it then
  * landed on the survey the guard exists to refuse, while the answer drew the
  * newer one unanswered and asked the user again. And the answer is this
@@ -189,7 +215,7 @@ export async function answerSurvey(
   const row = await currentSurvey(caller, ticketId);
   if (!row) return null;
   if (row.status === 'expired') return surveyView(row);
-  await recordAnswer(row.id, rating, comment, 'api', { ratable: ['sent'] });
+  await recordAnswer(row.id, rating, comment, 'api');
   const after = await answerOf(row.id);
   return surveyView(after ? { ...row, ...after } : row);
 }

@@ -338,7 +338,7 @@ export const Preview = z
 export const TicketSurveySummary = z
   .looseObject({ status: SurveyStatus })
   .describe(
-    "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null from a server before the survey's stage (stage 8).",
+    "Whether the ticket has a survey the app pulls, so a list can prompt without a call per ticket; `GET /tickets/{id}/survey` reads it whole. Null while the ticket has none, which includes while it is open or pending again after the user wrote, and from a server before the survey's stage (stage 8).",
   );
 
 /**
