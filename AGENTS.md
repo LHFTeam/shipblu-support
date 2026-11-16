@@ -1545,14 +1545,19 @@ the body from the rows on every attempt (`lib/api/webhook.ts`), with
 `user.externalId` read off the ticket's ownership row and never the contact,
 and it sends nothing — and completes — for a ticket the app could not open now:
 withdrawn, released by a revoke, a requester that is not the owner's contact, a
-blocked user, or an event past its day. A payload naming a note, an inbound
-message or another channel's reply is `PermanentJobError`: only a hand-written
-one can. The URL must be `https` with no userinfo and no query string, and the
-secret at least 32 characters; both are judged when a job runs
+blocked user, or an event past its day. The API switched off is not one of
+them: the reply is there once it is back on, so the attempt fails, retried, and
+a token unset for the minutes of a rotation costs no push; the age is asked
+first, so the retries still end within the day. A payload naming a note, an
+inbound message or another channel's reply is `PermanentJobError`: only a
+hand-written one can. The URL must be `https` with no userinfo and no query
+string, and the secret at least 32 characters; both are judged when a job runs
 (`webhookTarget`), never in `lib/env.ts`, and an unusable value fails every job
-by name, retried, so a value corrected within the day still sends. The URL
-unset completes the jobs already queued with nothing sent, which is the way
-back. `webhook.test.ts` reads the guide's test vector and its JavaScript
+that would send by name, retried, so a value corrected within the day still
+sends — and a URL set before its secret is a queue of failing jobs, not a quiet
+switch. The URL unset completes the jobs already queued with nothing sent,
+which is the way back, and the web service and the worker read it through one
+`webhookUrl()`. `webhook.test.ts` reads the guide's test vector and its JavaScript
 `verify` and runs both against what the job signs and sends, so the guide and
 the sender cannot drift apart.
 

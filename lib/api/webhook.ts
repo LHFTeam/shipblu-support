@@ -14,6 +14,7 @@ import { env } from '@/lib/env';
 import { isTimeout } from '@/lib/http/deadline';
 import { logger } from '@/lib/log';
 import { messageFrom } from './from';
+import { webhookUrl } from './notify';
 import { MIN_SECRET_CHARS, usableSecret } from './secrets';
 import type { MessageCreatedEvent } from './schemas';
 import { contactRefused, externalUserIdOf } from './sessions';
@@ -109,9 +110,9 @@ function urlRefusal(raw: string): string | null {
  * the jobs already queued as soon as the worker restarts with it.
  */
 export function webhookTarget(): TargetResolution {
-  const e = env();
-  const url = e.MYBLU_WEBHOOK_URL?.trim();
+  const url = webhookUrl();
   if (!url) return { kind: 'off' };
+  const e = env();
 
   const refusal = urlRefusal(url);
   if (refusal) return { kind: 'refused', reason: refusal };
@@ -256,16 +257,22 @@ export type QuietReason =
   /** The owner's contact is blocked or deleted: every request of theirs is refused, so a push is one they cannot open. */
   | 'refused'
   /** Older than `MAX_EVENT_AGE_MS`. */
-  | 'stale'
-  /**
-   * The API is switched off (`apiSwitchedOn`): every request the app makes
-   * answers `503 not_configured`, so a push would point at nothing it can open.
-   */
-  | 'api_off';
+  | 'stale';
 
 export type Decision =
   | { kind: 'send'; event: z.input<typeof MessageCreatedEvent> }
   | { kind: 'quiet'; reason: QuietReason }
+  /**
+   * Not now. The API is switched off (`apiSwitchedOn`), so every request the
+   * app makes answers `503 not_configured` and a push would point at nothing
+   * it can open — but the reply is still there for when it comes back on. So
+   * the attempt fails, a plain error the queue retries, as an unusable target
+   * does, rather than completing: a token unset or pasted short for ten
+   * minutes during a rotation then costs a few retries, not every push in
+   * those ten minutes. The day's bound holds because `stale` is asked first,
+   * on every attempt.
+   */
+  | { kind: 'later'; reason: 'api_off' }
   /**
    * Not a message the webhook is ever about: an inbound one, a note, or one on
    * another channel. Only a payload written by hand names one, since both
@@ -281,9 +288,11 @@ export type Decision =
  * so no caller can decide without it.
  *
  * The refusal is checked first, so a payload naming a note is refused whatever
- * the ticket is like; then the API itself, since while it is off the app opens
- * nothing; then the states in which the app could not open what the push
- * points at, in the order `ownedTicket` would refuse it; then the age.
+ * the ticket is like; then the states in which the app could not open what
+ * the push points at, in the order `ownedTicket` would refuse it; then the
+ * age; and only then the API itself, the one answer that is not final, so a
+ * retry made while it is off still completes once the event is past its day
+ * or the ticket has left the app.
  */
 export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: boolean): Decision {
   if (subject.direction !== 'outbound' || subject.kind !== 'reply') {
@@ -292,7 +301,6 @@ export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: 
   if (subject.channel !== 'api') {
     return { kind: 'refuse', reason: `a reply on ${subject.channel}, not on the myBlu app` };
   }
-  if (!apiOn) return { kind: 'quiet', reason: 'api_off' };
   if (subject.withdrawn) return { kind: 'quiet', reason: 'withdrawn' };
 
   const owner = subject.owner;
@@ -304,6 +312,7 @@ export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: 
   if (now.getTime() - subject.createdAt.getTime() > MAX_EVENT_AGE_MS) {
     return { kind: 'quiet', reason: 'stale' };
   }
+  if (!apiOn) return { kind: 'later', reason: 'api_off' };
 
   return {
     kind: 'send',

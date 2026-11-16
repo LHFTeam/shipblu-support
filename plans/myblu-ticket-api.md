@@ -829,8 +829,12 @@ X-ShipBlu-Signature: v1=<hex HMAC-SHA256(secret, "<timestamp>.<raw body>")>
 - The handler re-reads the message and requires an outbound `reply` on an
   `api` ticket not deleted, spam or merged, so a hand-made payload cannot
   carry a note out. A row gone is `subjectGone()`. A refusal by the receiver
-  is a plain error and the queue's retry, never `PermanentJobError`. A URL
-  with no secret sends nothing.
+  is a plain error and the queue's retry, never `PermanentJobError`. So is a
+  URL with no usable secret, on every job that would send, so the secret is
+  set before the URL. So is the API switched off (`MYBLU_API_TOKEN` unset or
+  short): the reply is there once it is back on, and a token unset for the
+  minutes of a rotation must not cost every push in them. `stale` is asked
+  first on every attempt, so the day's bound holds.
 - **The URL is `https`, with no userinfo and no query string,** refused at
   first use with nothing sent, never in the schema, where a format rule turns
   one mistyped value into a console that does not load. A delivery is

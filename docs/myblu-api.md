@@ -771,6 +771,12 @@ read off the ticket's own record of who opened it, never off the contact, and
 the phone is never sent. More event types will be added; a receiver answers
 `2xx` to one it does not know and does nothing with it.
 
+`ticket.status` is the status when the attempt was built, not a promise about
+the ticket after the event. An agent's "Send and resolve" stores the reply and
+then resolves the ticket, so its push can say `open` for a ticket resolved a
+moment later, and no event follows to say so. Word a push from the event's
+type, not from the status; the app reads the status off its poll.
+
 **The signature** is `v1=` and the lowercase hex HMAC-SHA256, under
 `MYBLU_WEBHOOK_SECRET`, of the `X-ShipBlu-Timestamp` value, a `.`, and the raw
 body. The timestamp is the attempt's, so a retry is not refused by the clock
@@ -853,8 +859,8 @@ has nothing to route on. `push.handle` ignores any key it does not know.
 - **The agent's name.** Messages say `from: agent`.
 - **A browser client.** No CORS header, no `OPTIONS`.
 - **Files from the team**, until the console can send one.
-- **A status-change event.** Status rides on every poll and on the next
-  `message.created`.
+- **A status-change event.** Status rides on every poll, and on the next
+  event as it stood when that event was built.
 - **A device-registration endpoint.** The backend holds the push credentials and
   the device tokens; this side holds neither.
 - **A survey by email** for a myBlu ticket.

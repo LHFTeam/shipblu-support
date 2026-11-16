@@ -37,7 +37,7 @@ withCleanDatabase();
 
 const RECEIVER = 'https://myblu.example.test/support/webhook/';
 const SECRET = 'db-test-webhook-secret-0123456789-abcdef';
-/** The API switched on: with no usable token, the job sends nothing (`api_off`). */
+/** The API switched on: with no usable token, the job waits for one (`api_off`). */
 const API_TOKEN = 'db-test-myblu-api-token-0123456789-abcdef';
 
 let errors: MockInstance;
@@ -394,15 +394,27 @@ describe('notify_myblu', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('sends nothing while the API itself is switched off, and completes', async () => {
+  // A token unset or pasted short for the minutes of a rotation: the attempt
+  // fails and is retried, so the push goes once the API is back, where a
+  // completed job had lost it for good.
+  it('fails the attempt while the API itself is switched off, and sends once it is back on', async () => {
     const messageId = await agentReply(await ticket());
     vi.stubEnv('MYBLU_API_TOKEN', '');
     resetEnvCache();
     const fetchMock = receiver();
+    const job = await jobFor(messageId);
 
-    await notifyMyblu(await jobFor(messageId));
+    const failure = await notifyMyblu(job).catch((error: unknown) => error);
 
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(PermanentJobError);
+    expect((failure as Error).message).toMatch(/the API is switched off/);
     expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.stubEnv('MYBLU_API_TOKEN', API_TOKEN);
+    resetEnvCache();
+    await notifyMyblu(job);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   // A wrong value fails only a job with something to send: asked first, it

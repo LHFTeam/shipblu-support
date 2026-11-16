@@ -14,6 +14,18 @@ import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 const log = logger('notify_myblu');
 
 /**
+ * `MYBLU_WEBHOOK_URL` as both halves read it: trimmed, and null when unset or
+ * blank. The web service queues on this answer (`mybluWebhookConfigured`) and
+ * the worker completes on it (`webhookTarget`), so the two must read one value
+ * the same way: read twice, a change to one reading — a value of spaces, say —
+ * would queue jobs the worker then completes with nothing sent, or leave a
+ * switched-on webhook queueing nothing.
+ */
+export function webhookUrl(): string | null {
+  return env().MYBLU_WEBHOOK_URL?.trim() || null;
+}
+
+/**
  * Whether the webhook is switched on: `MYBLU_WEBHOOK_URL` set, the
  * `instagramLoginConfigured()` device. Only the URL's presence, read on the web
  * service where the job is queued; whether it is a URL the worker may post to,
@@ -22,7 +34,7 @@ const log = logger('notify_myblu');
  * somebody reading the queue looks, rather than queueing nothing in silence.
  */
 export function mybluWebhookConfigured(): boolean {
-  return Boolean(env().MYBLU_WEBHOOK_URL?.trim());
+  return webhookUrl() !== null;
 }
 
 /**
@@ -72,7 +84,9 @@ function dedupeKeyFor(messageId: string): string {
  * On the pool it is best-effort, and a failure is logged rather than thrown:
  * the reply is already stored, and on the app's channel stored is delivered —
  * the app's next poll reads it — so a push that cannot be queued must not
- * read to the agent as a reply that failed, and send it twice. On a
+ * read to the agent as a reply that failed, and send it twice. That includes
+ * reading the switch, which parses the whole environment (`env()`) and so can
+ * throw over a variable that has nothing to do with the webhook. On a
  * transaction (`on`), as the survey's door queues its carrier, it throws: a
  * failed statement has already aborted the transaction, and the caller's next
  * one would fail on it anyway, with the message rolled back beside it.
@@ -82,10 +96,11 @@ export async function enqueueMessageCreated(
   messageId: string,
   { priority, on }: Pick<EnqueueOptions, 'priority' | 'on'> = {},
 ): Promise<void> {
-  if (channel !== 'api' || !mybluWebhookConfigured()) return;
+  if (channel !== 'api') return;
 
-  const queue = () =>
-    enqueue(
+  const queue = async () => {
+    if (!mybluWebhookConfigured()) return;
+    await enqueue(
       'notify_myblu',
       { event: 'message.created', messageId },
       {
@@ -95,6 +110,7 @@ export async function enqueueMessageCreated(
         maxAttempts: NOTIFY_MAX_ATTEMPTS,
       },
     );
+  };
 
   if (on) {
     await queue();

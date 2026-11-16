@@ -4632,7 +4632,7 @@
             },
             "required": ["id", "number", "status"],
             "additionalProperties": {},
-            "description": "The ticket it is about."
+            "description": "The ticket it is about. Its `status` is the one it had when this attempt was built, not a promise about it after the event: a change made with the same click — an agent's Send and resolve — can land a moment later and say nothing of its own. The app's poll is the truth."
           },
           "type": {
             "type": "string",
@@ -4709,7 +4709,7 @@
             },
             "required": ["id", "number", "status"],
             "additionalProperties": {},
-            "description": "The ticket it is about."
+            "description": "The ticket it is about. Its `status` is the one it had when this attempt was built, not a promise about it after the event: a change made with the same click — an agent's Send and resolve — can land a moment later and say nothing of its own. The app's poll is the truth."
           },
           "type": {
             "type": "string",
@@ -4795,7 +4795,7 @@
             },
             "required": ["id", "number", "status"],
             "additionalProperties": {},
-            "description": "The ticket it is about."
+            "description": "The ticket it is about. Its `status` is the one it had when this attempt was built, not a promise about it after the event: a change made with the same click — an agent's Send and resolve — can land a moment later and say nothing of its own. The app's poll is the truth."
           },
           "type": {
             "type": "string",

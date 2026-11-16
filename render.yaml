@@ -243,9 +243,11 @@ projects:
             #                            service that writes a reply reads it to
             #                            queue; only the worker posts
             #   MYBLU_WEBHOOK_SECRET     signs each delivery (HMAC-SHA256); under
-            #                            32 characters counts as unset, and a URL
-            #                            with no secret sends nothing. `openssl
-            #                            rand -hex 32`, handed to the backend once,
+            #                            32 characters counts as unset. A URL
+            #                            with no usable secret fails every job
+            #                            that would send, retried for 17 h, so
+            #                            set it before the URL. `openssl rand
+            #                            -hex 32`, handed to the backend once,
             #                            never staging's value
             #   MYBLU_WEBHOOK_SECRET_PREVIOUS
             #                            signs beside it only while the receiver

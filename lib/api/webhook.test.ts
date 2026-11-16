@@ -1,9 +1,9 @@
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { stubFetch } from '@/lib/testing/fetch';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
@@ -54,25 +54,41 @@ function guideVector() {
   };
 }
 
-/** The guide's JavaScript `verify`, written to a file of its own and imported, as a receiver would copy it. */
-async function guideVerify(): Promise<
-  (
-    rawBody: Buffer | string,
-    timestamp: string | null,
-    signature: string | null,
-    secret: string,
-    now?: number,
-  ) => boolean
-> {
-  const section = GUIDE.slice(GUIDE.indexOf('### Receiving the webhook'));
-  const code = /```js\n([\s\S]*?)\n```/.exec(section)?.[1];
-  if (!code) throw new Error('docs/myblu-api.md has no JavaScript verify');
-  const file = join(mkdtempSync(join(tmpdir(), 'myblu-verify-')), 'verify.mjs');
-  writeFileSync(file, code);
-  const copied = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as {
-    verify: Awaited<ReturnType<typeof guideVerify>>;
-  };
-  return copied.verify;
+type Verify = (
+  rawBody: Buffer | string,
+  timestamp: string | null,
+  signature: string | null,
+  secret: string,
+  now?: number,
+) => boolean;
+
+/** The directory the guide's `verify` is written to, once per file, and removed after it. */
+let verifyDir: string | null = null;
+let copiedVerify: Promise<Verify> | null = null;
+
+afterAll(() => {
+  if (verifyDir) rmSync(verifyDir, { recursive: true, force: true });
+});
+
+/**
+ * The guide's JavaScript `verify`, written to a file of its own and imported,
+ * as a receiver would copy it. Once per file: each call made a directory under
+ * the system's temporary one that nothing removed.
+ */
+function guideVerify(): Promise<Verify> {
+  copiedVerify ??= (async () => {
+    const section = GUIDE.slice(GUIDE.indexOf('### Receiving the webhook'));
+    const code = /```js\n([\s\S]*?)\n```/.exec(section)?.[1];
+    if (!code) throw new Error('docs/myblu-api.md has no JavaScript verify');
+    verifyDir = mkdtempSync(join(tmpdir(), 'myblu-verify-'));
+    const file = join(verifyDir, 'verify.mjs');
+    writeFileSync(file, code);
+    const copied = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as {
+      verify: Verify;
+    };
+    return copied.verify;
+  })();
+  return copiedVerify;
 }
 
 describe('the guide’s test vector', () => {
@@ -290,15 +306,30 @@ describe('decideMessageCreated', () => {
     });
   });
 
-  // Unsetting MYBLU_API_TOKEN is the API's way back: every request the app
-  // makes is then 503, so a push would point at nothing it can open.
-  it('sends nothing while the API is switched off, and refuses what is never a push all the same', () => {
+  // Every request the app makes is 503 while the API is off, so a push would
+  // point at nothing it can open; but the reply is there once it is back on,
+  // so the job waits for it rather than completing. Every final answer comes
+  // first, the age included, so a retry made while it is off still ends.
+  it('waits while the API is switched off, behind every answer that is final', () => {
     expect(decideMessageCreated(subject(), NOW, false)).toEqual({
-      kind: 'quiet',
+      kind: 'later',
       reason: 'api_off',
     });
     expect(decideMessageCreated(subject({ kind: 'note' }), NOW, false)).toMatchObject({
       kind: 'refuse',
+    });
+    expect(decideMessageCreated(subject({ withdrawn: true }), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'withdrawn',
+    });
+    expect(decideMessageCreated(subject({ owner: null }), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'not_in_app',
+    });
+    const late = new Date(NOW.getTime() - MAX_EVENT_AGE_MS - 1);
+    expect(decideMessageCreated(subject({ createdAt: late }), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'stale',
     });
   });
 

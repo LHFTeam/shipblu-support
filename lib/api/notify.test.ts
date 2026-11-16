@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { lastAttemptAfterSeconds, mybluWebhookConfigured, NOTIFY_MAX_ATTEMPTS } from './notify';
+import {
+  enqueueMessageCreated,
+  lastAttemptAfterSeconds,
+  mybluWebhookConfigured,
+  NOTIFY_MAX_ATTEMPTS,
+} from './notify';
 import { MAX_EVENT_AGE_MS, WEBHOOK_TIMEOUT_MS } from './webhook';
 
 /**
@@ -42,5 +47,39 @@ describe('mybluWebhookConfigured', () => {
     // Whether it is usable is the worker's to say, by name, on every job.
     setTestEnv({ MYBLU_WEBHOOK_URL: 'http://not-https.example.test' });
     expect(mybluWebhookConfigured()).toBe(true);
+  });
+});
+
+describe('enqueueMessageCreated', () => {
+  withTestEnv();
+
+  const MESSAGE = '6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
+
+  // `env()` parses the whole schema, so a variable that has nothing to do
+  // with the webhook can make reading the switch throw. On the pool the reply
+  // is already stored: a throw here left `storeAgentReply` before the rest of
+  // its work and read to the agent as a reply that failed, which they send
+  // again.
+  it('logs, and never throws, when reading the switch fails on the pool', async () => {
+    setTestEnv({ MYBLU_WEBHOOK_URL: 'https://myblu.example.test/hook', EMAIL_PROVIDER: 'nope' });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(enqueueMessageCreated('api', MESSAGE)).resolves.toBeUndefined();
+
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(String(errors.mock.calls[0]![0])).toContain('not queued');
+    errors.mockRestore();
+  });
+
+  it('throws it on a transaction, which a failure has aborted anyway', async () => {
+    setTestEnv({ MYBLU_WEBHOOK_URL: 'https://myblu.example.test/hook', EMAIL_PROVIDER: 'nope' });
+    const on = {} as NonNullable<Parameters<typeof enqueueMessageCreated>[2]>['on'];
+
+    await expect(enqueueMessageCreated('api', MESSAGE, { on })).rejects.toThrow();
+  });
+
+  it('reads nothing for a channel but the app’s', async () => {
+    setTestEnv({ EMAIL_PROVIDER: 'nope' });
+    await expect(enqueueMessageCreated('webchat', MESSAGE)).resolves.toBeUndefined();
   });
 });

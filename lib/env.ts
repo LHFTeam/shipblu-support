@@ -141,7 +141,9 @@ const schema = z.object({
    * **The URL set is the switch.** While it is unset no `notify_myblu` job is
    * queued (`mybluWebhookConfigured` in `lib/api/notify.ts`), and a job already
    * queued sends nothing when it runs, so unsetting it is the way back. A URL
-   * with no secret sends nothing.
+   * with no usable secret is not a quieter switch: every job with something
+   * to send fails by name and is retried for its seventeen hours before it
+   * goes `dead`, so stage the secret before the URL, never the URL alone.
    *
    * Plain optional strings, for the reason `LOG_ALL_INCOMING_WEBHOOKS` below
    * gives. The URL must be `https`, with no userinfo and no query string, and a

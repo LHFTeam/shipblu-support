@@ -902,7 +902,9 @@ const webhookBase = {
       number: z.int().min(1).describe("The ticket's number."),
       status: TicketStatus,
     })
-    .describe('The ticket it is about.'),
+    .describe(
+      "The ticket it is about. Its `status` is the one it had when this attempt was built, not a promise about it after the event: a change made with the same click — an agent's Send and resolve — can land a moment later and say nothing of its own. The app's poll is the truth.",
+    ),
 };
 
 export const MessageCreatedEvent = z
