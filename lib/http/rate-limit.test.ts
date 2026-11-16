@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { admit, allow, fits } from './rate-limit';
+import { admit, allow, fits, retryAfterSeconds } from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -52,6 +52,12 @@ describe('admit', () => {
 
   it('never says zero, which a client would read as "ask again now"', () => {
     expect(admit(key(), 1, 10).resetInSeconds).toBe(1);
+  });
+
+  // The one rounding every `Retry-After` comes from: whole seconds, rounded
+  // up, and never below one, a window already past included.
+  it('rounds every wait into Retry-After the one way', () => {
+    expect([200, 1_000, 1_001, 6_100, 0, -50].map(retryAfterSeconds)).toEqual([1, 1, 2, 7, 1, 1]);
   });
 
   it('starts a window again once it has passed', () => {

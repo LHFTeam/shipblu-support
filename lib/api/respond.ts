@@ -6,6 +6,7 @@ import {
   type FileRefusalReason,
 } from '@/lib/api/schemas';
 import type { z } from 'zod';
+import type { RetryAfterSeconds } from '@/lib/http/rate-limit';
 
 /**
  * How every `/api/v1` route answers, success or refusal, so none spells it out
@@ -80,7 +81,15 @@ type ErrorExtras = {
  * publishes it on every `429` — and refused on any other code, where the
  * document publishes no `Retry-After` for a client to read.
  */
-type RateLimitedExtras = ErrorExtras & { retryAfterSeconds: number };
+/**
+ * `Retry-After` is a `RetryAfterSeconds`, which only `retryAfterSeconds` in
+ * `lib/http/rate-limit.ts` makes — the one rounding to whole seconds and at
+ * least one, which every admission's `resetInSeconds` goes through — and is
+ * written as it is. The type, not a second rounding here, is what holds the
+ * rule: a second copy of the rounding could change while the other quietly
+ * overrode it, and a plain `number` let a later route pass `0` or `0.25`.
+ */
+type RateLimitedExtras = ErrorExtras & { retryAfterSeconds: RetryAfterSeconds };
 type OtherExtras = ErrorExtras & { retryAfterSeconds?: never };
 
 /**
@@ -125,7 +134,7 @@ export function apiError(
 
   const headers: Record<string, string> = {};
   if (extras.retryAfterSeconds !== undefined) {
-    headers['Retry-After'] = String(Math.max(1, Math.ceil(extras.retryAfterSeconds)));
+    headers['Retry-After'] = String(extras.retryAfterSeconds);
   }
 
   return apiJson(body, { requestId: extras.requestId, status: ERROR_STATUS[code], headers });

@@ -35,7 +35,25 @@ export function allow(key: string, limit: number, windowMs: number, cost = 1): b
   return admit(key, limit, windowMs, cost).allowed;
 }
 
-export type Admission = { allowed: boolean; resetInSeconds: number };
+declare const wholeSeconds: unique symbol;
+
+/**
+ * A wait as `Retry-After` carries it: whole seconds, at least one. Only
+ * `retryAfterSeconds` makes one, so a value that skipped the rounding — a
+ * backoff in milliseconds divided by a thousand, a literal `0` — does not
+ * compile where the header is written. Typed as a plain `number`, the rule
+ * lived in a comment, and `Retry-After: 0.25` or `0` compiled: the first is no
+ * value RFC 9110 allows, the second tells the client to ask again at once,
+ * against a bucket that still refuses.
+ */
+export type RetryAfterSeconds = number & { readonly [wholeSeconds]: true };
+
+/** The one rounding of a wait into `Retry-After`: a window with 200 ms left is "1", never "0". */
+export function retryAfterSeconds(msLeft: number): RetryAfterSeconds {
+  return Math.max(1, Math.ceil(msLeft / 1000)) as RetryAfterSeconds;
+}
+
+export type Admission = { allowed: boolean; resetInSeconds: RetryAfterSeconds };
 
 /**
  * `allow`, and how long until the window turns.
@@ -63,7 +81,7 @@ export function admit(key: string, limit: number, windowMs: number, cost = 1): A
   bucket.count += cost;
   return {
     allowed: bucket.count <= limit,
-    resetInSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    resetInSeconds: retryAfterSeconds(bucket.resetAt - now),
   };
 }
 

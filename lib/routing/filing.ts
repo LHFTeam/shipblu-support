@@ -4,8 +4,8 @@
  * whatever the mode says, and both are decided by ingest, not by the row:
  *
  * - **another row files them.** Email, the Meta rows and web chat each file
- *   under the oldest active row of their type, so a second one's mode does
- *   nothing.
+ *   under the oldest active row of their type, and so will the myBlu app
+ *   (`apiChannel`), so a second one's mode does nothing.
  * - **an active owner.** An owned number's ticket is stamped with its owner in
  *   the insert, and a ticket with an assignee is never held
  *   (`lib/routing/start.ts`).
@@ -29,7 +29,7 @@ export type FilingInput = {
  * row, while none is active, is stood in for by its platform's row — that is
  * not this one. `rows` oldest first, ties by id: the order every ingest path
  * picks "the row of this type" by (`defaultEmailChannel`, `channelFor`,
- * `webchatChannel`).
+ * `webchatChannel`), and `apiChannel` for the myBlu app's.
  */
 export function filingRowFor<T extends FilingInput>(channel: T, rows: readonly T[]): T | null {
   if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;
@@ -54,12 +54,53 @@ export function ownedByActiveAgent(channel: FilingInput): boolean {
   return channel.type === 'whatsapp' && channel.ownerActive === true;
 }
 
+/**
+ * Types a row can be made for before any ingest path files a ticket under it.
+ * The myBlu app's row is made ahead of the release that opens its tickets
+ * (`plans/myblu-ticket-api.md`, stage 2), and until that path ships its mode
+ * routes nothing: the panel said "held and routed" of a row that filed no
+ * ticket. Emptied by the stage whose path files under the type.
+ */
+const NOT_FILED_YET: readonly string[] = ['api'];
+
+/**
+ * Whether an ingest path files tickets under a row of this type yet. Asked by
+ * `planRouting` as well as by the panel and the report, so the list cannot
+ * claim one thing while the router does another: a type left on it after its
+ * path ships starts no routing, and that stage's own routing test fails.
+ */
+export function filedYet(type: string): boolean {
+  return !NOT_FILED_YET.includes(type);
+}
+
+/**
+ * Why a new ticket on `channel` does not reach the question of its mode, or
+ * null when it does. One answer, in one order, for the readiness panel and
+ * `/reports/routing`, so the two name the same reason for a row:
+ *
+ * - `not_filed_yet` first, whatever else is true of the row: no ingest path
+ *   files under its type, so nothing about it holds a ticket — not its being
+ *   off, which would speak of tickets held under it before, nor another row of
+ *   its type, which files nothing either.
+ * - `inactive`: a row switched off files nothing new.
+ * - `another_row`: another row of its type files its tickets.
+ * - `owned`: its number's active owner is stamped on each one.
+ */
+export type FilingGap = 'not_filed_yet' | 'inactive' | 'another_row' | 'owned';
+
+/** `rows` as `filingRowFor` takes them. */
+export function filingGap<T extends FilingInput>(channel: T, rows: readonly T[]): FilingGap | null {
+  if (!filedYet(channel.type)) return 'not_filed_yet';
+  if (!channel.isActive) return 'inactive';
+  if (filingRowFor(channel, rows) !== channel) return 'another_row';
+  if (ownedByActiveAgent(channel)) return 'owned';
+  return null;
+}
+
 /** True when a new ticket on `channel` reaches the question of its mode. `rows` as `filingRowFor` takes them. */
 export function filesRoutableTickets<T extends FilingInput>(
   channel: T,
   rows: readonly T[],
 ): boolean {
-  return (
-    channel.isActive && filingRowFor(channel, rows) === channel && !ownedByActiveAgent(channel)
-  );
+  return filingGap(channel, rows) === null;
 }

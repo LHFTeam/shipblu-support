@@ -1,6 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels } from '@/db/schema';
+import { switchRow, type RowSwitchOutcome } from '@/lib/admin/row-switch';
 import { logger } from '@/lib/log';
 import {
   reportedRow,
@@ -17,15 +18,6 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export const ONLY_WEBCHAT_ROW =
   'This is the only active web chat row, and the widget needs one: without it chats are filed under no row and no group. Switch another web chat row on, or add one, first.';
-
-/**
- * What a switch did, or why it did nothing, with the web chat rows as it left
- * them (`webchatStateKey`): the page shows the answer only while its rows
- * agree. A refusal about rows the page drew wrongly carries them too, so the
- * page can be drawn again; one for a row that is not web chat does not.
- */
-export type SwitchOutcome =
-  { ok: true; notice: string; stateKey: string } | { ok: false; error: string; stateKey?: string };
 
 /**
  * Serialise everything that decides by which web chat row the widget uses: a
@@ -112,41 +104,21 @@ export async function webchatEditRefusal(
  * ticket held for the router on it is still decided by its mode. Only new chats
  * move.
  */
-export async function switchWebchatRow(id: string, active: boolean): Promise<SwitchOutcome> {
-  return db.transaction(async (tx) => {
-    await lockWebchatRows(tx);
-
-    const [target] = await tx
-      .select({ type: channels.type })
-      .from(channels)
-      .where(eq(channels.id, id))
-      .limit(1);
-    if (target && target.type !== 'webchat') {
-      return { ok: false, error: 'Only a web chat channel is switched on and off here' };
-    }
-
-    const rows = await webchatRowsIn(tx);
-    const stateKey = webchatStateKey(rows);
-    const row = rows.find((candidate) => candidate.id === id);
-    if (!row) {
-      return { ok: false, error: 'That channel no longer exists — reload the page', stateKey };
-    }
-    if (row.isActive === active) {
-      return { ok: true, notice: `“${row.name}” is already ${active ? 'on' : 'off'}.`, stateKey };
-    }
-    if (!active && webchatSwitch(rows, id)?.kind === 'only_row') {
-      return { ok: false, error: ONLY_WEBCHAT_ROW, stateKey };
-    }
-
-    await tx
-      .update(channels)
-      .set({ isActive: active, updatedAt: new Date() })
-      .where(eq(channels.id, id));
-    log.info('web chat row switched', { channel: id, active });
-
-    const after = rows.map((candidate) =>
-      candidate.id === id ? { ...candidate, isActive: active } : candidate,
-    );
-    return { ok: true, notice: switchNotice(rows, id, active), stateKey: webchatStateKey(after) };
-  });
+export async function switchWebchatRow(id: string, active: boolean): Promise<RowSwitchOutcome> {
+  return switchRow(
+    {
+      type: 'webchat',
+      wrongType: 'Only a web chat channel is switched on and off here',
+      lock: lockWebchatRows,
+      rowsIn: webchatRowsIn,
+      stateKey: webchatStateKey,
+      refusal: (rows, row, on) =>
+        !on && webchatSwitch(rows, row)?.kind === 'only_row' ? ONLY_WEBCHAT_ROW : null,
+      notice: switchNotice,
+      log,
+      logLine: 'web chat row switched',
+    },
+    id,
+    active,
+  );
 }

@@ -1342,18 +1342,46 @@ function document(): Json {
   };
 }
 
-let built: Json | undefined;
-let serialised: string | undefined;
+/** How long a failed build is thrown again before the next call builds once more. */
+export const FAILED_BUILD_KEPT_MS = 60_000;
+
+/**
+ * `build`'s value, built on first use and kept for the process; the error it
+ * threw, kept and thrown again for `FAILED_BUILD_KEPT_MS`, then built again.
+ *
+ * Both halves matter on a public, unauthenticated route. Keeping only a
+ * success built again on every call after a failure, and a worked example that
+ * no longer passes its schema cost a whole `z.toJSONSchema` and every
+ * example's validation per request, 1,200 a minute per address, each answering
+ * `500`. Keeping a failure for good turned a one-off — a `RangeError` or a
+ * memory spike on a busy instance — into a `500` until the instance was
+ * recycled, while the app's developers and the SDK's `contract:pull` read the
+ * contract from it. Kept for a minute, a broken document costs one build a
+ * minute per instance, and a passing failure is gone within one.
+ */
+export function memoised<T>(build: () => T, now: () => number = Date.now): () => T {
+  let value: { value: T } | undefined;
+  let failure: { error: unknown; at: number } | undefined;
+  return () => {
+    if (value) return value.value;
+    if (failure && now() - failure.at < FAILED_BUILD_KEPT_MS) throw failure.error;
+    try {
+      value = { value: build() };
+      failure = undefined;
+      return value.value;
+    } catch (error) {
+      failure = { error, at: now() };
+      throw error;
+    }
+  };
+}
 
 /**
  * The document, built once per process on first use. Lazily, never at module
  * scope: `next build` imports the route that serves it, and a build should not
  * pay for a document nobody asked for.
  */
-export function openApiDocument(): Json {
-  built ??= document();
-  return built;
-}
+export const openApiDocument: () => Json = memoised(document);
 
 /**
  * The document as the route sends it, serialised once beside the object. It
@@ -1361,7 +1389,4 @@ export function openApiDocument(): Json {
  * deploy, so stringifying it per request spent an instance's CPU on a route
  * whose only limit is the address bucket's 1,200 a minute.
  */
-export function openApiDocumentJson(): string {
-  serialised ??= JSON.stringify(openApiDocument());
-  return serialised;
-}
+export const openApiDocumentJson: () => string = memoised(() => JSON.stringify(openApiDocument()));

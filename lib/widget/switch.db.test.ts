@@ -52,7 +52,7 @@ describe('switchWebchatRow', () => {
     expect(await switchWebchatRow(chat!, false)).toEqual({
       ok: false,
       error: ONLY_WEBCHAT_ROW,
-      stateKey: [`${chat}:on:-`, `${old}:off:-`].sort().join(','),
+      stateKey: [`${chat}:on:-:Web%20chat`, `${old}:off:-:Old%20copy`].sort().join(','),
     });
     expect(await active()).toEqual(['Web chat']);
   });
@@ -67,7 +67,7 @@ describe('switchWebchatRow', () => {
     const off = await switchWebchatRow(first!, false);
     expect(off).toMatchObject({
       ok: true,
-      stateKey: [`${first}:off:-`, `${second}:on:-`].sort().join(','),
+      stateKey: [`${first}:off:-:First`, `${second}:on:-:Second`].sort().join(','),
     });
     expect(off.ok && off.notice).toContain('the widget now uses “Second”');
     expect((await webchatChannel())?.id).toBe(second);
@@ -75,7 +75,7 @@ describe('switchWebchatRow', () => {
     const on = await switchWebchatRow(first!, true);
     expect(on).toMatchObject({
       ok: true,
-      stateKey: [`${first}:on:-`, `${second}:on:-`].sort().join(','),
+      stateKey: [`${first}:on:-:First`, `${second}:on:-:Second`].sort().join(','),
     });
     expect(on.ok && on.notice).toContain('the widget now uses it');
     expect((await webchatChannel())?.id).toBe(first);
@@ -110,7 +110,7 @@ describe('switchWebchatRow', () => {
     expect(await switchWebchatRow(chat!, true)).toEqual({
       ok: true,
       notice: '“Web chat” is already on.',
-      stateKey: `${chat}:on:-`,
+      stateKey: `${chat}:on:-:Web%20chat`,
     });
     const [after] = await db
       .select({ updatedAt: channels.updatedAt })

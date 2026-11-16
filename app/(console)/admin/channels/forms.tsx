@@ -21,8 +21,8 @@ import {
   metaPlatformOf,
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
-import type { AdminState, WebchatSwitchState } from '../settings-shared';
-import { saveChannel, setNumberOwner, setWebchatActive } from './actions';
+import type { AdminState, RowSwitchState } from '../settings-shared';
+import { saveChannel, setApiChannelActive, setNumberOwner, setWebchatActive } from './actions';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { InfoTip } from '@/components/tooltip';
 import { SubmitButton } from '@/components/submit-button';
@@ -30,15 +30,16 @@ import { useActionForm } from '@/components/use-action-form';
 import { CHANNEL_TYPES, channelTypeLabel, isChannelType, type ChannelType } from './channel-types';
 
 const INITIAL: AdminState = { error: null };
-const SWITCH_INITIAL: WebchatSwitchState = { error: null };
+const ROW_SWITCH_INITIAL: RowSwitchState = { error: null };
 
 /**
  * A row as the column stores it, which is a wider set than a form can save.
  *
- * `portal` and `api` channels are created by the product rather than by an
- * admin — the customer portal opens one on first use — and `saveChannel` refuses
- * both. Widening its allowlist to let this form reach them would also let a
- * forged `type` through the add form, so the editor declines them instead.
+ * A `portal` row is not one an admin makes or edits, and `saveChannel` refuses
+ * it. Widening its allowlist to let this form reach one would also let a forged
+ * `type` through the add form, so the editor declines it instead. An `api` row
+ * is an admin's since stage 2 of `plans/myblu-ticket-api.md`
+ * (`channel-types.ts` says why), and is edited here like any other.
  */
 export type ChannelRow = {
   id: string;
@@ -96,7 +97,7 @@ export function ChannelForm({
           </Select>
         </Field>
 
-        <NameField className="sm:flex-1" />
+        <NameField type={type} className="sm:flex-1" />
         <AddressField type={type} />
 
         {/* Only for WhatsApp, and only once there is a choice to make: with one
@@ -181,7 +182,7 @@ export function ChannelEditor({
       <input type="hidden" name="type" value={type} />
 
       <div className="flex flex-col gap-3 sm:flex-row">
-        <NameField className="sm:flex-1" defaultValue={channel.name} />
+        <NameField type={type} className="sm:flex-1" defaultValue={channel.name} />
         <AddressField type={type} config={channel.config} />
 
         {/* Rendered whenever there is an account at all, unlike the add form
@@ -450,10 +451,42 @@ function movesHint(count: number, ownerOnly: boolean): string {
   return `Its ${count} open or pending tickets go with it: from now they count against the new owner, and those the current owner or nobody holds are reassigned to them. ${resolved}`;
 }
 
-function NameField({ className, defaultValue }: { className?: string; defaultValue?: string }) {
+/**
+ * What the Name box suggests, per type. One placeholder for every type had the
+ * add form suggesting "Support mailbox" beside "The myBlu app needs no
+ * address". Keyed by the type, so a type added to `CHANNEL_TYPES` does not
+ * compile until it says what to suggest, rather than inheriting the mailbox's.
+ * The myBlu app's is its label, the name the plan expects its row to carry.
+ */
+const NAME_PLACEHOLDERS: Record<ChannelType, string> = {
+  email: 'Support mailbox',
+  whatsapp: 'Support number',
+  webchat: 'Chat widget',
+  facebook: 'Facebook Page',
+  facebook_comment: 'Facebook comments',
+  instagram: 'Instagram account',
+  instagram_comment: 'Instagram comments',
+  whatsapp_bot: 'WhatsApp customer bot',
+  api: channelTypeLabel('api'),
+};
+
+function NameField({
+  type,
+  className,
+  defaultValue,
+}: {
+  type: ChannelType;
+  className?: string;
+  defaultValue?: string;
+}) {
   return (
     <Field label="Name" className={className}>
-      <Input name="name" defaultValue={defaultValue} placeholder="Support mailbox" required />
+      <Input
+        name="name"
+        defaultValue={defaultValue}
+        placeholder={NAME_PLACEHOLDERS[type]}
+        required
+      />
     </Field>
   );
 }
@@ -502,6 +535,26 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
           placeholder="1234567890"
         />
       </Field>
+    );
+  }
+
+  // Name, default group and routing mode, and nothing else: the app reaches us
+  // with a session, not at anything a row could hold, and `saveChannel` stores
+  // an empty config for it. The mode is offered from the first day, because the
+  // path that opens an app's ticket reads it through `planRouting` and so needs
+  // no change the day the support lead sets it to category; until that path
+  // ships nothing files under the row, the setting waits for it, and the
+  // readiness panel says so (`filedYet`). `routingModeOf` needs no `api` case:
+  // it honours the column on any row that is neither the bot nor a number on
+  // the Business app, and the panel judges the filing row by
+  // `filingRowOfType`, the oldest active row of the type — the rule
+  // `apiChannel` reads by.
+  if (type === 'api') {
+    return (
+      <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
+        The myBlu app needs no address — only a default group, where its new tickets start. The app
+        uses the oldest active myBlu app row.
+      </p>
     );
   }
 
@@ -755,7 +808,7 @@ export function WebchatSettings({
 
       {/* The widget's row is edited here rather than by the row editor in the
           list, so its name is too. */}
-      <NameField className="sm:w-72" defaultValue={channel.name} />
+      <NameField type="webchat" className="sm:w-72" defaultValue={channel.name} />
 
       <div className="grid gap-3 sm:grid-cols-2">
         {(['ar', 'en'] as const).map((locale) => (
@@ -841,6 +894,93 @@ export type WebchatSwitchView =
   | { kind: 'switch_off'; widgetMovesTo: string | null }
   | { kind: 'switch_on'; takesWidget: boolean };
 
+/** A row switch's answer, shown only while the page's rows are as the action left them. */
+type RowSwitchAnswer = {
+  form: ReturnType<typeof useActionForm<RowSwitchState>>['form'];
+  notice: string | null;
+  error: string | null;
+};
+
+function useRowSwitch(
+  action: (state: RowSwitchState, formData: FormData) => Promise<RowSwitchState>,
+  stateKey: string,
+): RowSwitchAnswer {
+  const { state, form } = useActionForm(action, ROW_SWITCH_INITIAL);
+  const current = state.stateKey === undefined || state.stateKey === stateKey;
+  return {
+    form,
+    notice: current ? (state.notice ?? null) : null,
+    error: current ? state.error : null,
+  };
+}
+
+/**
+ * The notice outlives the form's place in the row, on a line of its own as the
+ * owner handover's does: it says where the widget or the app went, which is
+ * the sentence the admin needs, and inside the form it squeezed the button off
+ * its line.
+ */
+function NoticeLine({ notice }: { notice: string | null }) {
+  return notice ? (
+    <div className="w-full">
+      <SuccessText>{notice}</SuccessText>
+    </div>
+  ) : null;
+}
+
+/**
+ * One row switch, web chat's or the myBlu app's: its own form, holding nothing
+ * but the row and the direction, so `ConfirmSubmit` may sit in it beside a row
+ * editor that holds a text box (§6.90); the error under the button; the notice
+ * on its own line. One copy, so a fix to the confirm's wiring or the stale
+ * answer reaches both rows: they were near line-for-line copies.
+ *
+ * An `info` ⓘ shares a centred line with the button, inside the form and above
+ * the error, so it sits on the button's middle whatever the button's height
+ * and stays beside it when an error wraps underneath. It is a `type="button"`
+ * that carries no field, so the form still posts only the row and the
+ * direction.
+ */
+function RowSwitchForm({
+  answer,
+  channelId,
+  on,
+  confirmLabel,
+  info,
+}: {
+  answer: RowSwitchAnswer;
+  channelId: string;
+  on: boolean;
+  confirmLabel: string;
+  info?: React.ReactNode;
+}) {
+  const submit = (
+    <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
+  );
+  return (
+    <>
+      <form {...answer.form} className="inline-flex flex-col items-end gap-1">
+        <input type="hidden" name="id" value={channelId} />
+        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
+        {info ? (
+          <span className="inline-flex items-center gap-1">
+            {submit}
+            {info}
+          </span>
+        ) : (
+          submit
+        )}
+        {answer.error ? (
+          <span className="max-w-xs text-end">
+            <ErrorText inline>{answer.error}</ErrorText>
+          </span>
+        ) : null}
+      </form>
+      <NoticeLine notice={answer.notice} />
+    </>
+  );
+}
+
 /**
  * A web chat row's active switch.
  *
@@ -871,20 +1011,8 @@ export function WebchatActiveSwitch({
   plan: WebchatSwitchView;
   stateKey: string;
 }) {
-  const { state, form } = useActionForm(setWebchatActive, SWITCH_INITIAL);
-  const current = state.stateKey === undefined || state.stateKey === stateKey;
-  const notice = current ? state.notice : null;
-  const error = current ? state.error : null;
-
-  // The notice outlives the form's place in the row, on a line of its own as
-  // the owner handover's does: it says where the widget went, which is the
-  // sentence the admin needs, and inside the form it squeezed the button off
-  // its line.
-  const noticeLine = notice ? (
-    <div className="w-full">
-      <SuccessText>{notice}</SuccessText>
-    </div>
-  ) : null;
+  const answer = useRowSwitch(setWebchatActive, stateKey);
+  const { error } = answer;
 
   // A page drawn before another row went off is drawn again with the refusal
   // its click earned, and the button that was pressed is then this line, so
@@ -907,33 +1035,84 @@ export function WebchatActiveSwitch({
             </span>
           ) : null}
         </span>
-        {noticeLine}
+        <NoticeLine notice={answer.notice} />
       </>
     );
   }
 
   const on = plan.kind === 'switch_on';
-  const confirmLabel = on
-    ? plan.takesWidget
-      ? 'Move the widget to this row?'
-      : 'Really switch on?'
-    : plan.widgetMovesTo
-      ? `Move the widget to “${plan.widgetMovesTo}”?`
-      : 'Really switch off?';
-
   return (
-    <>
-      <form {...form} className="inline-flex flex-col items-end gap-1">
-        <input type="hidden" name="id" value={channelId} />
-        <input type="hidden" name="active" value={on ? 'on' : 'off'} />
-        <ConfirmSubmit label={on ? 'Switch on' : 'Switch off'} confirmLabel={confirmLabel} />
-        {error ? (
-          <span className="max-w-xs text-end">
-            <ErrorText inline>{error}</ErrorText>
-          </span>
-        ) : null}
-      </form>
-      {noticeLine}
-    </>
+    <RowSwitchForm
+      answer={answer}
+      channelId={channelId}
+      on={on}
+      confirmLabel={
+        on
+          ? plan.takesWidget
+            ? 'Move the widget to this row?'
+            : 'Really switch on?'
+          : plan.widgetMovesTo
+            ? `Move the widget to “${plan.widgetMovesTo}”?`
+            : 'Really switch off?'
+      }
+    />
+  );
+}
+
+/**
+ * What switching a myBlu app row would do, as the page worked it out from the
+ * rows it drew (`apiSwitch`), carrying names rather than rows into the browser.
+ */
+export type ApiSwitchView =
+  | { kind: 'switch_off'; appMovesTo: string | null; last: boolean }
+  | { kind: 'switch_on'; takesApp: boolean };
+
+/**
+ * A myBlu app row's active switch, built as `WebchatActiveSwitch` is and for
+ * its reasons: its own form posting to `setApiChannelActive`, holding nothing
+ * but the row and the direction, so `ConfirmSubmit` may sit in it beside a
+ * row editor that holds a text box; through `useActionForm`, so an action that
+ * throws is a sentence beside the button; and an answer about the `api` rows
+ * shown only while the page's rows are as the action left them (`stateKey`).
+ *
+ * It has no "only row" line, because the last active row may go off: that is
+ * how new tickets from the app are stopped. The second click is where that is
+ * said, and the explanation sits beside the button, one gesture away, since
+ * "switch off" alone does not say that customers keep their tickets.
+ */
+export function ApiActiveSwitch({
+  channelId,
+  plan,
+  stateKey,
+}: {
+  channelId: string;
+  plan: ApiSwitchView;
+  stateKey: string;
+}) {
+  const on = plan.kind === 'switch_on';
+  return (
+    <RowSwitchForm
+      answer={useRowSwitch(setApiChannelActive, stateKey)}
+      channelId={channelId}
+      on={on}
+      confirmLabel={
+        on
+          ? plan.takesApp
+            ? 'Open the app’s new tickets here?'
+            : 'Really switch on?'
+          : plan.last
+            ? 'Stop new tickets from the app?'
+            : plan.appMovesTo
+              ? `Move the app to “${plan.appMovesTo}”?`
+              : 'Really switch off?'
+      }
+      info={
+        <InfoTip label="switching the myBlu app row">
+          The app opens its new tickets under the oldest active myBlu app row. With none on, it
+          cannot open a ticket, while customers keep reading and replying on the tickets they
+          already have, and agents answer them here as before.
+        </InfoTip>
+      }
+    />
   );
 }
