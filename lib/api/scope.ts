@@ -1,7 +1,7 @@
 import { and, eq, exists, isNull, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
-import { apiTickets, conversations } from '@/db/schema';
+import { apiTickets, contactIdentities, conversations } from '@/db/schema';
 import type { Caller } from './sessions';
 
 /** The columns of `conversations`, or of an alias of it, that the predicate reads. */
@@ -51,18 +51,48 @@ export function ownedTicket(caller: Caller, table: TicketColumns = conversations
 }
 
 /**
- * `ownedTicket` without its requester half: a ticket this identity opened, on
- * `api`, not deleted, spam or merged away. For a read on the pool before a
- * write's lock, which may only refuse (`openedStatus` in `lib/api/tickets.ts`):
- * the requester half is the one a contact merge moves, so the gate's contact,
- * read before a merge committed, would refuse the user's own ticket, and the
- * SDK drops a ticket answered `404`. The identity is never moved off its
- * ownership rows, so this answers no for nothing `ownedTicket` would answer
- * yes for. Built here, as `ownedTicket`'s own first half, so the pre-check can
- * never be stricter than the locked read it stands in front of: a condition
- * loosened in one is loosened in both.
+ * `ownedTicket` with its requester half read through the identity in the
+ * statement itself, not off the gate's contact. For a read on the pool before
+ * a write's lock, which may only refuse (`openedStatus` in
+ * `lib/api/tickets.ts`).
+ *
+ * Not the gate's contact: the requester half is the one a contact merge moves,
+ * so a contact read before a merge committed would refuse the user's own
+ * ticket, and the SDK drops a ticket answered `404`. A merge moves the
+ * identity and the ticket's requester in one transaction, so one statement
+ * reads both before it or both after, and this answers no for nothing the
+ * locked read — which reads the contact through the identity too
+ * (`holdAccount`) — would answer yes for.
+ *
+ * Not without the half either, as it first was: a ticket whose requester an
+ * agent moved to another contact keeps its ownership row, so the pre-check
+ * answered its status, a closed one `409` rather than the locked read's `404`,
+ * and an open one let 25 MB go to Storage before the locked read refused it.
+ *
+ * The rest is `ownedTicket`'s own first half, so a condition loosened in one
+ * is loosened in both.
  */
-export function openedTicket(
+export function ownedTicketNow(
+  caller: Pick<Caller, 'identityId'>,
+  table: TicketColumns = conversations,
+): SQL {
+  return and(
+    openedTicket(caller, table),
+    eq(
+      table.requesterContactId,
+      db
+        .select({ contactId: contactIdentities.contactId })
+        .from(contactIdentities)
+        .where(eq(contactIdentities.id, caller.identityId)),
+    ),
+  )!;
+}
+
+/**
+ * `ownedTicket` without its requester half: a ticket this identity opened, on
+ * `api`, not deleted, spam or merged away. The half both predicates share.
+ */
+function openedTicket(
   caller: Pick<Caller, 'identityId'>,
   table: TicketColumns = conversations,
 ): SQL {

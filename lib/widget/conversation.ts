@@ -551,9 +551,15 @@ export async function releaseUnlessStored(
     await discardPaths(paths, conversationId);
     return 'released';
   }
-  log.warn(
-    `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${paths.join(',')}`,
-  );
+  // Only about files: the myBlu app asks this of every write that threw, words
+  // alone included, and a line about keeping no files is noise in the log
+  // search during the very outage that causes it. The write's own error is
+  // what reports the failure.
+  if (paths.length > 0) {
+    log.warn(
+      `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${paths.join(',')}`,
+    );
+  }
   return 'kept';
 }
 

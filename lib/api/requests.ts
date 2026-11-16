@@ -97,6 +97,20 @@ const EMPTY = 'A message needs words or files.';
  * know is. Nothing is stored here: the bytes are held for the write, which
  * stores them with the message or not at all (`lib/api/tickets.ts`).
  */
+/**
+ * A multipart text part with its line breaks put back as they were typed.
+ * The HTML encoding of a form turns each line break in a text value into
+ * CRLF, and browsers and undici's `FormData` follow it, so the words sent with
+ * a photo arrived longer than the same words sent as JSON — a message of 1,900
+ * characters and 150 line breaks was refused as too long beside a photo and
+ * taken without one — and were stored with CRs the JSON path never has. Before
+ * the schema, so the limit counts what the user wrote. A file part is left as
+ * it is.
+ */
+function unixLines(part: FormDataEntryValue | undefined): FormDataEntryValue | undefined {
+  return typeof part === 'string' ? part.replace(/\r\n?/g, '\n') : part;
+}
+
 export async function sendFields(
   request: Request,
   requestId: string,
@@ -138,7 +152,7 @@ export async function sendFields(
   }
 
   const parsed = schemas.multipart.safeParse({
-    text: form.get('text') ?? undefined,
+    text: unixLines(form.get('text') ?? undefined),
     locale: form.get('locale') ?? undefined,
     trackingNumber: form.get('trackingNumber') ?? undefined,
     files: form.getAll('files'),

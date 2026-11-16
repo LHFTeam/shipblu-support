@@ -12,7 +12,7 @@ import {
 } from '@/lib/api/requests';
 import { apiJson, newRequestId } from '@/lib/api/respond';
 import type { MessagesPage } from '@/lib/api/schemas';
-import { readMessages, sendApiMessage } from '@/lib/api/tickets';
+import { keyAnswer, readMessages, sendApiMessage } from '@/lib/api/tickets';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { logger } from '@/lib/log';
 
@@ -81,6 +81,18 @@ export async function POST(request: Request, context: Context): Promise<Response
 
     const keyed = idempotencyKey(request, requestId);
     if ('refusal' in keyed) return keyed.refusal;
+    // A key already spent is answered before the body is read, so a retry of a
+    // 25 MB send is not parsed and copied for an answer that uses none of it.
+    const key = await keyAnswer(caller, keyed.key, 'sendMessage', id);
+    if ('answer' in key) {
+      log.info('message send answered', {
+        route,
+        identity: caller.identityId,
+        outcome: key.answer.kind === 'sent' ? 'replayed' : key.answer.kind,
+        requestId,
+      });
+      return answerSend(key.answer, requestId);
+    }
     const read = await sendFields(request, requestId, 'sendMessage');
     if ('refusal' in read) return read.refusal;
 
@@ -88,7 +100,7 @@ export async function POST(request: Request, context: Context): Promise<Response
       text: read.text,
       locale: read.locale,
       uploads: read.uploads,
-      key: keyed.key,
+      key: key.key,
       // Present and parsed: the gate refuses a request without it.
       client: request.headers.get('shipblu-client') ?? '',
     });

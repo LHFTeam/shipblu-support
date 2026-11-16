@@ -1599,10 +1599,16 @@ differ, each on purpose. A multipart body without `Content-Length` is
 `411 length_required` rather than read: the SDK builds its body in a file and
 knows its length, and the proxy's truncation is otherwise silent. And the files
 go to Storage only once the pool says the key is unspent and the upload budget
-(100 MB an hour on the identity, `uploadFits`) has room, and on a reply only to
-a ticket the identity opened that is not closed (`openedStatus`, by the
-identity alone, never the merge-moved requester, so it cannot answer a false
-`404`); the budget is spent once the message is stored. A file is fetched
+(100 MB an hour on the identity, counted to the byte, `uploadFits`) has room,
+and on a reply only to a ticket the user owns that is not closed
+(`openedStatus`, through `ownedTicketNow`, whose requester is read through the
+identity in the statement rather than off the gate's contact, so a merge
+cannot make it answer a false `404` and a ticket moved to another contact is
+the locked read's `404`, not its status); the budget is spent once the message
+is stored. The key is asked first of all, before the body is read
+(`keyAnswer`, whose `UnspentKey` is the only key a writer takes), so a retry of
+a 25 MB send is answered without being parsed. Multipart text has its CRLFs put
+back to LF before the schema counts it, as the form encoding wrote them. A file is fetched
 through `GET /attachments/{id}` (`attachmentLink`), which reaches it through its
 message and `ownedTicket`, in one statement: exactly the files a thread lists,
 answered as a five-minute Storage link in JSON, never a redirect. An app

@@ -43,7 +43,11 @@ vi.mock('@/lib/storage', async (importOriginal) => ({
   },
 }));
 
-const lostCommit = vi.hoisted(() => ({ armed: false }));
+const lostCommit = vi.hoisted(() => ({
+  armed: false,
+  /** The transaction after the lost one fails before it starts: the pool still down. */
+  thenFails: false,
+}));
 vi.mock('@/db/client', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/db/client')>();
   const db = new Proxy(real.db, {
@@ -55,6 +59,10 @@ vi.mock('@/db/client', async (importOriginal) => {
           await target.transaction(...args);
           throw new Error('connection lost after COMMIT');
         };
+      }
+      if (property === 'transaction' && lostCommit.thenFails) {
+        lostCommit.thenFails = false;
+        return () => Promise.reject(new Error('connection lost again'));
       }
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -75,7 +83,7 @@ const {
 } = await import('@/db/schema');
 const { resetEnvCache } = await import('@/lib/env');
 const { withCleanDatabase } = await import('@/lib/testing/db');
-const { uploadFits } = await import('@/lib/api/limits');
+const { UPLOAD_BYTES_LIMIT, uploadFits } = await import('@/lib/api/limits');
 const { lookupSession } = await import('@/lib/api/sessions');
 const { AttachmentLink, ErrorBody, SendResult, Session } = await import('@/lib/api/schemas');
 const { POST: postSession } = await import('./sessions/route');
@@ -107,6 +115,7 @@ beforeEach(async () => {
   storage.signed.length = 0;
   storage.duringUpload = null;
   lostCommit.armed = false;
+  lostCommit.thenFails = false;
   vi.stubEnv('MYBLU_API_TOKEN', TOKEN);
   resetEnvCache();
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -410,7 +419,9 @@ describe('a send with files', () => {
     expect(answered.message.attachments).toHaveLength(1);
     expect(storage.removed).toEqual([]);
     // The work after the commit ran: the budget is spent.
-    expect(uploadFits(session.caller.identityId, 100).allowed).toBe(false);
+    expect(
+      uploadFits(session.caller.identityId, UPLOAD_BYTES_LIMIT - JPEG.length + 1).allowed,
+    ).toBe(false);
 
     // The SDK's retry under the same key: what the first stored, its file
     // included, and nothing uploaded a second time.
@@ -418,6 +429,26 @@ describe('a send with files', () => {
     expect(replayed.message.id).toBe(answered.message.id);
     expect(storage.uploaded).toHaveLength(1);
     expect(storage.removed).toEqual([]);
+  });
+
+  // The pool has just lost one answer, so the re-read of the requester can
+  // fail too: thrown, its error took the place of the first, the request
+  // answered 500, and the budget the stored file owed went unspent.
+  it('carries on with the session’s requester when the re-read after a lost answer fails too', async () => {
+    const token = await minted();
+    const session = await lookupSession(token, new Date());
+    if (session.kind !== 'live') throw new Error('expected a live session');
+    const ticket = (await sent(await create(token, [['text', 'Hello']]))).ticket;
+
+    lostCommit.armed = true;
+    lostCommit.thenFails = true;
+    const answered = await sent(await send(token, ticket.id, [['files', photo()]]));
+
+    expect(answered.message.attachments).toHaveLength(1);
+    expect(lostCommit.thenFails).toBe(false);
+    expect(
+      uploadFits(session.caller.identityId, UPLOAD_BYTES_LIMIT - JPEG.length + 1).allowed,
+    ).toBe(false);
   });
 
   it('carries on after a create whose COMMIT landed but whose answer was lost, files or none', async () => {
@@ -441,6 +472,90 @@ describe('a send with files', () => {
     );
   });
 
+  // The pre-check read the ticket by the identity alone, so a ticket an agent
+  // had moved to another contact answered its status — a closed one `409`, an
+  // open one a 25 MB upload — where the locked read answers `404`.
+  it('uploads nothing to a ticket whose requester was moved, and answers 404 as the locked read does', async () => {
+    const token = await minted();
+    const ticket = (await sent(await create(token, [['text', 'Hello']]))).ticket;
+    const [other] = await db
+      .insert(contacts)
+      .values({ name: 'Somebody else' })
+      .returning({ id: contacts.id });
+    await db
+      .update(conversations)
+      .set({ requesterContactId: other!.id })
+      .where(eq(conversations.id, ticket.id));
+
+    expect(await refusal(await send(token, ticket.id, [['files', photo()]]))).toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+    await db
+      .update(conversations)
+      .set({ statusId: await statusId('Closed') })
+      .where(eq(conversations.id, ticket.id));
+    expect(await refusal(await send(token, ticket.id, [['files', photo()]]))).toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+    expect(storage.uploaded).toEqual([]);
+  });
+
+  // The SDK's outbox resends a send it never heard back from, a 25 MB video
+  // included; the key is answered before the body is read, so a body nothing
+  // could read is still that send's replay.
+  it('answers a retry under a spent key before it reads the body', async () => {
+    const token = await minted();
+    const createKey = randomUUID();
+    const opened = await sent(await create(token, [['files', photo()]], createKey));
+    const sendKey = randomUUID();
+    const reply = await sent(await send(token, opened.ticket.id, [['files', photo()]], sendKey));
+
+    const unreadable = (path: string, key: string) =>
+      new Request(`https://support.shipblu.com/api/v1${path}`, {
+        method: 'POST',
+        body: '{',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'ShipBlu-Client': CLIENT,
+          'x-forwarded-for': address(),
+          'Idempotency-Key': key,
+          'Content-Type': 'application/json',
+        },
+      });
+    const created = await sent(await postTicket(unreadable('/tickets', createKey)), 200);
+    expect(created.message.id).toBe(opened.message.id);
+    const replied = await sent(
+      await postMessage(
+        unreadable(`/tickets/${opened.ticket.id}/messages`, sendKey),
+        params(opened.ticket.id),
+      ),
+      200,
+    );
+    expect(replied.message.id).toBe(reply.message.id);
+    expect(storage.uploaded).toHaveLength(2);
+  });
+
+  // The form encoding turns every line break into CRLF, so words sent with a
+  // photo were longer than the same words sent alone, and stored with CRs.
+  it('keeps the line breaks a user typed in the words beside a file', async () => {
+    const token = await minted();
+    const opened = await sent(
+      await create(token, [
+        ['text', 'Line one\nLine two'],
+        ['files', photo()],
+      ]),
+    );
+
+    expect(opened.message.text).toBe('Line one\nLine two');
+    const [row] = await db
+      .select({ bodyText: messages.bodyText })
+      .from(messages)
+      .where(eq(messages.id, opened.message.id));
+    expect(row!.bodyText).toBe('Line one\nLine two');
+  });
+
   // A refused send's paid upload budget made it wait up to an hour for an
   // answer the ticket gave at once.
   it('answers a closed ticket before the upload budget', async () => {
@@ -452,9 +567,9 @@ describe('a send with files', () => {
       .update(conversations)
       .set({ statusId: await statusId('Closed') })
       .where(eq(conversations.id, ticket.id));
-    // The hour's budget all but spent.
+    // The hour's budget spent.
     const { spendUpload } = await import('@/lib/api/limits');
-    spendUpload(session.caller.identityId, 100);
+    spendUpload(session.caller.identityId, UPLOAD_BYTES_LIMIT);
 
     expect(await refusal(await send(token, ticket.id, [['files', photo()]]))).toMatchObject({
       status: 409,
@@ -469,14 +584,14 @@ describe('a send with files', () => {
     const identity = session.caller.identityId;
 
     await refusal(await create(token, [['files', photo('bad.jpg', FAILING)]]));
-    expect(uploadFits(identity, 100).allowed).toBe(true);
+    expect(uploadFits(identity, UPLOAD_BYTES_LIMIT).allowed).toBe(true);
 
     const key = randomUUID();
     await sent(await create(token, [['files', photo()]], key));
     await sent(await create(token, [['files', photo()]], key), 200);
-    // One megabyte spent, by the one send that stored its file.
-    expect(uploadFits(identity, 99).allowed).toBe(true);
-    expect(uploadFits(identity, 100).allowed).toBe(false);
+    // The photo's bytes spent, by the one send that stored its file.
+    expect(uploadFits(identity, UPLOAD_BYTES_LIMIT - JPEG.length).allowed).toBe(true);
+    expect(uploadFits(identity, UPLOAD_BYTES_LIMIT - JPEG.length + 1).allowed).toBe(false);
   });
 });
 

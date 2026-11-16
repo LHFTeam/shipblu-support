@@ -6,7 +6,7 @@ import { admitRead, admitSend } from '@/lib/api/limits';
 import { answerSend, idempotencyKey, listAsked, sendFields } from '@/lib/api/requests';
 import { apiJson, newRequestId } from '@/lib/api/respond';
 import type { TicketsPage } from '@/lib/api/schemas';
-import { createApiTicket, listTickets } from '@/lib/api/tickets';
+import { createApiTicket, keyAnswer, listTickets } from '@/lib/api/tickets';
 import { logger } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
@@ -52,7 +52,8 @@ export async function GET(request: Request): Promise<Response> {
  *
  * `Idempotency-Key` is required: the first request is `201`, and a retry under
  * the same key `200` with `Idempotent-Replayed: true` and what the first
- * stored, creating nothing (`createApiTicket`). Spends the identity's send
+ * stored, creating nothing — answered before the body is read (`keyAnswer`),
+ * so a retry of a 25 MB send costs no memory. Spends the identity's send
  * bucket, as both message-writing routes do; its new-ticket and upload buckets
  * are asked by `createApiTicket` once the key is known to be unspent, so a
  * retry is never refused either. The body is JSON, or multipart with files
@@ -73,6 +74,16 @@ export async function POST(request: Request): Promise<Response> {
 
     const keyed = idempotencyKey(request, requestId);
     if ('refusal' in keyed) return keyed.refusal;
+    const key = await keyAnswer(caller, keyed.key, 'createTicket');
+    if ('answer' in key) {
+      log.info('ticket create answered', {
+        route: ROUTE,
+        identity: caller.identityId,
+        outcome: key.answer.kind === 'sent' ? 'replayed' : key.answer.kind,
+        requestId,
+      });
+      return answerSend(key.answer, requestId);
+    }
     const read = await sendFields(request, requestId, 'createTicket');
     if ('refusal' in read) return read.refusal;
 
@@ -81,7 +92,7 @@ export async function POST(request: Request): Promise<Response> {
       locale: read.locale,
       trackingNumber: read.trackingNumber ?? null,
       uploads: read.uploads,
-      key: keyed.key,
+      key: key.key,
       // Present and parsed: the gate refuses a request without it.
       client: request.headers.get('shipblu-client') ?? '',
     });

@@ -1785,11 +1785,14 @@ a question:
 - **The files are stored only once nothing on the pool refuses the send**: the
   key unspent (a replay uploads nothing), the upload budget with room, the
   new-ticket bucket and the channel row on a create, and on a reply the
-  ticket's status read by the identity alone (`openedStatus`), so a closed
-  ticket or an id that is not the user's is refused before 25 MB go to
-  Storage only to be removed. By the identity, not `ownedTicket`, because its
-  requester half is what a contact merge moves, and the gate's contact read
-  before a merge would answer the user's own ticket `404`, which the SDK drops.
+  ticket's status (`openedStatus`), so a closed ticket or an id that is not
+  the user's is refused before 25 MB go to Storage only to be removed. Read
+  through `ownedTicketNow`: `ownedTicket` with its requester read through the
+  identity in the statement, not off the gate's contact, which a merge
+  committed since would have moved, answering the user's own ticket `404`,
+  which the SDK drops. Read first by the identity alone, it answered the
+  status of a ticket an agent had moved to another contact — `409` for a
+  closed one where the locked read says `404`, and an upload for an open one.
   It only ever refuses; the locked read decides. The ten-open count is not
   asked early: past it the files are stored and then removed, a cost paid only
   by a client that does not read `tickets.maxOpen`.
@@ -1805,7 +1808,17 @@ a question:
 - **The upload budget is the widget's per-visitor hundred megabytes an hour**,
   asked with `peek` so its `429` carries `Retry-After`, and spent only once
   the message is stored: a send that failed on Storage, which the SDK retries
-  under its key, costs nothing, and a replay is never asked.
+  under its key, costs nothing, and a replay is never asked. Counted to the
+  byte, not as the widget counts, a whole megabyte a send rounded up: a phone
+  sends voice notes of a few tens of kilobytes far more often than a browser
+  sends files, and at a megabyte each a hundred of them spent the hour.
+- **A spent key is answered before the body is read** (`keyAnswer`), so a
+  retry of a 25 MB send is not parsed, copied and sniffed for an answer that
+  uses none of it; the writer takes only the `UnspentKey` it hands back, and
+  reads the key again under the account's lock.
+- **Multipart text has its line breaks put back to LF** before the schema
+  counts it: the form encoding writes each as CRLF, so the same words were
+  longer beside a photo than alone, and stored with CRs.
 - **A `files` part that is not a file** — one sent without a filename, which
   `formData()` reads as text — is `invalid_request` naming `files`, not
   `file_refused`, since there is no file to name; the guide's "a nameless file

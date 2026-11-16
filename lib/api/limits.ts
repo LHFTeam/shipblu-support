@@ -158,9 +158,14 @@ export function admitNewTicket(identityId: string): Admission {
 export const MAX_OPEN_TICKETS = 10;
 
 /**
- * Megabytes of files uploaded, on the session's identity: a hundred an hour,
- * the widget's figure per visitor (`/api/widget/message`), so four full
- * messages and change. One message carries at most 25 MB (`GET /config`).
+ * Files uploaded, on the session's identity: a hundred megabytes an hour, the
+ * widget's figure per visitor (`/api/widget/message`), so four full messages
+ * and change. One message carries at most 25 MB (`GET /config`).
+ *
+ * Counted to the byte, not in whole megabytes a send. Rounded up per send, as
+ * the widget counts, a 30 KB voice note cost a megabyte, so the hour's budget
+ * was a hundred file messages, not a hundred megabytes: a user in a long
+ * back-and-forth with support was refused for an hour after uploading three.
  *
  * Asked before a send's files are stored (`uploadFits`, `peekVouched`, which spends nothing)
  * and spent only once they are (`spendUpload`), the widget's lesson: spent up
@@ -171,16 +176,16 @@ export const MAX_OPEN_TICKETS = 10;
  * this is asked. Two sends can both fit and then both spend, the price of not
  * holding a lock across a multi-second upload, as the widget pays it.
  */
-const UPLOAD_MB_LIMIT = 100;
+export const UPLOAD_BYTES_LIMIT = 100 * 1024 * 1024;
 
 function uploadKey(identityId: string): string {
-  return `api-v1:upload-mb:${identityId}`;
+  return `api-v1:upload-bytes:${identityId}`;
 }
 
-export function uploadFits(identityId: string, megabytes: number): Admission {
-  return peekVouched(uploadKey(identityId), UPLOAD_MB_LIMIT, HOUR_MS, megabytes);
+export function uploadFits(identityId: string, bytes: number): Admission {
+  return peekVouched(uploadKey(identityId), UPLOAD_BYTES_LIMIT, HOUR_MS, bytes);
 }
 
-export function spendUpload(identityId: string, megabytes: number): void {
-  admitVouched(uploadKey(identityId), UPLOAD_MB_LIMIT, HOUR_MS, megabytes);
+export function spendUpload(identityId: string, bytes: number): void {
+  admitVouched(uploadKey(identityId), UPLOAD_BYTES_LIMIT, HOUR_MS, bytes);
 }
