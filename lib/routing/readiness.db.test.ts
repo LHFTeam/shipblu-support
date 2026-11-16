@@ -299,6 +299,52 @@ describe('routingReadiness', () => {
     expect(of(await routingReadiness(NOW), owned).starts).toBe('live');
   });
 
+  // Nothing files under a myBlu app row until the stage that opens the app's
+  // tickets (`filedYet`), so no app row routes yet, and every one says so — a
+  // second row too, since no row of the type files anything, and one switched
+  // off, whose own reason ("a ticket held under it before it went off") would
+  // describe tickets no app row has ever had.
+  it('judges the myBlu app’s rows by the row the app files under, which files nothing yet', async () => {
+    const recipients = await group('Recipients');
+    await member(recipients, 'Here', {});
+    const off = await channel({
+      type: 'api',
+      name: 'Old app row',
+      routingMode: 'category',
+      isActive: false,
+      defaultGroupId: recipients,
+    });
+    const app = await channel({
+      type: 'api',
+      name: 'myBlu app',
+      routingMode: 'category',
+      defaultGroupId: recipients,
+    });
+    const spare = await channel({
+      type: 'api',
+      name: 'Spare app row',
+      routingMode: 'category_shadow',
+      defaultGroupId: recipients,
+    });
+
+    const readiness = await routingReadiness(NOW);
+
+    expect(of(readiness, app)).toMatchObject({
+      mode: 'category',
+      starts: null,
+      routesInApply: false,
+      warnings: [{ kind: 'not_filed_yet' }],
+    });
+    expect(of(readiness, off)).toMatchObject({
+      starts: null,
+      warnings: [{ kind: 'not_filed_yet' }],
+    });
+    expect(of(readiness, spare)).toMatchObject({
+      starts: null,
+      warnings: [{ kind: 'not_filed_yet' }],
+    });
+  });
+
   it('leaves the classifier to the panel, and marks a row that starts routing with no key', async () => {
     const id = await channel({ name: 'Support mailbox', routingMode: 'category_shadow' });
     const second = await channel({ name: 'Second mailbox', routingMode: 'category' });

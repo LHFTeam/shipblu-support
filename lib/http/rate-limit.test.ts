@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { admit, allow, fits } from './rate-limit';
+import {
+  admit,
+  admitVouched,
+  allow,
+  allowVouched,
+  fits,
+  forwardedChain,
+  retryAfterSeconds,
+} from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -54,6 +62,12 @@ describe('admit', () => {
     expect(admit(key(), 1, 10).resetInSeconds).toBe(1);
   });
 
+  // The one rounding every `Retry-After` comes from: whole seconds, rounded
+  // up, and never below one, a window already past included.
+  it('rounds every wait into Retry-After the one way', () => {
+    expect([200, 1_000, 1_001, 6_100, 0, -50].map(retryAfterSeconds)).toEqual([1, 1, 2, 7, 1, 1]);
+  });
+
   it('starts a window again once it has passed', () => {
     const k = key();
     expect(admit(k, 1, -1).allowed).toBe(true);
@@ -80,5 +94,51 @@ describe('fits', () => {
     const k = key();
     allow(k, 10, -1, 10);
     expect(fits(k, 10, 10)).toBe(true);
+  });
+});
+
+describe('forwardedChain', () => {
+  const chain = (value?: string) =>
+    forwardedChain(new Headers(value === undefined ? {} : { 'x-forwarded-for': value }));
+
+  it('keeps the hops the proxies appended after the one a caller wrote', () => {
+    // The first hop is the caller's claim; the last is what connected to the platform.
+    expect(chain('10.0.0.9, 203.0.113.7')).toBe('10.0.0.9, 203.0.113.7');
+    expect(chain(' 198.51.100.4 ')).toBe('198.51.100.4');
+  });
+
+  it('is null with no header, or one with no hop in it', () => {
+    expect(chain()).toBeNull();
+    expect(chain(' , ,')).toBeNull();
+  });
+
+  it('keeps the last eight hops and bounds each, however much a caller writes', () => {
+    const written = Array.from({ length: 40 }, (_, i) => `192.0.2.${i}`).join(',');
+    const kept = chain(`${'x'.repeat(5_000)}, ${written}, 203.0.113.7`)!.split(', ');
+    expect(kept).toHaveLength(8);
+    expect(kept.at(-1)).toBe('203.0.113.7');
+    expect(chain(`${'x'.repeat(5_000)}, 203.0.113.7`)).toBe(`${'x'.repeat(64)}, 203.0.113.7`);
+  });
+});
+
+describe('the vouched store', () => {
+  // A spray of made-up keys fills the shared store, which then drops its oldest
+  // buckets: the API's plane, mint and identity buckets are not among them.
+  it('keeps its buckets counting while made-up keys flood the shared store', () => {
+    const plane = key();
+    const agent = key();
+    const address = key();
+    expect(admitVouched(plane, 1, HOUR).allowed).toBe(true);
+    // A signed-in agent's own throttle, through the boolean twin, in the same store.
+    expect(allowVouched(agent, 1, HOUR)).toBe(true);
+    expect(admit(address, 1, HOUR).allowed).toBe(true);
+
+    for (let i = 0; i < 25_000; i += 1) admit(`spray:${i}`, 1, HOUR);
+
+    // The shared bucket was among the oldest, and is gone: its count starts again.
+    expect(admit(address, 1, HOUR).allowed).toBe(true);
+    // The vouched ones still count the request each had.
+    expect(admitVouched(plane, 1, HOUR).allowed).toBe(false);
+    expect(allowVouched(agent, 1, HOUR)).toBe(false);
   });
 });

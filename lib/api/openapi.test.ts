@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { openApiDocumentJson } from './openapi';
+import { FAILED_BUILD_KEPT_MS, memoised, openApiDocumentJson } from './openapi';
 import { ERROR_STATUS, ErrorCode } from './schemas';
 
 /**
@@ -103,6 +103,37 @@ function answerRoots(): unknown[] {
     .map((ref) => ({ $ref: ref }));
   return [...answers, ...unreferenced];
 }
+
+describe('memoised', () => {
+  // The document's memo: a failed build is kept for a minute, so a broken
+  // document costs one build a minute, not one per request, and a passing
+  // failure is not a `500` until the instance restarts.
+  it('keeps a success for good, and a failure for a minute before building again', () => {
+    let clock = 0;
+    let builds = 0;
+    let failing = true;
+    const document = memoised(
+      () => {
+        builds += 1;
+        if (failing) throw new Error('an example no longer passes its schema');
+        return { built: builds };
+      },
+      () => clock,
+    );
+    expect(document).toThrow('an example no longer passes its schema');
+    clock += FAILED_BUILD_KEPT_MS - 1;
+    expect(document).toThrow('an example no longer passes its schema');
+    expect(builds).toBe(1);
+
+    failing = false;
+    clock += 1;
+    const built = document();
+    expect(built).toEqual({ built: 2 });
+    clock += 10 * FAILED_BUILD_KEPT_MS;
+    expect(document()).toBe(built);
+    expect(builds).toBe(2);
+  });
+});
 
 describe('the committed document', () => {
   it('is what lib/api/openapi.ts builds', () => {

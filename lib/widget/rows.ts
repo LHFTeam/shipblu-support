@@ -81,39 +81,48 @@ export function reportedRow<T extends WebchatRow & { config: unknown }>({
 }
 
 /**
- * The web chat rows as a switch's answer speaks about them: which are on, and
- * whether each lists questions. The action answers with it as it left them, and
- * the page draws it from its own rows, so a switch shows its answer only while
- * the two agree. Each row's switch keeps its answer for the life of the page,
- * and an answer about rows that have changed since is no longer true: "the
- * widget now uses B" once another switch has moved it, "B lists no FAQ
- * questions yet" once the card has chosen some, "the only active row" once
- * another has been added. Order-free, since only the rows' states are compared.
+ * The web chat rows as a switch's answer speaks about them: which are on,
+ * whether each lists questions, and what each is called. The action answers
+ * with it as it left them, and the page draws it from its own rows, so a switch
+ * shows its answer only while the two agree. Each row's switch keeps its answer
+ * for the life of the page, and an answer about rows that have changed since is
+ * no longer true: "the widget now uses B" once another switch has moved it, "B
+ * lists no FAQ questions yet" once the card has chosen some, "the only active
+ * row" once another has been added, and "B" at all once another admin has
+ * renamed it. The name is encoded, so no name can forge the separators.
+ * Order-free, since only the rows' states are compared.
  */
 export function webchatStateKey(rows: readonly ReportedRow[]): string {
   return rows
-    .map((row) => `${row.id}:${row.isActive ? 'on' : 'off'}:${row.hasFaqFolders ? 'q' : '-'}`)
+    .map(
+      (row) =>
+        `${row.id}:${row.isActive ? 'on' : 'off'}:${row.hasFaqFolders ? 'q' : '-'}:${encodeURIComponent(row.name)}`,
+    )
     .sort()
     .join(',');
 }
 
 /**
  * What the admin is told once a row has been switched. `rows` are as they were
- * before the switch, `active` is what the row was switched to.
+ * before the switch and `switched` as it leaves them (`switchRow` works them
+ * out once), `active` is what the row was switched to.
  *
  * A row the widget moves onto may never have been configured as the widget's:
  * one added from the "add a channel" form saves no FAQ folders, and the widget
  * then shows the most-read articles. Said here, because the move is the moment
  * the admin can see it happen.
  */
-export function switchNotice(rows: readonly ReportedRow[], id: string, active: boolean): string {
+export function switchNotice(
+  rows: readonly ReportedRow[],
+  switched: readonly ReportedRow[],
+  id: string,
+  active: boolean,
+): string {
   const row = rows.find((candidate) => candidate.id === id);
   if (!row) return '';
   const name = `“${row.name}”`;
   const before = widgetRow(rows);
-  const after = widgetRow(
-    rows.map((candidate) => (candidate.id === id ? { ...candidate, isActive: active } : candidate)),
-  );
+  const after = widgetRow(switched);
   const questions = (target: ReportedRow) =>
     target.hasFaqFolders
       ? ''

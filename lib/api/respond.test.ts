@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ErrorCode } from './schemas';
+import { admit } from '@/lib/http/rate-limit';
 import { apiError, apiJsonText } from './respond';
 
 /**
@@ -10,18 +11,17 @@ import { apiError, apiJsonText } from './respond';
  */
 
 describe('apiError', () => {
-  it('sends Retry-After on a 429, in whole seconds and at least one', () => {
+  // Whole seconds and at least one is `admit`'s rounding, held in
+  // `lib/http/rate-limit.test.ts`; this sends what an admission counted.
+  it('sends Retry-After on a 429, as the refusing bucket counted it', () => {
+    const refused = admit(`respond-test:${Math.random()}`, 0, 6_100);
+    expect(refused.resetInSeconds).toBe(7);
     const answer = apiError('rate_limited', 'Too many.', {
       requestId: 'r',
-      retryAfterSeconds: 0.2,
+      retryAfterSeconds: refused.resetInSeconds,
     });
     expect(answer.status).toBe(429);
-    expect(answer.headers.get('retry-after')).toBe('1');
-    expect(
-      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 6.1 }).headers.get(
-        'retry-after',
-      ),
-    ).toBe('7');
+    expect(answer.headers.get('retry-after')).toBe('7');
   });
 
   it('sends none on any other code', () => {
@@ -30,7 +30,7 @@ describe('apiError', () => {
     expect(answer.headers.has('retry-after')).toBe(false);
   });
 
-  it('does not compile a 429 without Retry-After, nor Retry-After on another code', () => {
+  it('does not compile a 429 without Retry-After, a wait that skipped the rounding, nor Retry-After on another code', () => {
     // Never called: each line is here for the type checker to refuse.
     const unnarrowed = 'internal' as ErrorCode;
     const refused = () => [
@@ -40,6 +40,10 @@ describe('apiError', () => {
       apiError('internal', 'Failed.', { requestId: 'r', retryAfterSeconds: 5 }),
       // @ts-expect-error a code not narrowed may be `rate_limited`.
       apiError(unnarrowed, 'Failed.', { requestId: 'r' }),
+      // @ts-expect-error a wait that skipped the rounding: `Retry-After: 0` says ask again now.
+      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 0 }),
+      // @ts-expect-error nor a fraction, which no `Retry-After` may carry.
+      apiError('rate_limited', 'Too many.', { requestId: 'r', retryAfterSeconds: 0.25 }),
     ];
     expect(refused).toBeTypeOf('function');
   });

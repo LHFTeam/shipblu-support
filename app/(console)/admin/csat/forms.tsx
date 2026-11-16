@@ -16,6 +16,7 @@ import {
 } from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
 import { saveSurveySettings } from './actions';
 
 const INITIAL: ActionState = { error: null };
@@ -214,12 +215,16 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
-        <Toggle
-          name="surveyApi"
-          label="API"
-          hint="Tickets opened through the API, by email, when the contact has an address."
-          defaultChecked={settings.channels.api}
-        />
+        {/* No switch until the stage that lets the app pull its survey
+            (`plans/myblu-ticket-api.md`, stage 8). A switch that changed
+            nothing still saved, and whatever an admin set today would have
+            taken effect, unannounced, the day that stage shipped. So the form
+            posts nothing for the app and the action leaves `survey_api` as it
+            is stored (`saveCsatSettings`); the switch returns with stage 8. */}
+        <p className="text-xs text-(--color-text-secondary)">
+          {CHANNEL_LABELS.api} customers are not surveyed yet. Their switch arrives with the release
+          that lets the app show its survey.
+        </p>
         <p className="text-xs text-(--color-text-secondary)">
           WhatsApp customers are not answered from this platform, so they are not surveyed from it
           either.

@@ -349,8 +349,6 @@ describe('an agent’s reply, and a customer’s message at the same moment', ()
     const replying = storeAgentReply(ticket.id, 'webchat', {
       authorAgentId: agentId,
       bodyText: 'It is on its way.',
-      deliveryStatus: 'delivered',
-      deliveredAt: new Date(),
     }).then(
       () => null,
       (error: unknown) => error,

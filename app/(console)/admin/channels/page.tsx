@@ -35,6 +35,7 @@ import {
 } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
 import { reportedRow, webchatStateKey, webchatSwitch, widgetRow } from '@/lib/widget/rows';
+import { apiStateKey, apiSwitch, appRow } from '@/lib/api/channel-rows';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
@@ -43,11 +44,13 @@ import {
   RequestSyncAgain,
 } from './coexistence-forms';
 import {
+  ApiActiveSwitch,
   ChannelEditor,
   ChannelForm,
   OwnerEditor,
   WebchatActiveSwitch,
   WebchatSettings,
+  type ApiSwitchView,
   type OwnerChoice,
   type WebchatSwitchView,
 } from './forms';
@@ -141,6 +144,20 @@ export default async function ChannelsPage() {
     const plan = webchatSwitch(webchatRows, channelId);
     if (plan?.kind !== 'switch_off') return plan;
     return { kind: 'switch_off', widgetMovesTo: plan.widgetMovesTo?.name ?? null };
+  };
+
+  // The myBlu app's rows, by the same rule and in the same order: the app uses
+  // the oldest active one (`apiChannel`), and each row's switch is worded from
+  // these rows by the rule `switchApiChannel` applies again under its lock.
+  const apiRows = channelList
+    .filter((channel) => channel.type === 'api')
+    .sort((a, b) => position(a.id) - position(b.id));
+  const app = appRow(apiRows);
+  const apiKey = apiStateKey(apiRows);
+  const apiSwitchView = (channelId: string): ApiSwitchView | null => {
+    const plan = apiSwitch(apiRows, channelId);
+    if (plan?.kind !== 'switch_off') return plan;
+    return { ...plan, appMovesTo: plan.appMovesTo?.name ?? null };
   };
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
@@ -257,6 +274,7 @@ export default async function ChannelsPage() {
               : undefined;
             const stillConnecting = attempt?.status === 'exchanged';
             const switchPlan = channel.type === 'webchat' ? switchView(channel.id) : null;
+            const apiPlan = channel.type === 'api' ? apiSwitchView(channel.id) : null;
 
             return (
               <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -275,21 +293,12 @@ export default async function ChannelsPage() {
                   <Badge tone="warning">No business account</Badge>
                 ) : null}
                 <span className="ms-auto text-xs text-(--color-text-secondary)">
-                  {coexistence
-                    ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
-                        coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
-                      }${account ? ` · ${account.name}` : ''}`
-                    : isWhatsApp
-                      ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
-                          account ? ` · ${account.name}` : ''
-                        }`
-                      : isMetaChannel(channel.type)
-                        ? 'hardcoded in server environment variables'
-                        : channel.type === 'webchat'
-                          ? channel.id === webchat?.id
-                            ? 'the widget'
-                            : 'not the widget’s row'
-                          : (channel.config.address as string) || 'no address'}
+                  {rowDetail(channel, {
+                    coexistence,
+                    accountName: account?.name ?? null,
+                    widgetRowId: webchat?.id ?? null,
+                    appRowId: app?.id ?? null,
+                  })}
                 </span>
                 {coexistence && canConnect && channel.isActive && !stillConnecting
                   ? SYNC_TYPES.map((type) => {
@@ -327,6 +336,9 @@ export default async function ChannelsPage() {
                     plan={switchPlan}
                     stateKey={webchatKey}
                   />
+                ) : null}
+                {apiPlan ? (
+                  <ApiActiveSwitch channelId={channel.id} plan={apiPlan} stateKey={apiKey} />
                 ) : null}
                 {reconnectable && canConnect ? (
                   <ConnectBusinessAppNumber
@@ -609,4 +621,41 @@ function NumberOwnerLine({
       />
     </div>
   );
+}
+
+/**
+ * The line beside a row saying what it is, one branch per kind, each with its
+ * reason beside it. It was one ternary five levels deep, a level added for each
+ * kind with a label of its own, with a comment in the middle of the expression.
+ */
+function rowDetail(
+  channel: { id: string; type: string; config: Record<string, unknown> },
+  row: {
+    coexistence: ReturnType<typeof parseCoexistence>;
+    accountName: string | null;
+    widgetRowId: string | null;
+    appRowId: string | null;
+  },
+): string {
+  const account = row.accountName ? ` · ${row.accountName}` : '';
+  if (row.coexistence) {
+    const { displayPhoneNumber, verifiedName } = row.coexistence;
+    const number = displayPhoneNumber ?? (channel.config.phoneNumberId as string);
+    return `${number}${verifiedName ? ` · ${verifiedName}` : ''}${account}`;
+  }
+  if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') {
+    return `${(channel.config.phoneNumberId as string) || 'no phone number id'}${account}`;
+  }
+  if (isMetaChannel(channel.type)) return 'hardcoded in server environment variables';
+  switch (channel.type) {
+    case 'webchat':
+      return channel.id === row.widgetRowId ? 'the widget' : 'not the widget’s row';
+    case 'api':
+      if (channel.id === row.appRowId) return 'the app’s row';
+      // Every row is off, which is the switch doing its job: said, so it reads
+      // as a choice rather than a missing setting.
+      return row.appRowId ? 'not the app’s row' : 'none on: the app opens no new tickets';
+    default:
+      return (channel.config.address as string) || 'no address';
+  }
 }
