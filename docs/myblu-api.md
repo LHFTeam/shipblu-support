@@ -404,7 +404,9 @@ still reads them.
   the number on an account changes; `number_released` when a number is given to
   somebody new and keeps the old account; `signed_out` for a "sign out
   everywhere". `account_deleted` and `number_released` also take the user's
-  tickets out of the app for good; they stay with the support team. A sign-out
+  tickets out of the app for good; they stay with the support team, marked as
+  no longer in the app, and an open one is resolved, since nobody would read
+  the answer. A sign-out
   on one device is the SDK's `reset()`, which ends that device's session only.
 - **Push only to devices signed in as that user.** The webhook names
   `user.externalId`. Today the app registers its FCM token at
@@ -507,15 +509,15 @@ Only replies are returned: never an agent's note, an event or a forward.
 
 ### `GET /config`
 
-| Field               | Meaning                                                                                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.         |
-| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                         |
-| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                |
-| `tickets.maxOpen`   | Open or pending tickets one user may have at once.                                                                                                                                                  |
-| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_). |
-| `support`           | `{ online, opensAt, timezone }`, the team's hours. Absent until stage 5; `opensAt` and `timezone` are null when no hours are set.                                                                   |
-| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                       |
+| Field               | Meaning                                                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user.id`           | The user's id here, which a contact merge does not change. Kept in the store, which is namespaced by `externalUserId` (rule 1); when it changes, the cached tickets and messages are wiped.                    |
+| `user.externalId`   | The id the session was minted for. A client that asked for another user discards the token.                                                                                                                    |
+| `tickets.canCreate` | Whether `POST /tickets` is open now. When false, hide the new-ticket button rather than fail a send.                                                                                                           |
+| `tickets.maxOpen`   | Open or pending tickets one user may have when opening another; past it, `POST /tickets` is `409 too_many_open`. A reply never counts against it: replying on a resolved ticket reopens it whatever the count. |
+| `limits.*`          | `messageMaxChars`, `maxFiles`, `maxFileBytes`, `maxTotalBytes`, `contentTypes`, `extensions`. They move with the server; check against these. `messageMaxChars` counts UTF-16 code units (_Files_).            |
+| `support`           | `{ online, opensAt, timezone }`, the team's hours. Absent until stage 5; `opensAt` and `timezone` are null when no hours are set.                                                                              |
+| `polling`           | `{ threadSeconds, listSeconds }`: what a screen polls at before its first `pollAfterSeconds`. Whole seconds, each at least 1.                                                                                  |
 
 ### The survey
 
@@ -627,7 +629,9 @@ a screen is open and is woken by a push while it is not.
   `?before=<olderCursor>` returns the page before it; `olderCursor` is null at the
   start of the thread. `?after=<newerCursor>` returns what is newer; `newerCursor`
   is never null and comes back unchanged when nothing is new, so a poll always has
-  a cursor to send. Both together is `400 invalid_request`.
+  a cursor to send. A poll's `olderCursor` is always null: it never pages back,
+  so keep the `olderCursor` of the newest or `before` page read last. Both
+  together is `400 invalid_request`.
 - `messages` is ascending by `(createdAt, id)` whichever way was asked. `limit`
   is 30 by default and 100 at most. A full page means ask again at once.
 - `after` re-reads a few seconds before its cursor, because a row stamped
@@ -639,7 +643,9 @@ a screen is open and is woken by a push while it is not.
   `?trackingNumber=` finds the tickets opened with a parcel's number, so a
   shipment screen finds its ticket after a reinstall.
 - A cursor is opaque. Send it back as it came; one this server did not mint is
-  `400 invalid_cursor`, never a first page.
+  `400 invalid_cursor`, never a first page. A cursor is signed, so one built by
+  hand is refused, and so is every cursor held across a change of the server's
+  secret, which is rare: either way, drop it and load the newest page.
 - **Every poll's answer carries `pollAfterSeconds`, and the SDK obeys it.** A
   whole number of seconds, never less than 1. Five seconds on an open thread to
   start, thirty on the list, nothing in the background. It is how load is shed
@@ -673,7 +679,9 @@ From stage 7. Before it, a multipart body is `400 invalid_request`.
 - **Text is counted in UTF-16 code units**, as JavaScript's `length` counts it,
   so an emoji is two. The document's `maxLength` on `text` counts characters,
   so a text with emoji in it can pass that bound and still be refused: check
-  against `limits.messageMaxChars`.
+  against `limits.messageMaxChars`. Text holding U+0000 (NUL), which the
+  database cannot store, is refused `400 invalid_request` too, as a survey's
+  comment holding one is.
 - **A file is admitted on its label and stored by its bytes.** A part's
   `Content-Type` must be one of `limits.contentTypes`; a part with none, or with
   `application/octet-stream`, is admitted only by an extension in
@@ -718,7 +726,10 @@ never delays a sign-in. The bad-bearer bucket counts bearers that were refused
 and only changes how the next refusal is answered, `429` rather than `401`: a
 live session token, or `MYBLU_API_TOKEN`, is never refused for it. No address
 bucket stands in front of a session token: the address is something a caller
-can write.
+can write. A retried `POST /tickets` under a key an earlier attempt already
+spent opens nothing, so it spends the send bucket and never the new-ticket one:
+however often the app retries a ticket it opened, the answer is the replay's
+`200`.
 
 ## The webhook
 

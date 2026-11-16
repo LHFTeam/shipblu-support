@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ShipBlu Support: the myBlu ticket API",
-    "version": "2026-11-13",
+    "version": "2026-11-16",
     "description": "The HTTP API the myBlu app reaches support through, and the webhook it is told of replies by. The guide, `docs/myblu-api.md` in the shipblu-support repository, says what every field means, what an SDK must do, and the scenarios it is checked with; this document is the shapes.\n\nTwo planes. The **server plane** is myBlu's backend, holding `MYBLU_API_TOKEN`: it mints and ends sessions and does nothing else. The **client plane** is the app, through the SDK, holding a session token for one user: it does everything else, as that user.\n\nEvery client-plane request carries `ShipBlu-Client`. Every answer carries `ShipBlu-Request-Id` and `Cache-Control: no-store`. JSON, UTF-8, ISO-8601 instants in UTC, UUID ids, no credential in a URL and no trailing slash.\n\n**It changes by addition.** Fields and enum values appear without notice, and a client ignores a field it does not know and keeps an enum value it does not know. What an operation sends and answers is fixed from the release that ships it; a breaking change is `/api/v2`. Each change is a dated line in `docs/myblu-api-changelog.md`, whose newest date is `info.version`."
   },
   "servers": [
@@ -89,7 +89,7 @@
                       "openapi": "3.1.0",
                       "info": {
                         "title": "ShipBlu Support: the myBlu ticket API",
-                        "version": "2026-11-13"
+                        "version": "2026-11-16"
                       }
                     }
                   }
@@ -2007,7 +2007,7 @@
                         }
                       ],
                       "olderCursor": null,
-                      "newerCursor": "MjAyNi0xMS0xMiAwOTo0MTowNy4wMDQyMTMrMDB8NmYxYzJkM2UtNGE1Yi00YzZkLThlN2YtOWEwYjFjMmQzZTRm",
+                      "newerCursor": "MjAyNi0xMS0xMiAwOTo0MTowNy4wMDQyMTMrMDB8NmYxYzJkM2UtNGE1Yi00YzZkLThlN2YtOWEwYjFjMmQzZTRmfDdFeXhJYW4wRUtTRDRERUF3M2Z3M2NmYTZEMWx0TmY1LWxYRUpfVTVFalk",
                       "ticket": {
                         "id": "8a1f4c2e-6b3d-4f9a-a7e5-1c2d3e4f5a6b",
                         "number": 4812,
@@ -4102,7 +4102,7 @@
               "maxOpen": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "How many open or pending tickets one user may have at once."
+                "description": "How many open or pending tickets one user may have when opening another: `POST /tickets` past it is `409 too_many_open`. A reply never counts against it, so replying on a resolved ticket reopens it whatever the count."
               }
             },
             "required": ["canCreate", "maxOpen"],
@@ -4358,7 +4358,7 @@
                 "type": "null"
               }
             ],
-            "description": "Send as `before` for the page before this one; null at the start of the thread."
+            "description": "Send as `before` for the page before this one; null at the start of the thread, and always null on a poll (`after`), which never pages back: page back from the `olderCursor` of the newest page, or of the `before` page, read last."
           },
           "newerCursor": {
             "type": "string",
@@ -4887,7 +4887,7 @@
       "RevokeReason": {
         "type": "string",
         "enum": ["signed_out", "phone_changed", "account_deleted", "number_released", "other"],
-        "description": "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good."
+        "description": "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good: they stay with the support team, and an open one is resolved there."
       },
       "ExternalUserId": {
         "type": "string",
@@ -4959,7 +4959,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -4977,7 +4978,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5004,7 +5006,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote. Required in JSON; blank is `400 empty_message`, and over the limit `400 invalid_request`, never cut short. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5019,7 +5022,8 @@
           "text": {
             "type": "string",
             "maxLength": 5000,
-            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "What the user wrote; may be empty or left out when there is a file. At most 5000 UTF-16 code units, as JavaScript's `length` counts and `limits.messageMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
@@ -5061,7 +5065,8 @@
           "comment": {
             "type": "string",
             "maxLength": 2000,
-            "description": "A comment, sent as a second `POST` carrying the same rating. Over the limit is `400 invalid_request`, never cut short. At most 2000 UTF-16 code units, as JavaScript's `length` counts and `survey.commentMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused."
+            "pattern": "^[^\\u0000]*$",
+            "description": "A comment, sent as a second `POST` carrying the same rating. Over the limit is `400 invalid_request`, never cut short. At most 2000 UTF-16 code units, as JavaScript's `length` counts and `survey.commentMaxChars` states. `maxLength` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it."
           }
         },
         "required": ["rating"],

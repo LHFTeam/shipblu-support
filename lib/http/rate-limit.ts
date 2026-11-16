@@ -64,9 +64,23 @@ class BucketStore {
   }
 
   fits(key: string, limit: number, cost: number): boolean {
+    return this.peek(key, limit, 0, cost).allowed;
+  }
+
+  /**
+   * `admit`'s answer, spending nothing. With no live bucket the window has
+   * not started, so the wait is the whole window: the time a bucket started
+   * by this cost would take to turn.
+   */
+  peek(key: string, limit: number, windowMs: number, cost: number): Admission {
+    const now = Date.now();
     const bucket = this.buckets.get(key);
-    const used = bucket && bucket.resetAt > Date.now() ? bucket.count : 0;
-    return used + cost <= limit;
+    const live = bucket && bucket.resetAt > now ? bucket : null;
+    const resetAt = live ? live.resetAt : now + windowMs;
+    return {
+      allowed: (live ? live.count : 0) + cost <= limit,
+      resetInSeconds: retryAfterSeconds(resetAt - now),
+    };
   }
 
   private prune(now: number): void {
@@ -144,6 +158,19 @@ export function admitVouched(key: string, limit: number, windowMs: number, cost 
 /** `allow`, in the vouched store: `admitVouched`'s answer as a boolean. */
 export function allowVouched(key: string, limit: number, windowMs: number, cost = 1): boolean {
   return admitVouched(key, limit, windowMs, cost).allowed;
+}
+
+/**
+ * `admitVouched`'s answer, spending nothing (`fits`, with when to come back).
+ *
+ * For a budget in the vouched store charged only for work that happened,
+ * whose refusal must still say when the window turns: the myBlu API asks the
+ * new-ticket bucket before a create's transaction and spends it only once the
+ * transaction has decided to open the ticket, so a create refused for the
+ * channel, the open cap or a revoked session costs nothing.
+ */
+export function peekVouched(key: string, limit: number, windowMs: number, cost = 1): Admission {
+  return vouched.peek(key, limit, windowMs, cost);
 }
 
 /**

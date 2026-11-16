@@ -60,9 +60,10 @@ describe('which row a channel’s tickets are filed under', () => {
     expect(filingGap(off, [off, first])).toBe('inactive');
     expect(filingGap(row('Owned', { type: 'whatsapp', ownerActive: true }), [])).toBe('owned');
 
+    // The myBlu app files under its oldest active row, as web chat does.
     const app = row('App', { type: 'api' });
     const appOff = row('App off', { type: 'api', isActive: false });
-    expect(filingGap(app, [app])).toBe('not_filed_yet');
-    expect(filingGap(appOff, [appOff, app])).toBe('not_filed_yet');
+    expect(filingGap(app, [app])).toBeNull();
+    expect(filingGap(appOff, [appOff, app])).toBe('inactive');
   });
 });

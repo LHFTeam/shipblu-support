@@ -1,4 +1,4 @@
-import { admit, admitVouched, clientIp, type Admission } from '@/lib/http/rate-limit';
+import { admit, admitVouched, clientIp, peekVouched, type Admission } from '@/lib/http/rate-limit';
 
 /**
  * The myBlu API's limits, in memory and per instance (`lib/http/rate-limit.ts`):
@@ -15,9 +15,9 @@ import { admit, admitVouched, clientIp, type Admission } from '@/lib/http/rate-l
  * first; only a request that presents none, or one refused, spends an address
  * bucket (`spendBadBearer`).
  *
- * The buckets here are `plans/myblu-ticket-api.md`'s first five. Sends, new
- * tickets and uploaded megabytes arrive with the routes that spend them
- * (stages 4 and 7), each on the session's identity.
+ * The buckets here are `plans/myblu-ticket-api.md`'s first seven. Uploaded
+ * megabytes arrive with the route that spends them (stage 7), on the session's
+ * identity.
  *
  * Two stores. The address and bad-bearer buckets are keyed on a header the
  * caller writes, and live in the shared one every public endpoint uses, which
@@ -102,8 +102,51 @@ export function admitRead(identityId: string): Admission {
 }
 
 /**
- * Open or pending tickets one user may have at once. Published on
+ * Messages written, on the session's identity: both requests that write one,
+ * `POST /tickets` and `POST /tickets/{id}/messages`, spend it. A retry under
+ * the same `Idempotency-Key` spends it too, as every refused request does: it
+ * is a request, and a client retrying in a loop is what the bucket is for.
+ */
+const SEND_LIMIT = 20;
+
+export function admitSend(identityId: string): Admission {
+  return admitVouched(`api-v1:send:${identityId}`, SEND_LIMIT, MINUTE_MS);
+}
+
+/**
+ * Tickets opened, on the session's identity: ten an hour, beside the ten open
+ * at once below. Charged only for a ticket opened. `createApiTicket` asks
+ * before its transaction (`newTicketFits`, which spends nothing) and spends
+ * (`admitNewTicket`) inside it, under the account lock, once the transaction
+ * has decided to insert. Never by a replay: a retry of a ticket that exists
+ * opens nothing, and spending on it let one ticket's retries refuse it `429`,
+ * and the user's next ticket with it, for the rest of the hour. Nor by a
+ * refusal: spent up front, an outbox resending a create on every foreground
+ * while the app's row was off, or past the open cap, ran the hour out on
+ * `503`s and `409`s, and the first create that could open was refused `429`.
+ */
+const NEW_TICKET_LIMIT = 10;
+const HOUR_MS = 60 * MINUTE_MS;
+
+function newTicketKey(identityId: string): string {
+  return `api-v1:new-ticket:${identityId}`;
+}
+
+export function newTicketFits(identityId: string): Admission {
+  return peekVouched(newTicketKey(identityId), NEW_TICKET_LIMIT, HOUR_MS);
+}
+
+export function admitNewTicket(identityId: string): Admission {
+  return admitVouched(newTicketKey(identityId), NEW_TICKET_LIMIT, HOUR_MS);
+}
+
+/**
+ * Open or pending tickets one user may have when opening another. Published on
  * `GET /config` as `tickets.maxOpen` from stage 3, and enforced by
- * `POST /tickets` from stage 4, which answers `409 too_many_open` past it.
+ * `POST /tickets` from stage 4, which answers `409 too_many_open` past it. A
+ * cap on opening, not on what is open: a reply reopening a resolved ticket is
+ * that ticket going on, and refusing it would cut a customer off in the middle
+ * of a conversation they already have, so a user can hold more than this once
+ * replies reopen what they had resolved.
  */
 export const MAX_OPEN_TICKETS = 10;

@@ -179,14 +179,16 @@ const PageLimit = z.coerce
  * characters instead, so a text with emoji in it can pass the published bound
  * and still be refused. The bound stays, because it never refuses a text the
  * server takes; the description says which count decides.
+ *
+ * And `storable`, decided with the stage that first stores it (stage 4): a
+ * message's text and a survey's comment both reach a `text` column, which
+ * refuses U+0000, so one holding it is the `400` naming the field rather than
+ * a `500` a client can never get past by retrying.
  */
 const boundedText = (max: number, limitAt: string, description: string) =>
-  z
-    .string()
-    .max(max)
-    .describe(
-      `${description} At most ${max} UTF-16 code units, as JavaScript's \`length\` counts and \`${limitAt}\` states. \`maxLength\` counts characters, so a text with emoji in it can pass that and still be refused.`,
-    );
+  storable(z.string().max(max)).describe(
+    `${description} At most ${max} UTF-16 code units, as JavaScript's \`length\` counts and \`${limitAt}\` states. \`maxLength\` counts characters, so a text with emoji in it can pass that and still be refused. Text holding U+0000 is refused too, since the server cannot store it.`,
+  );
 
 /** A message's text: `GET /config` publishes its limit. */
 const messageText = (description: string) =>
@@ -199,7 +201,7 @@ const messageText = (description: string) =>
  * surrogate — drawn as a replacement mark, and refused outright by some
  * decoders — so the server stops one unit short instead.
  */
-const PREVIEW_CHARS = 140;
+export const PREVIEW_CHARS = 140;
 
 // ---------------------------------------------------------------------------
 // Headers
@@ -416,7 +418,9 @@ export const Config = z
         canCreate: z
           .boolean()
           .describe('Whether `POST /tickets` is open now; when false, hide the new-ticket button.'),
-        maxOpen: count('How many open or pending tickets one user may have at once.'),
+        maxOpen: count(
+          'How many open or pending tickets one user may have when opening another: `POST /tickets` past it is `409 too_many_open`. A reply never counts against it, so replying on a resolved ticket reopens it whatever the count.',
+        ),
       })
       .describe('Creating tickets.'),
     limits: z
@@ -525,7 +529,7 @@ export const MessagesPage = z
       .array(Message)
       .describe('Ascending by `(createdAt, id)` whichever way was asked. Merge by `id`.'),
     olderCursor: Cursor.nullable().describe(
-      'Send as `before` for the page before this one; null at the start of the thread.',
+      'Send as `before` for the page before this one; null at the start of the thread, and always null on a poll (`after`), which never pages back: page back from the `olderCursor` of the newest page, or of the `before` page, read last.',
     ),
     newerCursor: Cursor.describe(
       'Send as `after` to poll for newer messages. Never null, and unchanged when nothing is new; a full page means ask again at once.',
@@ -736,7 +740,7 @@ export const CreateSessionRequest = z
 export const RevokeReason = z
   .enum(['signed_out', 'phone_changed', 'account_deleted', 'number_released', 'other'])
   .describe(
-    "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good.",
+    "`signed_out` everywhere; `phone_changed`; `account_deleted`; `number_released`, the number now somebody else's; or `other`. With `account_deleted` or `number_released` the user's tickets also leave the app for good: they stay with the support team, and an open one is resolved there.",
   );
 
 export const RevokeSessionsRequest = z

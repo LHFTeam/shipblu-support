@@ -573,7 +573,6 @@ function ChannelNames({
  */
 function whyNoTicketEnters(rows: readonly RoutingChannel[]): string {
   const reasons: Record<FilingGap, string> = {
-    not_filed_yet: 'nothing opens tickets there yet: the myBlu app’s arrive with a later release',
     inactive: 'it is switched off',
     another_row: 'another row of its kind files its tickets',
     owned: 'its number’s owner is given them as they arrive',

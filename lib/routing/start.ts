@@ -2,7 +2,6 @@ import type { db } from '@/db/client';
 import { routingDecisions } from '@/db/schema';
 import { loadCategoryAiSettings } from '@/lib/category-ai/settings';
 import { enqueue } from '@/lib/queue';
-import { filedYet } from './filing';
 import { windowEndsAt } from './hold';
 import { routingModeOf, routingStartFor, type RoutingStart } from './mode';
 
@@ -10,8 +9,9 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Where routing starts: the transaction that inserts a ticket on an inbound
- * ingest path — email, WhatsApp, a Meta direct message or comment, and the
- * widget (`plans/ticket-category-routing.md`, decision 5).
+ * ingest path — email, WhatsApp, a Meta direct message or comment, the widget
+ * (`plans/ticket-category-routing.md`, decision 5), and the myBlu app's API
+ * (`createApiTicket`, `plans/myblu-ticket-api.md`).
  *
  * In that transaction rather than after the creation pass, because the things
  * that can assign a ticket in its first second — the priority classifier's
@@ -62,11 +62,6 @@ export type RoutingChannel = {
  */
 export async function planRouting(channel: RoutingChannel | null): Promise<RoutingPlan | null> {
   if (!channel?.id) return null;
-  // The list the readiness panel and the report read (`filedYet`), asked here
-  // too, so what they say about a type no ingest path files yet is what the
-  // router does: nothing starts. Left on the list after its path ships, the
-  // type would start no routing, which that stage's routing test catches.
-  if (!filedYet(channel.type)) return null;
   const mode = routingModeOf(channel);
   if (mode === 'default_group') return null;
   const settings = await loadCategoryAiSettings();

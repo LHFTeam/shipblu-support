@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { htmlToText, textToHtml } from './sanitize';
+import { htmlToText, preview, textToHtml } from './sanitize';
 
 describe('textToHtml', () => {
   it('makes a paragraph of each block separated by a blank line', () => {
@@ -51,5 +51,23 @@ describe('htmlToText', () => {
     expect(htmlToText('<p>Intro.</p><h2>Returns</h2><p>Book a pickup.</p>')).toBe(
       'Intro.\n\n\nReturns\n\nBook a pickup.',
     );
+  });
+});
+
+describe('preview', () => {
+  it('cuts at the length, ellipsis included, and leaves a short text whole', () => {
+    expect(preview('a'.repeat(10), 10)).toBe('a'.repeat(10));
+    expect(preview('a'.repeat(11), 10)).toBe(`${'a'.repeat(9)}…`);
+    expect(preview('  two\n\nlines  ')).toBe('two lines');
+  });
+
+  it('never keeps half of a character the cut would split', () => {
+    // An emoji is two code units; here its first sits where the cut falls.
+    const text = `${'a'.repeat(8)}😀tail`;
+    const cut = preview(text, 10);
+    expect(cut).toBe(`${'a'.repeat(8)}…`);
+    expect(cut).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    // One unit further and the whole emoji fits.
+    expect(preview(text, 11)).toBe(`${'a'.repeat(8)}😀…`);
   });
 });

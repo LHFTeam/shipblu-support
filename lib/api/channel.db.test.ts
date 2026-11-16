@@ -93,12 +93,9 @@ describe('apiChannel', () => {
     expect((await apiChannel())?.id).toBe(ids.Two);
   });
 
-  // The stage that opens a ticket hands the row straight to `planRouting`,
-  // read once before its transaction, its group beside it. Until that stage no
-  // ingest path files under the type (`filedYet`), and `planRouting` asks the
-  // same list the readiness panel does, so it starts nothing even in category
-  // mode with the classifier in Apply; stage 4 takes `api` off the list, and
-  // this becomes a live hold on the row.
+  // `createApiTicket` hands the row straight to `planRouting`, read once
+  // before its transaction, its group beside it: in category mode with the
+  // classifier in Apply, a live hold on the row.
   it('answers what planRouting takes, with the default group beside it', async () => {
     const [group] = await db.insert(groups).values({ name: 'Recipients' }).returning();
     const [row] = await db
@@ -128,7 +125,11 @@ describe('apiChannel', () => {
       routingMode: 'category',
       defaultGroupId: group!.id,
     });
-    expect(await planRouting(channel)).toBeNull();
+    expect(await planRouting(channel)).toEqual({
+      start: 'live',
+      channelId: row!.id,
+      windowMinutes: 5,
+    });
   });
 });
 

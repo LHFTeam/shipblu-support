@@ -292,7 +292,8 @@ For the support lead and the repo's owner:
   name safely («عبد الله أحمد»).
 - **How many tickets may one user open?** Default: ten open or pending at
   once and ten new ones an hour. Nothing caps tickets per contact anywhere
-  today.
+  today. The ten bounds opening a ticket, not replying: a reply reopens a
+  resolved ticket whatever the count, rather than cutting a conversation off.
 - **How long does `/api/v1` live once there is a `/api/v2`?** Default: twelve
   months, with `Deprecation` and `Sunset` headers six months ahead on any
   operation being retired.
@@ -372,7 +373,12 @@ follows the document would get a 401.
   `account_deleted`, `number_released`, `other`, recorded on the rows. With
   `account_deleted` or `number_released` it also deletes that identity's
   ownership rows (below), so the tickets stay on the contact for agents and
-  leave the app for good. A mint and a revoke for one account each take the
+  leave the app for good. Nobody can read a reply on them after that — `api`
+  has no other carrier — so, by the owner's decision on #532, each gets a
+  `released_from_app` event, which the ticket's header turns into "Not in the
+  myBlu app any more", and an open or pending one is resolved by the system,
+  credited to `myblu`, with no survey and no `on_update` pass; its clocks
+  stop once the revoke commits (`lib/api/release.ts`). A mint and a revoke for one account each take the
   account's advisory lock first, so a revoke ends a session a mint wrote while
   it ran: without it, the revoke's `UPDATE` neither sees nor waits for a row
   not yet committed, and that session outlives a "sign out everywhere" by a
@@ -570,7 +576,8 @@ portal's words for the four.
   mid-conversation.
 - **Provenance is an event.** `opened_from_app`, written in the creating
   transaction so the on-create rules and the header see it:
-  `{ app: 'myblu', platform, appVersion, sdkVersion, identityId }`. Nothing
+  `{ app: 'myblu', platform, appVersion, sdk, sdkVersion, identityId }`, the
+  SDK's name and version apart (`sdk-ts`, `0.3.0`). Nothing
   draws `meta.pageUrl`, which is why web chat's page is on every message and
   on no screen. `messages.meta` carries `{ locale, client }`, and
   `webchatFiles` on a message sent with files; `requesterLocale` gains an
@@ -639,7 +646,10 @@ never retried — is right for both.
   the page before it, and `olderCursor` is null at the start of the thread.
   `?after=<newerCursor>` returns what is newer; `newerCursor` is never null
   and comes back unchanged when nothing is new, so a poll always has a cursor
-  to send, and a full page means ask again at once. Both together is
+  to send, and a full page means ask again at once. A poll's `olderCursor` is
+  always null: a poll never pages back, and its first row is as often one the
+  overlap re-read as the oldest row after the cursor, so a cursor taken from
+  it offered "load older" at the thread's start. Both together is
   `400 invalid_request`.
 - `GET /tickets` is ordered by `(lastMessageAt, id)` descending and pages back
   with `?before=<olderCursor>`. It has no `after`: a ticket that gets a
@@ -649,7 +659,11 @@ never retried — is right for both.
   id, the inbox's form (`lib/tickets/inbox-filters.ts`): a JS `Date` holds
   milliseconds where `timestamptz` holds microseconds, and a round trip skips
   or repeats a row. A cursor this server did not mint is `400 invalid_cursor`,
-  never a first page.
+  never a first page, and "did not mint" is checked rather than approximated:
+  the cursor also carries an HMAC of its text under `APP_SECRET`, with a
+  purpose of its own, so one in this server's spelling that it never signed is
+  refused too. A change of the secret refuses every cursor an app holds, once,
+  and the app drops it and reads the newest page.
 - **`created_at` is not commit order,** so `after` re-reads a few seconds
   before its cursor and a page may repeat rows the client holds. The one rule
   an SDK needs is "merge by `id`".
@@ -835,8 +849,9 @@ tapped (rule 10 under _What every SDK does_).
   retries can never succeed. The session's `name` and `client.appVersion`
   publish a `pattern` that refuses it (`storable` in `lib/api/schemas.ts`);
   `ExternalUserId` and `Phone` already name their alphabets. The text the
-  user writes reaches a column from stage 4, which decides the same for
-  `text` and the survey's comment before either is served.
+  user writes reaches a column from stage 4, which decided the same for
+  `text` and the survey's comment before either is served: both publish that
+  `pattern` and refuse U+0000 as `400 invalid_request` naming the field.
 - **A file is admitted on its label and stored by its bytes.** `declaredKind`
   refuses a `Content-Type` outside the list whatever the bytes are, and admits
   a part with no type, or `application/octet-stream`, only by its filename's
@@ -890,6 +905,12 @@ it, and the launch's number decides whether the map grows.
 The per-user minting bucket bounds an honest app's loop and nothing else,
 since the caller chooses its key; the server plane's own bucket is what caps
 minting.
+
+The new-ticket bucket counts tickets opened, so it is spent only once the pool
+has found the request's `Idempotency-Key` unspent, never by a replay: spent by
+every `POST /tickets`, one ticket's eleventh retry within the hour was refused
+`429`, and the user's next real ticket with it. A retry still spends the send
+bucket, which turns over in a minute.
 
 The bad-bearer bucket is spent only by a bearer that is refused, and only
 turns that refusal's `401` into a `429`: a live session, or the backend's
@@ -1498,14 +1519,22 @@ contact's WhatsApp ticket and a merged one are each 404; a note is never
 returned; a files-only message answers `text: ""` and `subject: null`;
 `after` returns a row stamped earlier and committed later; a reply reopens
 `resolved` and is refused on `closed`; a revoke with `account_deleted` takes
-the user's tickets out of the app and leaves them on the contact; a row in `category` mode gets its
+the user's tickets out of the app and leaves them on the contact, each marked
+`released_from_app` and an open one resolved by the system with no survey; a
+request that never takes the work after its commit leaves it to
+`finish_api_message`, which a replay does not run and a second attempt does
+not repeat; a reply is stamped after the locks it waited on; a row in `category` mode gets its
 window, its `routing_decisions` row and one `settle_routing` job; no bare
 `Date` survives in `toSQL().params`; and a case each in the portal's tests.
 Then on production, by the owner, with the token set and a test phone no
 WhatsApp contact holds: mint, create, see "myBlu app" and the header line in
 the inbox, answer from the console, read the answer back, then purge the
 ticket and the contact. The pull request says plainly that this writes to
-production and what removes it. **The SDK's 0.1 is cut from here.**
+production and what removes it. **The SDK's 0.1 is cut from here.** Way back:
+switch the `api` row off, or unset the token. Not a revert once an `api`
+ticket exists, since the build before this stage shows those tickets on the
+portal, which is what the portal's exclusion above prevents; a revert of the
+rest keeps that exclusion.
 
 **5. History and unread.** No schema. The list with its filter, in place of
 stage 4's `404` on `GET /tickets`; the read marker; hours on `GET /config`.

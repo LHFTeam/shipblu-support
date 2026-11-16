@@ -599,6 +599,40 @@ describe('getTicket', () => {
       { from: 'agent', body: 'Today.' },
     ]);
   });
+
+  // The list leaves a merged ticket out, so the page must too: the
+  // conversation goes on in the survivor.
+  it('does not open a ticket merged into another', async () => {
+    const contactId = await customer();
+    const survivor = await createTicket(contactId, { subject: 'Kept', body: 'First.' });
+    const folded = await createTicket(contactId, { subject: 'Folded', body: 'Second.' });
+    await db
+      .update(conversations)
+      .set({ mergedIntoId: survivor.conversationId })
+      .where(eq(conversations.id, folded.conversationId));
+
+    expect(await getTicket(contactId, folded.number)).toBeNull();
+    expect((await getTicket(contactId, survivor.number))?.number).toBe(survivor.number);
+  });
+});
+
+describe('a myBlu app ticket', () => {
+  // `plans/myblu-ticket-api.md`, _What the app can read_: the portal stops
+  // reaching `api` tickets in the stage that writes the first one, through one
+  // list for the three reads, so the list cannot hide one the page still opens.
+  it('is neither listed nor opened on the portal, while the contact’s other tickets are', async () => {
+    const contactId = await customer();
+    const app = await createTicket(contactId, { subject: 'App', body: 'From the app.' });
+    const mail = await createTicket(contactId, { subject: 'Portal', body: 'From here.' });
+    await db
+      .update(conversations)
+      .set({ channel: 'api' })
+      .where(eq(conversations.id, app.conversationId));
+
+    expect((await listTickets(contactId)).map((ticket) => ticket.number)).toEqual([mail.number]);
+    expect(await getTicket(contactId, app.number)).toBeNull();
+    expect((await getTicket(contactId, mail.number))?.number).toBe(mail.number);
+  });
 });
 
 describe('the status label a customer sees', () => {
@@ -780,6 +814,41 @@ describe('appendReply', () => {
       await db
         .update(conversations)
         .set({ deletedAt: new Date() })
+        .where(eq(conversations.id, created.conversationId));
+
+      await refused(contactId, created.number, created.conversationId);
+    });
+
+    // Answered here, the reply landed on the folded ticket, reopening it,
+    // while agents worked the survivor.
+    it('a ticket merged into another, even resolved', async () => {
+      const contactId = await customer();
+      const survivor = await createTicket(contactId, { subject: 'Kept', body: 'First.' });
+      const folded = await createTicket(contactId, { subject: 'Folded', body: 'Second.' });
+      await setStatus(folded.conversationId, 'Resolved');
+      await db
+        .update(conversations)
+        .set({ mergedIntoId: survivor.conversationId })
+        .where(eq(conversations.id, folded.conversationId));
+
+      await refused(contactId, folded.number, folded.conversationId);
+      const [row] = await db
+        .select({ category: ticketStatuses.category })
+        .from(conversations)
+        .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+        .where(eq(conversations.id, folded.conversationId));
+      expect(row?.category).toBe('resolved');
+    });
+
+    // The myBlu app's tickets belong to the app identity that opened them, and
+    // a number is guessable: from here, a previous holder of the phone could
+    // write into the new holder's myBlu ticket as the customer.
+    it('a myBlu app ticket, which only the app reaches', async () => {
+      const contactId = await customer();
+      const created = await createTicket(contactId, { subject: 'App', body: 'From the app.' });
+      await db
+        .update(conversations)
+        .set({ channel: 'api' })
         .where(eq(conversations.id, created.conversationId));
 
       await refused(contactId, created.number, created.conversationId);

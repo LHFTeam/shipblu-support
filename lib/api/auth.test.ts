@@ -20,7 +20,14 @@ vi.mock('./sessions', () => ({
     if (token === lookup.live) {
       return Promise.resolve({
         kind: 'live',
-        caller: { identityId: 'i', contactId: 'c', externalUserId: 'u', tokenHash: 'h' },
+        caller: {
+          identityId: 'i',
+          contactId: 'c',
+          externalUserId: 'u',
+          tokenHash: 'h',
+          platform: 'ios',
+          appVersion: '5.4.1',
+        },
       });
     }
     if (token === lookup.blocked) {

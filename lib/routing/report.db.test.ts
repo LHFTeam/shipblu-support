@@ -992,12 +992,13 @@ describe('routingChannels', () => {
   });
 
   // The page names each row's own reason: a myBlu app row, the only one of
-  // its kind and nobody's, is not filed for by another row, and was said to be.
-  it('says a myBlu app row files nothing because nothing opens its tickets yet', async () => {
+  // its kind and nobody's, files its own tickets, and was once said to be
+  // filed for by another row.
+  it('says a myBlu app row, the only one of its kind, files its own tickets', async () => {
     const app = await channel({ type: 'api', name: 'myBlu app', routingMode: 'category' });
 
     const row = (await routingChannels()).find((candidate) => candidate.id === app)!;
-    expect(row).toMatchObject({ files: false, gap: 'not_filed_yet' });
+    expect(row).toMatchObject({ files: true, gap: null });
   });
 });
 

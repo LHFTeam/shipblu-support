@@ -517,6 +517,10 @@ POST   /api/v1/sessions          server plane: mint a session for one user   (st
 POST   /api/v1/sessions/revoke   server plane: end every session of a user   (stage 3)
 DELETE /api/v1/session           client plane: end this session             (stage 3)
 GET    /api/v1/config            client plane: who is signed in, the limits  (stage 3)
+POST   /api/v1/tickets           client plane: open a ticket                 (stage 4)
+GET    /api/v1/tickets/{id}      client plane: one ticket                    (stage 4)
+GET    /api/v1/tickets/{id}/messages   a page of a thread, by cursor         (stage 4)
+POST   /api/v1/tickets/{id}/messages   the user's reply                      (stage 4)
 ```
 
 Two planes, and neither takes a cookie. **myBlu's backend** holds `MYBLU_API_TOKEN` and
@@ -528,6 +532,14 @@ account to that number's WhatsApp contact, so an agent sees one customer with on
 while the app sees only what its own identity opened. With `MYBLU_API_TOKEN` unset the
 whole API answers `503 not_configured`, which is how it ships ahead of anybody holding a
 value and how it is switched off.
+
+A ticket the app opens is an ordinary `api` ticket to the team — filed under the `api`
+channel row's group, routed, timed and answered from the console like any other — and
+belongs, to the app, only to the identity that opened it: every statement the API runs
+about a ticket names that identity, the session's contact and the channel in the same
+`WHERE` as the id (`ownedTicket` in `lib/api/scope.ts`), so a contact merge or a shared
+phone changes what an agent sees and never what another app user reads. There is no
+stream: the app polls a cursor and obeys the `pollAfterSeconds` each answer carries.
 
 ## Deployment
 

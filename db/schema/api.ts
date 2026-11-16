@@ -1,4 +1,5 @@
 import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { conversations } from './conversations';
 import { contactIdentities } from './customers';
 
 /**
@@ -98,5 +99,64 @@ export const apiSessions = pgTable(
     index('api_sessions_identity_idx').on(t.identityId),
     // The nightly sweep.
     index('api_sessions_expires_idx').on(t.expiresAt),
+  ],
+);
+
+/**
+ * Which myBlu user opened a ticket (`plans/myblu-ticket-api.md`, _What the app
+ * can read_): one row per ticket the app's API created, written in the
+ * transaction that creates it and never updated.
+ *
+ * A ticket belongs to the identity that opened it, and to nobody the contact
+ * later gains. A contact merge re-points identities, two identities can land
+ * on one contact, and a backend can vouch for a wrong phone — each of those
+ * changes what an agent sees, and with this row none of them changes what
+ * another app user reads. So every statement the API runs about a ticket asks
+ * for this row by the session's identity, in the same `WHERE` as the id
+ * (`ownedTicket` in `lib/api/scope.ts`), beside the contact and the channel.
+ *
+ * Immutable, which is what makes it safe to join under a lock (AGENTS.md, _A
+ * read that locks a row…_): nothing writes `identity_id` after the insert, so a
+ * locked read re-checking the newest version of the ticket's row finds the
+ * same ownership it joined before it waited. The one change it ever sees is
+ * its deletion: `revokeSessions` deletes an identity's rows on
+ * `account_deleted` and `number_released`, so the tickets leave the app for
+ * good and stay on the contact for agents.
+ *
+ * It is also where the webhook (stage 6) reads whom to name: the contact,
+ * after a merge, has two identities.
+ */
+export const apiTickets = pgTable(
+  'api_tickets',
+  {
+    /** The ticket. Cascading: a purged ticket takes its ownership with it. */
+    conversationId: uuid('conversation_id')
+      .primaryKey()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+
+    /**
+     * The `api` identity whose session opened it. Cascading: a purged contact
+     * takes its identities, and their ownership rows go with them.
+     */
+    identityId: uuid('identity_id')
+      .notNull()
+      .references(() => contactIdentities.id, { onDelete: 'cascade' }),
+
+    /**
+     * The tracking number the ticket was opened with, as the app sent it, or
+     * null. A claim the user made, given back to that user and to nobody else:
+     * the API answers `ticket.trackingNumber` from here and never from
+     * `conversation_shipments`, which also holds numbers an agent typed in a
+     * note. Linked to a parcel only when it is shaped like one of ours
+     * (`detectShipmentRefs`); stored as sent either way, so the shipment
+     * screen that sent it still finds its ticket.
+     */
+    trackingNumber: text('tracking_number'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Every list, count and revoke is by the identity; the cascade from a purge too.
+    index('api_tickets_identity_idx').on(t.identityId),
   ],
 );

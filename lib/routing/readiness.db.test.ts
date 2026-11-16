@@ -299,12 +299,11 @@ describe('routingReadiness', () => {
     expect(of(await routingReadiness(NOW), owned).starts).toBe('live');
   });
 
-  // Nothing files under a myBlu app row until the stage that opens the app's
-  // tickets (`filedYet`), so no app row routes yet, and every one says so — a
-  // second row too, since no row of the type files anything, and one switched
-  // off, whose own reason ("a ticket held under it before it went off") would
-  // describe tickets no app row has ever had.
-  it('judges the myBlu app’s rows by the row the app files under, which files nothing yet', async () => {
+  // The myBlu app's rows need no case of their own here: the app files under
+  // the oldest active one (`apiChannel`), the rule `filingRowOfType` answers
+  // for every type filed by kind, and `routingModeOf` honours the column on
+  // them. So the oldest routes, and a second says which row does instead.
+  it('judges the myBlu app’s rows by the row the app files under', async () => {
     const recipients = await group('Recipients');
     await member(recipients, 'Here', {});
     const off = await channel({
@@ -329,19 +328,11 @@ describe('routingReadiness', () => {
 
     const readiness = await routingReadiness(NOW);
 
-    expect(of(readiness, app)).toMatchObject({
-      mode: 'category',
-      starts: null,
-      routesInApply: false,
-      warnings: [{ kind: 'not_filed_yet' }],
-    });
-    expect(of(readiness, off)).toMatchObject({
-      starts: null,
-      warnings: [{ kind: 'not_filed_yet' }],
-    });
+    expect(of(readiness, app)).toMatchObject({ mode: 'category', starts: 'live' });
+    expect(of(readiness, off)).toMatchObject({ starts: null, warnings: [{ kind: 'inactive' }] });
     expect(of(readiness, spare)).toMatchObject({
       starts: null,
-      warnings: [{ kind: 'not_filed_yet' }],
+      warnings: [{ kind: 'not_filing_row', filingRow: 'myBlu app' }],
     });
   });
 

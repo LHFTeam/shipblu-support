@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { Admission } from '@/lib/http/rate-limit';
-import { logger } from '@/lib/log';
+import { logger, scrubbed } from '@/lib/log';
 import { apiError } from './respond';
 
 /**
@@ -36,13 +36,22 @@ export function invalidRequest(requestId: string, message: string, field?: strin
  * the body itself is the wrong shape. zod's own sentence says what was wrong
  * and never what was sent — it does not repeat the input unless asked to — so
  * a refused phone is not written into the app's log.
+ *
+ * `whole` names what was refused when no one field is to blame: the body, or
+ * for a query string read with a schema (`pageAsked`) the query, since
+ * "The body" on a `GET`'s refusal sent its reader to look for a body it never
+ * sent.
  */
-export function invalidBody(requestId: string, error: z.ZodError): Response {
+export function invalidBody(
+  requestId: string,
+  error: z.ZodError,
+  whole: 'The body' | 'The query' = 'The body',
+): Response {
   const issue = error.issues[0];
   const field = issue && issue.path.length > 0 ? issue.path.join('.') : undefined;
   const message = issue
-    ? `${field ?? 'The body'}: ${issue.message}`
-    : 'The body does not match the request schema.';
+    ? `${field ?? whole}: ${issue.message}`
+    : `${whole} does not match the request schema.`;
   return invalidRequest(requestId, message, field);
 }
 
@@ -86,25 +95,5 @@ export async function answering(
   }
 }
 
-/**
- * The failure's kind, its SQLSTATE when it has one, the first line of the
- * underlying message and the stack frames: what a reader needs to find the
- * fault, and none of the query, its parameters or Postgres's `detail`.
- */
-function scrubbed(error: unknown): Error {
-  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-  const name = cause instanceof Error ? cause.name : typeof cause;
-  const code =
-    typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
-      ? ` ${cause.code}`
-      : '';
-  const message = cause instanceof Error ? (cause.message.split('\n')[0] ?? '') : '';
-
-  const out = new Error(`${name}${code}: ${message}`);
-  const frames =
-    error instanceof Error
-      ? (error.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line))
-      : [];
-  out.stack = [`Error: ${out.message}`, ...frames].join('\n');
-  return out;
-}
+/** `lib/log.ts`'s, where every path that logs a customer's words reaches it. */
+export { scrubbed };
