@@ -117,7 +117,7 @@ export default async function ConversationPage({
     saw.
   */
   const lastInbound = lastCustomerWords(conversation.messages);
-  const subject = subjectWords(conversation.subject);
+  const subject = subjectWords(conversation.subject, conversation.channel);
 
   // The panel lives in the reply form, so a ticket with no reply box (read-only,
   // or a channel not answered from here) has nowhere to show it.

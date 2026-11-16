@@ -7,13 +7,17 @@ import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
-import type { ConversationChannel } from '@/lib/tickets/channel-policy';
-import { carrierFor } from '@/lib/tickets/outbound';
+import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
+import { carrierFor, rowIsDelivery } from '@/lib/tickets/outbound';
 
-/** The row an agent's reply is stored as, less what every reply shares. */
+/**
+ * The row an agent's reply is stored as, less what every reply shares and what
+ * `storeAgentReply` decides itself: the delivery status, from the same answer
+ * that decides whether a carrier is queued.
+ */
 export type AgentReplyMessage = Omit<
   typeof messages.$inferInsert,
-  'conversationId' | 'direction' | 'kind'
+  'conversationId' | 'direction' | 'kind' | 'deliveryStatus' | 'deliveredAt'
 > & { authorAgentId: string; bodyText: string };
 
 /**
@@ -31,6 +35,14 @@ export type AgentReplyMessage = Omit<
  * does.) What each sender checks before it gets here — permission, read-only
  * channels, the messaging windows, the template's account — stays in its action.
  *
+ * Whether the row is its own delivery is decided here once, for the status it
+ * is written with and for whether a carrier is queued below: each sender
+ * stating its own status had to repeat `rowIsDelivery`, and one that forgot
+ * wrote a web chat or app reply `pending` with nothing queued behind it. A
+ * read-only channel (the bot) has neither a carrier nor a client reading the
+ * row, so a reply there is refused before it is written, as
+ * `writeAutomatedReply` refuses an automated one; its action refuses it first.
+ *
  * Returns the new message's id.
  */
 export async function storeAgentReply(
@@ -38,9 +50,28 @@ export async function storeAgentReply(
   channel: ConversationChannel,
   message: AgentReplyMessage,
 ): Promise<string> {
+  if (isReadOnlyChannel(channel)) {
+    throw new Error(
+      `agent reply refused on ${channel} conversation ${conversationId}: ` +
+        'nobody on the team writes there, and its action should have refused it first',
+    );
+  }
+  const carrier = carrierFor(channel);
+  const delivered = rowIsDelivery(channel);
+
   const inserted = await db
     .insert(messages)
-    .values({ ...message, conversationId, direction: 'outbound', kind: 'reply' })
+    .values({
+      ...message,
+      conversationId,
+      direction: 'outbound',
+      kind: 'reply',
+      // Written `delivered` where the customer's client reads the row: marked
+      // pending, it would show "sending…" for ever on a message the customer
+      // is already looking at.
+      deliveryStatus: delivered ? 'delivered' : 'pending',
+      ...(delivered ? { deliveredAt: new Date() } : {}),
+    })
     .returning({ id: messages.id });
 
   const messageId = inserted[0]!.id;
@@ -84,11 +115,12 @@ export async function storeAgentReply(
     });
   }
 
-  // Web chat has no outbound provider: writing the row *is* delivery, because
-  // the visitor's open stream reads the same table.
-  if (channel !== 'webchat') {
+  // Web chat and the myBlu app have no outbound provider: writing the row,
+  // above, *is* delivery, because the customer's client — the widget's open
+  // stream, the app's poll — reads the same table (`rowIsDelivery`).
+  if (carrier) {
     await enqueue(
-      carrierFor(channel),
+      carrier,
       { messageId },
       // dedupeKey on the message id: a double-submit or a retried action can
       // never queue the same reply twice.

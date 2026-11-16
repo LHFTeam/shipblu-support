@@ -53,8 +53,8 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   // opens is on the host they are on, where their session keeps the chat
   // launcher off the article. The address printed for them to copy is on the
   // published host, because a link copied from here is one sent to a customer,
-  // and the console's own host is the Render service URL once `KB_PUBLIC_HOST`
-  // names the help centre's.
+  // and the console's own host (`APP_URL`'s) is not the help centre's once
+  // `KB_PUBLIC_HOST` names one.
   //
   // `effectiveVisibility`, never the column: a `published`/`public` article
   // inside an `agents_only` folder is not on the help centre, so its URL is a

@@ -16,6 +16,7 @@ import {
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { allLimited } from '@/lib/concurrency';
+import { anyChannelSurveyed } from '@/lib/csat/decision';
 import { loadCsatSettings, type CsatSettings } from '@/lib/csat/settings';
 import { ratingLabels } from '@/lib/csat/wording';
 import { channelLabel, formatDateTime } from '@/lib/format';
@@ -442,7 +443,10 @@ export default async function CsatReportPage({
  * Why no survey has ever gone out, from the switch the sends obey. The fixed
  * sentence it replaces began "Surveys are switched on", which read as a status
  * on a page whose surveys were off. Null, a settings read that failed, says
- * only where they are set.
+ * only where they are set. Whether a channel is surveyed is the decision's own
+ * answer (`anyChannelSurveyed`), not the stored switches: the myBlu app's is
+ * kept with no channel behind it, and on alone it would have promised a survey
+ * that nothing can send.
  */
 function nothingSentSentence(settings: CsatSettings | null): string {
   const where = 'under Settings → Satisfaction surveys';
@@ -450,7 +454,7 @@ function nothingSentSentence(settings: CsatSettings | null): string {
   if (!settings.enabled) {
     return `Surveys are switched off, so nothing has been sent. An admin turns them on ${where}.`;
   }
-  if (!Object.values(settings.channels).some(Boolean)) {
+  if (!anyChannelSurveyed(settings)) {
     return `Surveys are on for no channel, so nothing has been sent. An admin chooses the channels ${where}.`;
   }
   return 'Surveys are on, and none has gone out yet: one is sent once a ticket on a surveyed channel is resolved and the survey’s delay has passed.';

@@ -22,7 +22,9 @@ here since 2026-11-11. Pick one and keep it. The visitor's token lives in the
 frame's own storage, which belongs to the host the script was loaded from, so
 moving to the other host later starts every visitor afresh: their stored
 conversation stays behind on the first. `support.shipblu.com` is the name to
-pick, since it is the one meant to last. Load it from the same host in every
+pick, since it is the one meant to last, and the Render host is being retired
+(`plans/console-host.md`): a page still loading the script from it moves once,
+and its visitors start afresh that once. Load it from the same host in every
 environment — the script frames the origin it was served from, so a staging
 dashboard pointing at production opens production's chat.
 

@@ -214,9 +214,9 @@ export default async function ArticlePage({
               host: the queue's help-centre link and the knowledge panel's
               Open both bring them here, so their session keeps the chat
               launcher off the page (`articleOrigins` in `lib/kb/site.ts`).
-              That host is the Render service URL once `KB_PUBLIC_HOST` names
-              the help centre's, so the address bar is not the link to send a
-              customer; this is. English, like the console it belongs to.
+              That host is `APP_URL`'s, not the help centre's, once
+              `KB_PUBLIC_HOST` names one, so the address bar is not the link to
+              send a customer; this is. English, like the console it belongs to.
               Decided per viewer, which this page may do only because it is
               `force-dynamic`.
 

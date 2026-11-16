@@ -3,6 +3,7 @@ import { SESSION_COOKIE } from '@/lib/auth/cookie';
 import { freshdeskPortalRedirect } from '@/lib/kb/freshdesk-portal';
 import { FRESHDESK_FOLDER, freshdeskCategoryId, LEGACY_PATH_HEADER } from '@/lib/kb/legacy-path';
 import { LOCALES } from '@/lib/kb/locale';
+import { isConsoleHost, isHelpCentreHost } from '@/lib/kb/site';
 
 /**
  * Two jobs, both of which have to happen before anything touches a database.
@@ -78,6 +79,14 @@ const PUBLIC_PREFIXES = [
   // /login that the widget cannot follow.
   '/api/widget',
   '/widget',
+  // The myBlu ticket API (`plans/myblu-ticket-api.md`). Neither of its callers
+  // carries a cookie — the app's SDK sends a session token, myBlu's backend the
+  // server plane's — so the cookie check below would turn every call into a
+  // redirect to /login, which no HTTP client reads as a refusal. Being public
+  // here grants nothing: every route checks its bearer in code, and `/api/v1`
+  // never reads a cookie at all. The help-centre host passes `/api` through
+  // already, so without this the fault showed only on the other hosts.
+  '/api/v1',
   '/_next',
 ];
 
@@ -170,8 +179,6 @@ function isPublic(pathname: string): boolean {
 
 export default function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const host = request.headers.get('host')?.split(':')[0]?.toLowerCase() ?? '';
-  const kbHost = process.env.KB_PUBLIC_HOST?.toLowerCase();
 
   // --- Legacy Freshdesk links ---------------------------------------------
   // An article, a folder or a category: each names a row, so finding where it
@@ -230,7 +237,11 @@ export default function proxy(request: NextRequest) {
   }
 
   // --- Help centre hostname ------------------------------------------------
-  if (kbHost && host === kbHost) {
+  // `isHelpCentreHost`, which the help centre's sign-in asks too: a server
+  // action's redirect is rendered in the same request, without coming back
+  // through here, so the sign-in has to know for itself that this host serves
+  // no console (`app/help/[locale]/account/actions.ts`).
+  if (isHelpCentreHost(request.headers.get('host'))) {
     if (underPrefix(pathname, KB_HOST_PASSTHROUGH)) {
       return NextResponse.next();
     }
@@ -264,12 +275,23 @@ export default function proxy(request: NextRequest) {
 
   // --- Console auth --------------------------------------------------------
 
-  // The bare domain is the help centre's front door on every hostname, so it is
-  // public even though nothing beneath it is: `app/page.tsx` redirects it to the
+  // The bare domain is the help centre's front door on every hostname but the
+  // console's, so it is public even though nothing beneath it is: `app/page.tsx` redirects it to the
   // default locale, which the locale rule above then rewrites under /help. Left
   // to the check below it would redirect to /login instead, and the front door
   // of a public support site would ask for a password.
-  if (pathname === '/') return NextResponse.next();
+  //
+  // Except on the console's own address, once the help centre has one of its
+  // own: whoever types desk.shipblu.com is an agent (`isConsoleHost`). A 307,
+  // not a permanent redirect, so a browser holds no answer that outlives a
+  // change of either variable; `/inbox` then sends a signed-out agent to the
+  // sign-in below, with `next` set to come back.
+  if (pathname === '/') {
+    if (isConsoleHost(request.headers.get('host'))) {
+      return NextResponse.redirect(new URL('/inbox', request.nextUrl.origin), 307);
+    }
+    return NextResponse.next();
+  }
 
   if (isPublic(pathname)) return NextResponse.next();
 

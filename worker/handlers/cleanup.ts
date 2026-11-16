@@ -1,6 +1,7 @@
 import { lt, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationPresence, jobs, webhookEvents } from '@/db/schema';
+import { deleteSweptApiSessions } from '@/lib/api/sessions';
 import { deleteExpiredCustomerSessions } from '@/lib/auth/customer-session';
 import { deleteExpiredSessions } from '@/lib/auth/session';
 import { deleteExpiredContactTokens } from '@/lib/portal/accounts';
@@ -94,6 +95,10 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
   // Spent and expired verification/reset links. They are useless once expired
   // and they are credentials-adjacent, so there is no reason to keep them.
   const expiredContactTokens = await deleteExpiredContactTokens();
+  // The myBlu app's sessions, thirty days after they ran out: kept until then
+  // as the only record of who myBlu's backend vouched for, with which phone,
+  // which is what a suspected leak of its minting token is read back from.
+  const sweptApiSessions = await deleteSweptApiSessions();
 
   // Presence is ephemeral; anything older than an hour is a dead browser tab.
   //
@@ -137,6 +142,6 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
   log.info(
     `sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
       `contact_tokens=${expiredContactTokens} presence=${stalePresence.count} ` +
-      `webhooks=${oldWebhooks.count} jobs=${oldJobs.count}`,
+      `webhooks=${oldWebhooks.count} jobs=${oldJobs.count} api_sessions=${sweptApiSessions}`,
   );
 }

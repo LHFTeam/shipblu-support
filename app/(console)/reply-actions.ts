@@ -200,7 +200,6 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   // A portal ticket's reply goes out by email too, so it is written as one.
   const isEmail = sendsByEmail(conversation.channel);
-  const isWebchat = conversation.channel === 'webchat';
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
@@ -211,12 +210,6 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     bodyHtml: html,
     toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
     inReplyTo: parentMessageId,
-    // Web chat has no outbound provider: writing the row *is* delivery,
-    // because the visitor's open stream reads the same table. Marking it
-    // pending would leave a permanent "sending…" badge on a message the
-    // customer is already looking at.
-    deliveryStatus: isWebchat ? 'delivered' : 'pending',
-    ...(isWebchat ? { deliveredAt: new Date() } : {}),
     meta:
       conversation.channel === 'whatsapp'
         ? { sendKind: 'text' }
@@ -380,7 +373,6 @@ export async function sendTemplateReply(
   await storeAgentReply(conversationId, row.conversation.channel, {
     authorAgentId: agent.id,
     bodyText: rendered,
-    deliveryStatus: 'pending',
     meta: {
       sendKind: 'template',
       template: { name: template.name, language: template.language, components },

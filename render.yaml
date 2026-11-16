@@ -220,6 +220,18 @@ projects:
             #                            value per environment: a signature minted
             #                            against one deployment would otherwise
             #                            be replayable at the other.
+            #   MYBLU_API_TOKEN          the myBlu API's server-plane bearer,
+            #                            held by myBlu's backend: it mints a
+            #                            session for any user and ends them.
+            #                            Unset, or under 32 characters, is the
+            #                            API switched off (503 on both planes);
+            #                            unsetting it is the way back. Read by
+            #                            the web service alone. `openssl rand
+            #                            -base64 48`, never staging's value.
+            #   MYBLU_API_TOKEN_PREVIOUS
+            #                            the value being retired, set only while
+            #                            the backend moves to a new one; never a
+            #                            value suspected of leaking
             #   KB_NOTICE_EN             service notice, English
             #   KB_NOTICE_AR             service notice, Arabic
             #   KB_NOTICE_HREF           optional "read the update" link
@@ -306,21 +318,25 @@ projects:
             preDeployCommand: npm run db:migrate
             startCommand: npm run start
             healthCheckPath: /api/health
-            # The help centre's public host. It was added in the dashboard on
-            # 2026-11-11, when the CNAME moved here from Freshdesk, and is
-            # written down so the file describes the running service: on
-            # 2026-11-13 the dashboard listed it as the only custom domain,
-            # verified, with its certificate issued. Not an apex and not www.,
-            # so Render adds no redirect beside it.
+            # Two custom domains, each added in the dashboard and written down
+            # so the file describes the running service. support.shipblu.com is
+            # the help centre's public host, added on 2026-11-11 when the CNAME
+            # moved here from Freshdesk. desk.shipblu.com is the console's own
+            # host, added on 2026-11-16 (plans/console-host.md); the dashboard
+            # listed both that day, verified, with certificates issued. Neither
+            # is an apex or www., so Render adds no redirect beside them.
             domains:
               - support.shipblu.com
+              - desk.shipblu.com
             # The onrender.com host stays on, as the dashboard has it. The
             # console is served there once KB_PUBLIC_HOST names the domain
             # above, which proxy.ts then serves only as the help centre, and
             # every webhook (/api/webhooks/*) is delivered to it. Stated
             # rather than left out, though an omitted value keeps the current
             # one: a sync then puts it back if the dashboard switch is ever
-            # turned off by mistake.
+            # turned off by mistake. It is being retired: the console and the
+            # webhooks move to desk.shipblu.com first, and this turns to
+            # `disabled` only at the last step of plans/console-host.md.
             renderSubdomainPolicy: enabled
             scaling:
               minInstances: 1
@@ -623,6 +639,12 @@ projects:
             #                              a configuration on staging's own
             #                              Meta app, and a v4 one, as in
             #                              production's group
+            #   MYBLU_API_TOKEN            staging's own minting token, held by
+            #                              myBlu's staging backend for a named
+            #                              test window, never production's:
+            #                              whoever holds it mints any user here
+            #   MYBLU_API_TOKEN_PREVIOUS
+            #                              only during a rotation
             envVars: []
 
         services:

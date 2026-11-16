@@ -1,14 +1,17 @@
 'use server';
 
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { localeOf, text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
 import { signInWithPassword } from '@/lib/auth/sign-in';
 import { destroyCustomerSession } from '@/lib/auth/customer-session';
-import { customerPath, safePath } from '@/lib/auth/next-path';
+import { customerPath, HELP_CENTRE_SIGN_IN, safePath } from '@/lib/auth/next-path';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { type Locale, type StringKey } from '@/lib/kb/locale';
+import { consoleBaseUrl, isHelpCentreHost } from '@/lib/kb/site';
+import { logger } from '@/lib/log';
 import { completePasswordReset, requestAccount, requestPasswordReset } from '@/lib/portal/accounts';
 
 /**
@@ -20,6 +23,8 @@ import { completePasswordReset, requestAccount, requestPasswordReset } from '@/l
  * interfaces happen.
  */
 export type PortalFormState = { error: StringKey | null; done?: boolean };
+
+const log = logger('portal_sign_in');
 
 function customerHome(locale: Locale): string {
   return `/${locale}/portal`;
@@ -42,7 +47,8 @@ export async function portalSignIn(
   // where `errorUnverified` sent them to an inbox nothing reaches (§6.117).
   if (!looksLikeEmail(email)) return { error: 'errorInvalidEmail' };
 
-  const outcome = await signInWithPassword(email, password, locale);
+  const consoleServedHere = !isHelpCentreHost((await headers()).get('host'));
+  const outcome = await signInWithPassword(email, password, locale, { consoleServedHere });
 
   if (outcome === 'throttled') return { error: 'errorThrottled' };
   if (outcome === 'invalid') return { error: 'errorCredentials' };
@@ -54,6 +60,23 @@ export async function portalSignIn(
     // not where an agent works, and landing them in the customer portal — which
     // their address may well have tickets in — reads as a broken login.
     redirect(safePath(formData.get('next'), '/inbox'));
+  }
+
+  if (outcome === 'agent_elsewhere') {
+    // The same, on the help centre's own host, which serves no console: to the
+    // console's sign-in on its own host, where the session can live. The agent
+    // signs in once more there, and `from` has that page say why, so a second
+    // password box reads as a change of address rather than a failed sign-in.
+    const origin = consoleBaseUrl();
+    if (!origin) {
+      log.error('an agent signed in on the help-centre host, and APP_URL names no console');
+      return { error: 'errorGeneric' };
+    }
+    const query = new URLSearchParams({
+      next: safePath(formData.get('next'), '/inbox'),
+      from: HELP_CENTRE_SIGN_IN,
+    });
+    redirect(`${origin}/login?${query.toString()}`);
   }
 
   redirect(customerPath(formData.get('next'), locale, customerHome(locale)));
