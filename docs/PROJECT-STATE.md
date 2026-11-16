@@ -2287,7 +2287,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   on an `api` ticket. A revoke with `account_deleted` or `number_released` now
   deletes that identity's `api_tickets` rows, so its tickets leave the app and
   stay on the contact. A message's text holding U+0000 is refused `400` (the
-  changelog's 2026-11-13 line). After the release is on `main`, by the owner,
+  changelog's 2026-11-16 line). After the release is on `main`, by the owner,
   with the token set and a test phone no WhatsApp contact holds: mint, create,
   see "myBlu app" and the header line in the inbox, answer from the console,
   read the answer back, then purge the ticket and the contact — this writes to
