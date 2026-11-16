@@ -29,7 +29,7 @@ const ROUTE = 'POST /sessions';
 export async function POST(request: Request): Promise<Response> {
   const requestId = newRequestId();
   return answering(ROUTE, requestId, async () => {
-    const refused = serverPlane(request, requestId);
+    const refused = serverPlane(request, requestId, 'mint');
     if (refused) return refused;
 
     const parsed = CreateSessionRequest.safeParse(await jsonBody(request));

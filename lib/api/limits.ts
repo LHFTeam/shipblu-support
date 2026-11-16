@@ -6,9 +6,14 @@ import { admit, admitVouched, clientIp, type Admission } from '@/lib/http/rate-l
  * `429 rate_limited` with `Retry-After`, and a refused request is still spent.
  *
  * Keyed on the identity wherever a request has one, and on the address only
- * before it does: carrier-grade NAT puts a great many unrelated phones behind
- * one address (`lib/auth/throttle.ts`), so an address bucket is a ceiling on a
- * script, not a measure of a person, and it is generous for that reason.
+ * where it has none: carrier-grade NAT puts a great many unrelated phones
+ * behind one address (`lib/auth/throttle.ts`), so an address bucket is a
+ * ceiling on a script, not a measure of a person. And the address is the first
+ * `X-Forwarded-For` value, which a caller writes, so no address bucket stands
+ * in front of a client-plane bearer: a forged flood under one carrier's egress
+ * would refuse every app behind it, sign-outs included. The session is read
+ * first; only a request that presents none, or one refused, spends an address
+ * bucket (`spendBadBearer`).
  *
  * The buckets here are `plans/myblu-ticket-api.md`'s first five. Sends, new
  * tickets and uploaded megabytes arrive with the routes that spend them
@@ -24,7 +29,12 @@ import { admit, admitVouched, clientIp, type Admission } from '@/lib/http/rate-l
 
 const MINUTE_MS = 60_000;
 
-/** Every client-plane request, and the contract's, before anything is read. */
+/**
+ * `GET /openapi.json`, which takes no credential and so has nothing but the
+ * address to be counted on. Not the client plane: asked before the bearer, a
+ * stranger spending it under a carrier's egress address refused every app
+ * behind it for the rest of the minute.
+ */
 const ADDRESS_LIMIT = 1_200;
 
 export function admitAddress(request: Request): Admission {
@@ -43,7 +53,10 @@ export function admitAddress(request: Request): Admission {
  * spent: every app behind one carrier's egress, for a hundred and twenty
  * forged requests a minute, and the SDK's one `Retry-After` gate then holds
  * every call. Like every address bucket here, it bounds a careless script and
- * not a determined one; the address bucket above is the ceiling before auth.
+ * not a determined one, and it sheds no load: a refused bearer has been looked
+ * up by the time it is counted. A 256-bit token needs no gate in front of its
+ * index, and the owner accepted that cost (on #525 and #531) rather than let a
+ * forged address refuse a real user.
  */
 const BAD_BEARER_LIMIT = 120;
 
@@ -53,15 +66,20 @@ export function spendBadBearer(request: Request): Admission {
 }
 
 /**
- * Every server-plane call, on the plane itself: myBlu's backend is one caller
- * however many users it mints for, so this is what caps minting. Spent only
- * once the bearer is `MYBLU_API_TOKEN`, or anybody on the internet could spend
- * it for the backend and stop every app from getting a session.
+ * The server plane's calls, on the plane itself and apart by what they do:
+ * myBlu's backend is one caller however many users it mints for, so the mint
+ * budget is what caps minting. Revokes have one of their own, so a cleanup job
+ * revoking a batch of deleted accounts cannot spend the minute's mints and
+ * leave every app without a session until the window turns. Spent only once
+ * the bearer is `MYBLU_API_TOKEN`, or anybody on the internet could spend them
+ * for the backend.
  */
 const SERVER_PLANE_LIMIT = 600;
 
-export function admitServerPlane(): Admission {
-  return admitVouched('api-v1:server-plane', SERVER_PLANE_LIMIT, MINUTE_MS);
+export type ServerPlaneBudget = 'mint' | 'revoke';
+
+export function admitServerPlane(budget: ServerPlaneBudget): Admission {
+  return admitVouched(`api-v1:server-plane:${budget}`, SERVER_PLANE_LIMIT, MINUTE_MS);
 }
 
 /**

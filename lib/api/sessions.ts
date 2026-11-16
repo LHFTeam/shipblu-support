@@ -123,14 +123,20 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
     const { identityId } = await resolveApiContactIn(tx, pending);
 
     const [contact] = await tx
-      .select({ id: contacts.id, isBlocked: contacts.isBlocked, deletedAt: contacts.deletedAt })
+      .select({
+        id: contacts.id,
+        isBlocked: contacts.isBlocked,
+        deletedAt: contacts.deletedAt,
+        name: contacts.name,
+        displayName: contactIdentities.displayName,
+      })
       .from(contactIdentities)
       .innerJoin(contacts, eq(contacts.id, contactIdentities.contactId))
       .where(eq(contactIdentities.id, identityId))
       .limit(1);
     if (!contact) throw new Error('The account was purged while its session was minted');
     if (refused(contact)) return { kind: 'blocked', identityId };
-    await keepNameCurrent(tx, contact.id, identityId, input.name);
+    await keepNameCurrent(tx, contact, identityId, input.name);
 
     const token = `${TOKEN_PREFIX}${generateToken()}`;
     const expiresAt = new Date(input.now.getTime() + SESSION_TTL_SECONDS * 1000);
@@ -164,31 +170,39 @@ export async function mintSession(input: MintInput): Promise<MintOutcome> {
  * replaces the old one once they set it in the app.
  *
  * A blank or absent name changes nothing, since the backend saying nothing is
- * not the user clearing their name. And only a differing name is written, in
- * the `WHERE`, so the daily mint of a user whose name agrees writes no row.
- * After the blocked check, so a refused mint writes nothing to the contact.
+ * not the user clearing their name. Each statement runs only where the names
+ * the mint already read differ — the daily mint of a user whose name agrees,
+ * the usual case, sends none, inside a transaction that holds the account's
+ * lock and a pooled connection — and its `WHERE` names the difference too, so
+ * an agent's edit landing since that read is still compared, not overwritten
+ * blind. After the blocked check, so a refused mint writes nothing to the
+ * contact.
  */
 async function keepNameCurrent(
   tx: Tx,
-  contactId: string,
+  held: { id: string; name: string | null; displayName: string | null },
   identityId: string,
   given: string | null,
 ): Promise<void> {
   const name = given?.trim();
   if (!name) return;
-  await tx
-    .update(contacts)
-    .set({ name })
-    .where(and(eq(contacts.id, contactId), or(isNull(contacts.name), ne(contacts.name, name))));
-  await tx
-    .update(contactIdentities)
-    .set({ displayName: name })
-    .where(
-      and(
-        eq(contactIdentities.id, identityId),
-        or(isNull(contactIdentities.displayName), ne(contactIdentities.displayName, name)),
-      ),
-    );
+  if (held.name !== name) {
+    await tx
+      .update(contacts)
+      .set({ name })
+      .where(and(eq(contacts.id, held.id), or(isNull(contacts.name), ne(contacts.name, name))));
+  }
+  if (held.displayName !== name) {
+    await tx
+      .update(contactIdentities)
+      .set({ displayName: name })
+      .where(
+        and(
+          eq(contactIdentities.id, identityId),
+          or(isNull(contactIdentities.displayName), ne(contactIdentities.displayName, name)),
+        ),
+      );
+  }
 }
 
 /**
@@ -260,19 +274,16 @@ export async function lookupSession(token: string, now: Date): Promise<SessionLo
 }
 
 /**
- * The statement `DELETE /session` runs: the presented token and nothing else,
- * stamped rather than deleted, so the row still says who was vouched for.
- * Exported so a test can read its parameters back (AGENTS.md, _Tests_).
+ * What `DELETE /session` runs: the presented token and nothing else, stamped
+ * rather than deleted, so the row still says who was vouched for. The
+ * statement itself, which the route awaits, so a test can read its parameters
+ * back (AGENTS.md, _Tests_) from the one name that runs it.
  */
-export function endStatement(tokenHash: string, now: Date) {
+export function endSession(tokenHash: string, now: Date) {
   return db
     .update(apiSessions)
     .set({ revokedAt: now, revokeReason: 'ended' satisfies ApiSessionEndReason })
     .where(and(eq(apiSessions.tokenHash, tokenHash), isNull(apiSessions.revokedAt)));
-}
-
-export async function endSession(tokenHash: string, now: Date): Promise<void> {
-  await endStatement(tokenHash, now);
 }
 
 /**

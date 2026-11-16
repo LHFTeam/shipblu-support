@@ -2,7 +2,7 @@ import { safeEqual } from '@/lib/auth/tokens';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/log';
 import { invalidRequest, notConfigured, rateLimited } from './errors';
-import { admitAddress, admitServerPlane, spendBadBearer } from './limits';
+import { admitServerPlane, spendBadBearer, type ServerPlaneBudget } from './limits';
 import { apiError } from './respond';
 import { ShipBluClientHeader } from './schemas';
 import { lookupSession, type Caller, type SessionLookup } from './sessions';
@@ -135,7 +135,11 @@ function refusedBearer(
  * answered `429` rather than `401`; the right one is never refused for it
  * (`refusedBearer` says why).
  */
-export function serverPlane(request: Request, requestId: string): Response | null {
+export function serverPlane(
+  request: Request,
+  requestId: string,
+  budget: ServerPlaneBudget,
+): Response | null {
   const accepted = serverPlaneTokens();
   if (accepted.length === 0) return notConfigured(requestId);
 
@@ -154,7 +158,7 @@ export function serverPlane(request: Request, requestId: string): Response | nul
     );
   }
 
-  const plane = admitServerPlane();
+  const plane = admitServerPlane(budget);
   if (!plane.allowed) return rateLimited(requestId, plane, 'The server plane is over its limit');
   return null;
 }
@@ -170,17 +174,23 @@ type GateInput = { requestId: string; route: string; now: Date };
 /**
  * The client plane's gate, in the order each refusal is cheapest to give:
  *
- * 1. The address bucket, before anything is read.
- * 2. The switch: `503` before a session is read, so an API switched off reads
+ * 1. The switch: `503` before a session is read, so an API switched off reads
  *    nothing for anybody.
- * 3. `ShipBlu-Client`, required, and the `426` decided on it — before the
+ * 2. `ShipBlu-Client`, required, and the `426` decided on it — before the
  *    session, because a request the `426` rule cannot judge would let a build
  *    old enough to have lost the header past the one gate that can stop it.
- * 4. The session, its identity and the identity's contact, read now and never
+ * 3. The session, its identity and the identity's contact, read now and never
  *    cached: `unauthenticated` for none of ours, `session_expired` for a row
  *    past its day, `blocked` for a contact that may not use support. The first
  *    two spend the address's bad-bearer budget, and past it are answered `429`
  *    (`refusedBearer`); a live session is never refused for it.
+ *
+ * No address bucket comes before the session, by the owner's decision on
+ * #531. The address is the first `X-Forwarded-For` value, which a caller
+ * writes, so one asked first let a stranger refuse every app behind a
+ * carrier's egress address for the rest of a minute, sign-outs included, with
+ * twelve hundred forged requests. What it bought was a lookup saved for a
+ * script that does not forge its address; one that does was never slowed.
  */
 export async function clientPlane(request: Request, input: GateInput): Promise<ClientGate> {
   const gate = await presentedSession(request, input);
@@ -203,12 +213,15 @@ export async function clientPlane(request: Request, input: GateInput): Promise<C
 export type Ending = { tokenHash: string; identityId: string };
 
 /**
- * `DELETE /session`'s gate: the client plane's, steps 1 to 4, except that a
- * blocked or deleted contact's session is handed back to be ended rather than
- * refused, and a build below `MINIMUM_VERSIONS` is not answered `426`. Ending a session takes nothing from anybody, and the SDK's
- * `reset()` wipes the device whatever this answers, so a `403` here would
- * leave alive a token its app has already let go of — for the rest of its
- * day, and usable again the moment the block is lifted.
+ * `DELETE /session`'s gate: the client plane's, except that a blocked or
+ * deleted contact's session is handed back to be ended rather than refused,
+ * and `ShipBlu-Client` is not judged — neither a build below
+ * `MINIMUM_VERSIONS` answered `426` nor a header that is missing or no longer
+ * parses answered `400`. Ending a session takes nothing from anybody, and the
+ * SDK's `reset()` wipes the device whatever this answers, so any refusal here
+ * leaves alive a token its app has already let go of — for the rest of its
+ * day, and usable again the moment a block is lifted. The header is judged
+ * only to decide the `426`, which this gate never answers.
  *
  * A gate of its own, rather than an option on `clientPlane`, so no other
  * route can be handed a blocked contact's session by passing a flag: every
@@ -226,43 +239,39 @@ export async function endingPlane(
     : { ending: { tokenHash: session.tokenHash, identityId: session.identityId } };
 }
 
-/** Steps 1 to 4 of `clientPlane`, up to the session read, its block not yet judged. */
+/**
+ * `ShipBlu-Client`, required, and the `426` decided on it: the refusal, or null
+ * when the request may go on. Not asked on `DELETE /session` (`endingPlane`).
+ */
+function judgeClientHeader(request: Request, requestId: string): Response | null {
+  const header = request.headers.get('shipblu-client');
+  const client = header === null ? null : ShipBluClientHeader.safeParse(header);
+  if (!client?.success) {
+    return invalidRequest(
+      requestId,
+      header === null
+        ? 'ShipBlu-Client is required on every client-plane request.'
+        : 'ShipBlu-Client must be name/version tokens separated by spaces, the SDK first.',
+      'ShipBlu-Client',
+    );
+  }
+  const stale = belowMinimum(client.data);
+  if (!stale) return null;
+  return apiError('client_upgrade_required', `${stale} is no longer served; update it.`, {
+    requestId,
+  });
+}
+
+/** `clientPlane`'s steps, up to the session read, its block not yet judged. */
 async function presentedSession(
   request: Request,
   { requestId, now }: GateInput,
   { ending = false }: { ending?: boolean } = {},
 ): Promise<Presented> {
-  const address = admitAddress(request);
-  if (!address.allowed) {
-    return { refusal: rateLimited(requestId, address, 'Too many requests from this address') };
-  }
-
   if (!apiSwitchedOn()) return { refusal: notConfigured(requestId) };
 
-  const header = request.headers.get('shipblu-client');
-  const client = header === null ? null : ShipBluClientHeader.safeParse(header);
-  if (!client?.success) {
-    return {
-      refusal: invalidRequest(
-        requestId,
-        header === null
-          ? 'ShipBlu-Client is required on every client-plane request.'
-          : 'ShipBlu-Client must be name/version tokens separated by spaces, the SDK first.',
-        'ShipBlu-Client',
-      ),
-    };
-  }
-  // Never on the way out: a build too old to be served still ends its
-  // session, or the app's sign-out wipes the device and leaves the row live
-  // for the rest of its day — the outcome `endingPlane` exists to prevent.
-  const stale = ending ? null : belowMinimum(client.data);
-  if (stale) {
-    return {
-      refusal: apiError('client_upgrade_required', `${stale} is no longer served; update it.`, {
-        requestId,
-      }),
-    };
-  }
+  const judged = ending ? null : judgeClientHeader(request, requestId);
+  if (judged) return { refusal: judged };
 
   const presented = bearerOf(request);
   if (presented.bearer === null) {

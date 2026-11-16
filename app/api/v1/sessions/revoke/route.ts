@@ -22,7 +22,7 @@ const ROUTE = 'POST /sessions/revoke';
 export async function POST(request: Request): Promise<Response> {
   const requestId = newRequestId();
   return answering(ROUTE, requestId, async () => {
-    const refused = serverPlane(request, requestId);
+    const refused = serverPlane(request, requestId, 'revoke');
     if (refused) return refused;
 
     const parsed = RevokeSessionsRequest.safeParse(await jsonBody(request));

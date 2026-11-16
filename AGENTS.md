@@ -1429,7 +1429,9 @@ is unset or under 32 characters both planes answer `503 not_configured`, the
 client plane before it reads a session. That is how the routes deploy before
 myBlu holds a value, and unsetting it is the way back. `ShipBlu-Client` is
 required on the client plane, and a `426` is decided on it from
-`MINIMUM_VERSIONS` beside the gate, empty until a build is to be refused. **An
+`MINIMUM_VERSIONS` beside the gate, empty until a build is to be refused —
+everywhere but `DELETE /session`, which judges no header, so a build too old
+to be served still ends its session. **An
 `/api/v1` log line carries the identity's uuid and the route, never a token, a
 phone, an `externalUserId` or a body.** A route's failure goes through
 `answering()` (`lib/api/errors.ts`), which logs a scrubbed copy: drizzle words
@@ -3150,15 +3152,16 @@ deleting it, and drop the sections that genuinely do not apply.
 - Public endpoints (KB feedback and views, the widget, the myBlu API) are rate
   limited in memory — do not add a row per rejected request. The myBlu API's
   buckets are keyed on the session's identity wherever a request has one, and
-  on the address only before it does (`lib/api/limits.ts`). The address is the
-  first `X-Forwarded-For` value, which a caller writes, so no address bucket
-  stands between a good bearer and its answer except the generous one before
-  auth: refused bearers are counted only to turn the next refusal's `401` into
-  a `429`. That also means a forged address can fill the store every public
-  endpoint shares, which then drops its oldest buckets, so a bucket keyed on
-  something no unauthenticated caller can choose — a plane, an account the
-  server plane vouched for, a session's identity — goes in the store of its
-  own (`admitVouched`), where the spray cannot evict it. A row that records
+  on the address only where it has none (`lib/api/limits.ts`). The address is
+  the first `X-Forwarded-For` value, which a caller writes, so no address
+  bucket stands between a bearer and its answer: the session is read first,
+  and refused bearers are counted only to turn the next refusal's `401` into a
+  `429` (the owner's decision on #531). That also means a forged address can
+  fill the store every public endpoint shares, which then drops its oldest
+  buckets, so a bucket keyed on something no unauthenticated caller can
+  choose — a signed-in agent, a plane, an account the server plane vouched
+  for, a session's identity — goes in the store of its own (`admitVouched`,
+  `allowVouched`), wherever it is asked, where the spray cannot evict it. A row that records
   who asked keeps the whole chain (`forwardedChain`), never that first value.
 - **A host page telling the widget who its visitor is makes a claim, not a
   statement of fact.** It arrives from a browser. An unsigned identity may only

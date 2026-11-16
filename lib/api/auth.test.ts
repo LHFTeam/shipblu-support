@@ -80,8 +80,8 @@ describe('serverPlaneTokens', () => {
 describe('serverPlane', () => {
   it('lets the current value and the previous one through, and nothing else', async () => {
     setTestEnv({ MYBLU_API_TOKEN_PREVIOUS: PREVIOUS });
-    expect(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r')).toBeNull();
-    expect(serverPlane(request({ Authorization: `Bearer ${PREVIOUS}` }), 'r')).toBeNull();
+    expect(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r', 'mint')).toBeNull();
+    expect(serverPlane(request({ Authorization: `Bearer ${PREVIOUS}` }), 'r', 'mint')).toBeNull();
 
     for (const authorization of [
       undefined,
@@ -93,6 +93,7 @@ describe('serverPlane', () => {
       const refused = serverPlane(
         request(authorization ? { Authorization: authorization } : {}),
         'r',
+        'mint',
       );
       expect(await codeOf(refused)).toMatchObject({ status: 401, code: 'unauthenticated' });
     }
@@ -114,6 +115,7 @@ describe('serverPlane', () => {
         serverPlane(
           request(authorization === undefined ? {} : { Authorization: authorization }),
           'r',
+          'mint',
         ),
       );
       expect(refused, String(authorization)).toMatchObject({
@@ -128,12 +130,14 @@ describe('serverPlane', () => {
   it('answers 503 not_configured while the token is unset or short, whatever is presented', async () => {
     setTestEnv({ MYBLU_API_TOKEN: undefined });
     expect(
-      await codeOf(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r')),
+      await codeOf(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r', 'mint')),
     ).toMatchObject({ status: 503, code: 'not_configured' });
 
     setTestEnv({ MYBLU_API_TOKEN: TOKEN.slice(0, 31) });
     expect(
-      await codeOf(serverPlane(request({ Authorization: `Bearer ${TOKEN.slice(0, 31)}` }), 'r')),
+      await codeOf(
+        serverPlane(request({ Authorization: `Bearer ${TOKEN.slice(0, 31)}` }), 'r', 'mint'),
+      ),
     ).toMatchObject({ status: 503, code: 'not_configured' });
   });
 
@@ -145,6 +149,7 @@ describe('serverPlane', () => {
           headers: { 'x-forwarded-for': from, Authorization: `Bearer ${bearer}` },
         }),
         'r',
+        'mint',
       );
     for (let i = 0; i < 120; i += 1) expect((await codeOf(asking('wrong')))?.status).toBe(401);
 
@@ -166,11 +171,26 @@ describe('serverPlane', () => {
       vi.useRealTimers();
     });
     for (let i = 0; i < 600; i += 1) {
-      expect(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r')).toBeNull();
+      expect(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r', 'mint')).toBeNull();
     }
     expect(
-      await codeOf(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r')),
+      await codeOf(serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r', 'mint')),
     ).toMatchObject({ status: 429, code: 'rate_limited' });
+  });
+
+  // A cleanup job revoking a batch of deleted accounts spends the revoke
+  // budget, and every app's next session is still minted.
+  it('counts revokes apart from mints, so a batch of revokes stops no sign-in', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 240_000);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const asking = (budget: 'mint' | 'revoke') =>
+      serverPlane(request({ Authorization: `Bearer ${TOKEN}` }), 'r', budget);
+    for (let i = 0; i < 600; i += 1) expect(asking('revoke')).toBeNull();
+    expect(await codeOf(asking('revoke'))).toMatchObject({ status: 429, code: 'rate_limited' });
+    expect(asking('mint')).toBeNull();
   });
 });
 
@@ -307,6 +327,41 @@ describe('clientPlane', () => {
   });
 });
 
+describe('the client plane and a forged address', () => {
+  // The address is the first X-Forwarded-For value, which anybody writes. Read
+  // after the session, it refuses nobody who presents a live one: twelve
+  // hundred forged requests under a carrier's egress once refused every app
+  // behind it for the rest of the minute, sign-outs included.
+  it('reads the session before counting the address, so a flood under it refuses no live session', async () => {
+    const from = '41.33.0.2';
+    const asking = (headers: Record<string, string>) =>
+      new Request('https://x/api/v1/config', {
+        headers: { ...CLIENT, 'x-forwarded-for': from, ...headers },
+      });
+    for (let i = 0; i < 1_300; i += 1) {
+      await clientPlane(asking({ Authorization: `Bearer ${lookup.live}` }), {
+        requestId: 'r',
+        route: 'GET /config',
+        now: new Date(),
+      });
+    }
+    expect(
+      await clientPlane(asking({ Authorization: `Bearer ${lookup.live}` }), {
+        requestId: 'r',
+        route: 'GET /config',
+        now: new Date(),
+      }),
+    ).toEqual({ caller: expect.objectContaining({ identityId: 'i' }) });
+    expect(
+      await endingPlane(asking({ Authorization: `Bearer ${lookup.live}` }), {
+        requestId: 'r',
+        route: 'DELETE /session',
+        now: new Date(),
+      }),
+    ).toEqual({ ending: { tokenHash: 'h', identityId: 'i' } });
+  });
+});
+
 describe('endingPlane', () => {
   const ending = (headers: Record<string, string>) =>
     endingPlane(request(headers), { requestId: 'r', route: 'DELETE /session', now: new Date() });
@@ -344,6 +399,22 @@ describe('endingPlane', () => {
     }
   });
 
+  // The header is judged only to decide a `426`, which ending never answers,
+  // so a build that sends none, or one this server no longer parses, still
+  // ends its session rather than being refused and leaving it live.
+  it('judges no ShipBlu-Client, missing or unparsable', async () => {
+    const variants: Record<string, string>[] = [
+      {},
+      { 'ShipBlu-Client': 'my app' },
+      { 'ShipBlu-Client': '' },
+    ];
+    for (const headers of variants) {
+      expect(await ending({ ...headers, Authorization: `Bearer ${lookup.blocked}` })).toEqual({
+        ending: { tokenHash: 'hb', identityId: 'ib' },
+      });
+    }
+  });
+
   it('refuses everything else as the client plane does', async () => {
     const refused = async (gate: Awaited<ReturnType<typeof ending>>) =>
       'refusal' in gate ? await codeOf(gate.refusal) : null;
@@ -355,9 +426,6 @@ describe('endingPlane', () => {
     expect(
       await refused(await ending({ ...CLIENT, Authorization: `Bearer sbu_${'z'.repeat(43)}` })),
     ).toMatchObject({ status: 401, code: 'unauthenticated' });
-    expect(
-      await refused(await ending({ Authorization: `Bearer ${lookup.blocked}` })),
-    ).toMatchObject({ status: 400, field: 'ShipBlu-Client' });
 
     setTestEnv({ MYBLU_API_TOKEN: undefined });
     expect(

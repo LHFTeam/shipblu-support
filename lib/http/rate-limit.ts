@@ -90,8 +90,9 @@ class BucketStore {
 const shared = new BucketStore();
 
 /**
- * Buckets keyed on what an unauthenticated caller cannot make up: a plane, an
- * account the myBlu API's server plane vouched for, a session's identity. In a
+ * Buckets keyed on what an unauthenticated caller cannot make up: a signed-in
+ * agent, a plane, an account the myBlu API's server plane vouched for, a
+ * session's identity. In a
  * store of their own, so a spray of forged addresses filling the shared one
  * evicts none of them: in the one map, about ten thousand forged requests
  * reset the API's server-plane and per-user mint buckets, and the mint cap
@@ -129,12 +130,20 @@ export function admit(key: string, limit: number, windowMs: number, cost = 1): A
 }
 
 /**
- * `admit`, in the store a forged address cannot reach (`vouched`). Only for a
- * key no unauthenticated caller can choose; anything keyed on an address or a
- * value a request carries before it is authenticated belongs in `admit`.
+ * `admit`, in the store a forged address cannot reach (`vouched`). For every
+ * key no unauthenticated caller can choose — a signed-in agent, a plane, an
+ * account the server plane vouched for, a session's identity — wherever it is
+ * asked, or a spray of forged addresses at any public endpoint resets it. Not
+ * for an address, nor for a widget visitor's contact, which any visitor makes
+ * for themselves by opening the widget: those belong in `admit`.
  */
 export function admitVouched(key: string, limit: number, windowMs: number, cost = 1): Admission {
   return vouched.admit(key, limit, windowMs, cost);
+}
+
+/** `allow`, in the vouched store: `admitVouched`'s answer as a boolean. */
+export function allowVouched(key: string, limit: number, windowMs: number, cost = 1): boolean {
+  return admitVouched(key, limit, windowMs, cost).allowed;
 }
 
 /**

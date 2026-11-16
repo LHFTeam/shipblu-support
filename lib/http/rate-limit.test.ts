@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { admit, admitVouched, allow, fits, forwardedChain, retryAfterSeconds } from './rate-limit';
+import {
+  admit,
+  admitVouched,
+  allow,
+  allowVouched,
+  fits,
+  forwardedChain,
+  retryAfterSeconds,
+} from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -118,15 +126,19 @@ describe('the vouched store', () => {
   // buckets: the API's plane, mint and identity buckets are not among them.
   it('keeps its buckets counting while made-up keys flood the shared store', () => {
     const plane = key();
+    const agent = key();
     const address = key();
     expect(admitVouched(plane, 1, HOUR).allowed).toBe(true);
+    // A signed-in agent's own throttle, through the boolean twin, in the same store.
+    expect(allowVouched(agent, 1, HOUR)).toBe(true);
     expect(admit(address, 1, HOUR).allowed).toBe(true);
 
     for (let i = 0; i < 25_000; i += 1) admit(`spray:${i}`, 1, HOUR);
 
     // The shared bucket was among the oldest, and is gone: its count starts again.
     expect(admit(address, 1, HOUR).allowed).toBe(true);
-    // The vouched one still counts the request it had.
+    // The vouched ones still count the request each had.
     expect(admitVouched(plane, 1, HOUR).allowed).toBe(false);
+    expect(allowVouched(agent, 1, HOUR)).toBe(false);
   });
 });

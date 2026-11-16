@@ -9,7 +9,7 @@ import { can } from '@/lib/auth/permissions';
 import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
-import { allow } from '@/lib/http/rate-limit';
+import { allowVouched } from '@/lib/http/rate-limit';
 import { logger } from '@/lib/log';
 import { enqueue } from '@/lib/queue';
 import { isRoutingMode, routingModeOf, type RoutingMode } from '@/lib/routing/mode';
@@ -682,7 +682,9 @@ export async function connectBusinessAppNumber(
 ): Promise<AdminState> {
   const agent = await requirePermission('admin.channels.connect');
 
-  if (!allow(`signup:${agent.id}`, 5, 10 * 60 * 1000)) {
+  // Keyed on the signed-in agent, so in the store a spray of forged addresses
+  // at a public endpoint cannot evict: in the shared one it reset this cap.
+  if (!allowVouched(`signup:${agent.id}`, 5, 10 * 60 * 1000)) {
     return {
       error: 'Too many attempts — wait ten minutes before connecting again.',
       wait: true,

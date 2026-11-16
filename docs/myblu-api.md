@@ -420,21 +420,21 @@ still reads them.
 
 ## Headers
 
-| Header                | Direction | When                                  | What                                                                                                                                                            |
-| --------------------- | --------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Authorization`       | request   | every request but `GET /openapi.json` | `Bearer <MYBLU_API_TOKEN>` on the server plane, `Bearer <session token>` on the client plane. No credential is ever accepted in a URL.                          |
-| `ShipBlu-Client`      | request   | every client-plane request            | `sdk-ts/0.3.0 app/5.4.1 ios/18.1`: `name/version` tokens, the SDK first, then the app, then the platform. Missing is `400 invalid_request`; it decides a `426`. |
-| `Idempotency-Key`     | request   | `POST /tickets`, `POST …/messages`    | A UUID made before a send's first attempt and reused on every retry of it. Missing or not a UUID is `400 idempotency_key_required`.                             |
-| `Content-Type`        | request   | a request with a body                 | `application/json`, or `multipart/form-data` on the two sends from stage 7.                                                                                     |
-| `Content-Length`      | request   | a multipart body                      | Required: `411 length_required` without it.                                                                                                                     |
-| `ShipBlu-Request-Id`  | answer    | every answer                          | An opaque id for the request, repeated in an error's body. Quote it in a bug report.                                                                            |
-| `Cache-Control`       | answer    | every answer                          | `no-store`. Nothing between the server and the app may cache an answer.                                                                                         |
-| `Idempotent-Replayed` | answer    | a `200` to a send                     | `true`: an earlier attempt under the same key stored the message, and this is what it stored.                                                                   |
-| `Retry-After`         | answer    | a `429`                               | Whole seconds to wait.                                                                                                                                          |
-| `X-ShipBlu-Event`     | webhook   | every delivery                        | The body's `type`.                                                                                                                                              |
-| `X-ShipBlu-Event-Id`  | webhook   | every delivery                        | The body's `id`, the same on every attempt.                                                                                                                     |
-| `X-ShipBlu-Timestamp` | webhook   | every delivery                        | Unix seconds when this attempt was signed.                                                                                                                      |
-| `X-ShipBlu-Signature` | webhook   | every delivery                        | `v1=<hex>`, or `v1=<hex>,v1=<hex>` while a secret is rotated.                                                                                                   |
+| Header                | Direction | When                                  | What                                                                                                                                                                                                    |
+| --------------------- | --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Authorization`       | request   | every request but `GET /openapi.json` | `Bearer <MYBLU_API_TOKEN>` on the server plane, `Bearer <session token>` on the client plane. No credential is ever accepted in a URL.                                                                  |
+| `ShipBlu-Client`      | request   | every client-plane request            | `sdk-ts/0.3.0 app/5.4.1 ios/18.1`: `name/version` tokens, the SDK first, then the app, then the platform. Missing is `400 invalid_request`; it decides a `426`. `DELETE /session` judges it not at all. |
+| `Idempotency-Key`     | request   | `POST /tickets`, `POST …/messages`    | A UUID made before a send's first attempt and reused on every retry of it. Missing or not a UUID is `400 idempotency_key_required`.                                                                     |
+| `Content-Type`        | request   | a request with a body                 | `application/json`, or `multipart/form-data` on the two sends from stage 7.                                                                                                                             |
+| `Content-Length`      | request   | a multipart body                      | Required: `411 length_required` without it.                                                                                                                                                             |
+| `ShipBlu-Request-Id`  | answer    | every answer                          | An opaque id for the request, repeated in an error's body. Quote it in a bug report.                                                                                                                    |
+| `Cache-Control`       | answer    | every answer                          | `no-store`. Nothing between the server and the app may cache an answer.                                                                                                                                 |
+| `Idempotent-Replayed` | answer    | a `200` to a send                     | `true`: an earlier attempt under the same key stored the message, and this is what it stored.                                                                                                           |
+| `Retry-After`         | answer    | a `429`                               | Whole seconds to wait.                                                                                                                                                                                  |
+| `X-ShipBlu-Event`     | webhook   | every delivery                        | The body's `type`.                                                                                                                                                                                      |
+| `X-ShipBlu-Event-Id`  | webhook   | every delivery                        | The body's `id`, the same on every attempt.                                                                                                                                                             |
+| `X-ShipBlu-Timestamp` | webhook   | every delivery                        | Unix seconds when this attempt was signed.                                                                                                                                                              |
+| `X-ShipBlu-Signature` | webhook   | every delivery                        | `v1=<hex>`, or `v1=<hex>,v1=<hex>` while a secret is rotated.                                                                                                                                           |
 
 The API reads no `Accept-Language`. `locale` on a write, exactly `ar` or `en`, is
 the only language it is told, and the only translated text it returns is a
@@ -698,23 +698,27 @@ deploy. A refusal is `429 rate_limited` with `Retry-After`, and a refused reques
 still counts, so a client that polls through a refusal stays refused until the
 window turns.
 
-| Bucket                    | Key              | Limit                                      |
-| ------------------------- | ---------------- | ------------------------------------------ |
-| Client plane, before auth | address          | 1,200 a minute                             |
-| Bad bearer                | address          | 120 a minute                               |
-| Server plane, all calls   | the plane        | 600 a minute                               |
-| Minting                   | `externalUserId` | 10 in ten minutes                          |
-| Reads                     | identity         | 240 a minute                               |
-| Sends                     | identity         | 20 a minute                                |
-| New tickets               | identity         | 10 an hour, and 10 open or pending at once |
-| Uploaded megabytes        | identity         | 100 an hour                                |
+| Bucket                | Key              | Limit                                      |
+| --------------------- | ---------------- | ------------------------------------------ |
+| The contract          | address          | 1,200 a minute                             |
+| Bad bearer            | address          | 120 a minute                               |
+| Server plane, mints   | the plane        | 600 a minute                               |
+| Server plane, revokes | the plane        | 600 a minute                               |
+| Minting               | `externalUserId` | 10 in ten minutes                          |
+| Reads                 | identity         | 240 a minute                               |
+| Sends                 | identity         | 20 a minute                                |
+| New tickets           | identity         | 10 an hour, and 10 open or pending at once |
+| Uploaded megabytes    | identity         | 100 an hour                                |
 
 The first bucket is live with `GET /openapi.json`; the rest arrive with the
 routes they guard. The minting bucket bounds an honest app's loop and nothing
-more, since the caller chooses its key; the server plane's own bucket is what
-caps minting. The bad-bearer bucket counts bearers that were refused and only
-changes how the next refusal is answered, `429` rather than `401`: a live
-session token, or `MYBLU_API_TOKEN`, is never refused for it.
+more, since the caller chooses its key; the server plane's mint budget is what
+caps minting, and revokes have a budget of their own, so a batch of revokes
+never delays a sign-in. The bad-bearer bucket counts bearers that were refused
+and only changes how the next refusal is answered, `429` rather than `401`: a
+live session token, or `MYBLU_API_TOKEN`, is never refused for it. No address
+bucket stands in front of a session token: the address is something a caller
+can write.
 
 ## The webhook
 

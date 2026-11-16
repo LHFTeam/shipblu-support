@@ -864,16 +864,17 @@ NAT puts a large number of unrelated people behind one address"
 (`lib/auth/throttle.ts`). A refusal is `429` with `Retry-After`. No row per
 refusal.
 
-| Bucket                    | Key              | Limit                                      |
-| ------------------------- | ---------------- | ------------------------------------------ |
-| Client plane, before auth | address          | 1,200 a minute                             |
-| Bad bearer                | address          | 120 a minute                               |
-| Server plane, all calls   | the plane        | 600 a minute                               |
-| Minting                   | `externalUserId` | 10 in ten minutes                          |
-| Reads                     | identity         | 240 a minute                               |
-| Sends                     | identity         | 20 a minute                                |
-| New tickets               | identity         | 10 an hour, and 10 open or pending at once |
-| Uploaded megabytes        | identity         | 100 an hour                                |
+| Bucket                | Key              | Limit                                      |
+| --------------------- | ---------------- | ------------------------------------------ |
+| The contract          | address          | 1,200 a minute                             |
+| Bad bearer            | address          | 120 a minute                               |
+| Server plane, mints   | the plane        | 600 a minute                               |
+| Server plane, revokes | the plane        | 600 a minute                               |
+| Minting               | `externalUserId` | 10 in ten minutes                          |
+| Reads                 | identity         | 240 a minute                               |
+| Sends                 | identity         | 20 a minute                                |
+| New tickets           | identity         | 10 an hour, and 10 open or pending at once |
+| Uploaded megabytes    | identity         | 100 an hour                                |
 
 Three properties of that module are designed for, not discovered. `allow()`
 answers a boolean and keeps `resetAt` to itself, so `admit()` beside it also
@@ -897,8 +898,15 @@ token, is never refused for it, on either plane. The address is the first
 bearer was read would let anybody refuse every app behind one carrier's
 egress for a hundred and twenty forged requests a minute, while a script
 writing a fresh address each time was never slowed by it. A 256-bit token
-needs no gate in front of its index; the address bucket is the ceiling before
-auth.
+needs no gate in front of its index. The same reasoning took the address
+bucket out from in front of the client plane (the owner's decision on #531):
+asked before the session was read, twelve hundred forged requests a minute
+refused every app behind a carrier's egress, sign-outs included. The session
+is read first, so the address is counted only for a bearer refused, and the
+address bucket is left to `GET /openapi.json`, which has nothing else to be
+counted on. Revokes have a budget of their own beside the mints, so a cleanup
+job revoking a batch of deleted accounts cannot leave every app without a
+session for the rest of the minute.
 
 ## The API
 
@@ -923,7 +931,9 @@ the SDK's configuration; it is what `426` is decided on, and it is stored as
 does not parse, is `400 invalid_request` with `field` naming `ShipBlu-Client`,
 before the session is read, because a request the `426` rule cannot judge
 would let a build old enough to have lost the header past the one gate that
-can stop it. Every answer carries `ShipBlu-Request-Id`, repeated in an error's
+can stop it. `DELETE /session` alone judges it not at all: ending a session is
+not a gate to stop a build at, and a refusal there leaves alive a token the
+app has already wiped. Every answer carries `ShipBlu-Request-Id`, repeated in an error's
 body, so an app developer's bug report names a log line, and
 `Cache-Control: no-store`. The API reads no `Accept-Language`: `locale` on a
 write, exactly `ar` or `en`, is the only language it is told, and it returns

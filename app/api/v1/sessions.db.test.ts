@@ -13,7 +13,7 @@ import {
 import { ErrorBody, Config, Session } from '@/lib/api/schemas';
 import {
   deleteSweptApiSessions,
-  endStatement,
+  endSession,
   lookupSession,
   mintSession,
   revokeSessions,
@@ -514,6 +514,25 @@ describe('GET /config', () => {
 });
 
 describe('DELETE /session', () => {
+  // The SDK's `reset()` wipes the device whatever this answers, so a `400`
+  // for a header a build no longer sends, or sends in a shape this server no
+  // longer parses, left its session live for the rest of its day.
+  it('ends a session whatever ShipBlu-Client says, or without one', async () => {
+    for (const header of [null, 'my app']) {
+      const token = await minted();
+      const request = new Request('https://support.shipblu.com/api/v1/session', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-forwarded-for': address(),
+          ...(header !== null && { 'ShipBlu-Client': header }),
+        },
+      });
+      expect((await deleteSession(request)).status, String(header)).toBe(204);
+      expect(await refusal(await config(token))).toMatchObject({ status: 401 });
+    }
+  });
+
   it('ends the presented session and nothing else', async () => {
     const thisDevice = await minted();
     const otherDevice = await minted();
@@ -780,7 +799,7 @@ describe('the statements that stamp a session', () => {
   it('bind no bare Date', () => {
     const now = new Date('2026-11-13T09:00:00.000Z');
     for (const { params } of [
-      endStatement(hashToken('x'), now).toSQL(),
+      endSession(hashToken('x'), now).toSQL(),
       revokeStatement(db, '00000000-0000-0000-0000-000000000000', 'other', now).toSQL(),
     ]) {
       expect(params.some((param) => param instanceof Date)).toBe(false);

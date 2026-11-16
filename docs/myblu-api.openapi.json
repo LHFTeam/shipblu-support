@@ -527,7 +527,7 @@
         "operationId": "endSession",
         "tags": ["Sessions"],
         "summary": "End this session",
-        "description": "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed. The one client-plane call a blocked user is not refused: their session is ended and answered `204` too, since a refusal would leave it live for the rest of its day, and usable again if the block were lifted.\n\nServed from stage 3. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
+        "description": "Client plane. Ends the presented token and nothing else: the user's other devices keep theirs. The SDK's `reset()` calls it with a five-second deadline and wipes the device whether or not it landed. The one client-plane call a blocked user is not refused: their session is ended and answered `204` too, since a refusal would leave it live for the rest of its day, and usable again if the block were lifted. For the same reason it judges no `ShipBlu-Client`: a build too old to be served ends its session like any other.\n\nServed from stage 3. Until that stage ships, the path answers `404` with no body of this shape: the shapes are published first so the app and the SDK can be written against them.",
         "x-shipblu-stage": "3",
         "security": [
           {
@@ -536,7 +536,16 @@
         ],
         "parameters": [
           {
-            "$ref": "#/components/parameters/ShipBluClient"
+            "name": "ShipBlu-Client",
+            "in": "header",
+            "required": false,
+            "description": "Sent as on every client-plane call, and not judged here: a build too old to be served, or one whose header is missing or no longer parses, still ends its session.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9._-]+\\/[^\\s/]+(?: [A-Za-z0-9._-]+\\/[^\\s/]+)*$"
+            },
+            "example": "sdk-ts/0.3.0 app/5.4.1 ios/18.1"
           }
         ],
         "responses": {
@@ -548,29 +557,6 @@
               },
               "Cache-Control": {
                 "$ref": "#/components/headers/CacheControl"
-              }
-            }
-          },
-          "400": {
-            "description": "Refused as written. `invalid_request`: a field, a query parameter or a header is wrong; `field` names it when one is to blame.",
-            "headers": {
-              "ShipBlu-Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                },
-                "examples": {
-                  "invalid_request": {
-                    "$ref": "#/components/examples/invalid_request"
-                  }
-                }
               }
             }
           },
@@ -595,29 +581,6 @@
                   },
                   "session_expired": {
                     "$ref": "#/components/examples/session_expired"
-                  }
-                }
-              }
-            }
-          },
-          "426": {
-            "description": "Upgrade required. `client_upgrade_required`: this SDK or app is no longer served. Stop every call and tell the app once.",
-            "headers": {
-              "ShipBlu-Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                },
-                "examples": {
-                  "client_upgrade_required": {
-                    "$ref": "#/components/examples/client_upgrade_required"
                   }
                 }
               }
