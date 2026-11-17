@@ -95,7 +95,7 @@ import {
  */
 
 /** The date of the newest line in `docs/myblu-api-changelog.md`; the test holds the two together. */
-const CONTRACT_VERSION = '2026-11-16';
+const CONTRACT_VERSION = '2026-11-17';
 
 const TITLE = 'ShipBlu Support: the myBlu ticket API';
 
