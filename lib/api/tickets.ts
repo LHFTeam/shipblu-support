@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
-import { alias, unionAll } from 'drizzle-orm/pg-core';
+import { and, asc, desc, eq, exists, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { alias, unionAll, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 import { db } from '@/db/client';
 import {
@@ -16,6 +16,7 @@ import { preview } from '@/lib/html/sanitize';
 import type { Admission } from '@/lib/http/rate-limit';
 import { shownLabelSql } from '@/lib/portal/tickets';
 import { planRouting, routingWindowValues, startRouting } from '@/lib/routing/start';
+import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { subjectWords, UNNAMED_SUBJECT } from '@/lib/tickets/customer-text';
 import { latest } from '@/lib/tickets/latest';
 import { isMediaStandIn } from '@/lib/tickets/message-media';
@@ -30,6 +31,7 @@ import { encodeCursor, THREAD_START, type Cursor } from './cursor';
 import { finishInRequest, oweFinish } from './finish';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits } from './limits';
 import { previewText } from './preview';
+import { trackingFoldSql } from './tracking-fold';
 import type { Message, Ticket } from './schemas';
 import { ownedTicket } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -54,6 +56,11 @@ import { holdAccount, requesterNow, type Caller } from './sessions';
  * what decides the answer. A ticket and a message are named field lists built
  * fresh here, as `publicTracking()` builds its answer, so a column added to
  * either table cannot ride along.
+ *
+ * **Unread is one predicate, `unreadReply()`**: what `unreadCount` and
+ * `unreadTotal` count and what `POST /tickets/{id}/read` clears. That marker
+ * (`markTicketRead`) is the only writer of `messages.read_at` on `api`, and it
+ * never moves or unsets one.
  */
 
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -229,20 +236,30 @@ const previewSql = sql<PreviewRow | null>`(
 )`;
 
 /**
- * The team's replies on a ticket the user has not marked read: outbound and
- * `reply` — a note is an outbound row too — not a reaction, with no
- * `read_at`. Kept on the server, so two devices and a reinstall show one
- * badge. Exactly the rows a thread read can return, `notReaction()` included:
- * a row the app can never be shown is a row it can never mark read, and would
- * hold the badge above zero for good.
+ * The team's replies the user has not marked read: what `unreadCount` and
+ * `unreadTotal` count and what `POST /tickets/{id}/read` marks, one predicate
+ * so the badge and the marker cannot disagree. Outbound and `reply`, because a
+ * note is an outbound row too; no `read_at`; and `notReaction()`, because a row
+ * the thread never returns cannot be in a badge the user clears by reading it.
+ * That last changes nothing on `api`, which has no reactions, and is there so
+ * the marker and the badge stay one question if one ever arrives. Kept on the
+ * server, so two devices and a reinstall show one badge.
+ *
+ * Over `messages` unaliased, which `notReaction()` names.
  */
+function unreadReply(): SQL {
+  return and(
+    eq(messages.direction, 'outbound'),
+    eq(messages.kind, 'reply'),
+    isNull(messages.readAt),
+    notReaction(),
+  )!;
+}
+
+/** `unreadReply` on one ticket, a scalar subquery of the ticket's statement. */
 const unreadCountSql = sql<number>`(
   select count(*)::int from ${messages}
-  where ${messages.conversationId} = ${conversations.id}
-    and ${messages.direction} = 'outbound'
-    and ${messages.kind} = 'reply'
-    and ${notReaction()}
-    and ${messages.readAt} is null
+  where ${messages.conversationId} = ${conversations.id} and ${unreadReply()}
 )`;
 
 /**
@@ -251,22 +268,27 @@ const unreadCountSql = sql<number>`(
  */
 const owned = alias(conversations, 'owned');
 
-/** `unreadCountSql` across every ticket the user may read, for a badge. */
-function unreadTotalSql(caller: Caller): SQL<number> {
-  const unread = db
+/**
+ * `unreadReply` across every ticket the user may read: the badge. It names no
+ * ticket the outer statement reads, so inside one it is computed once (an
+ * InitPlan), and it depends on no filter, cursor or page a list was asked for.
+ */
+function unreadTotalQuery(caller: Caller) {
+  return db
     .select({ count: sql<number>`count(*)::int` })
     .from(messages)
     .innerJoin(owned, eq(owned.id, messages.conversationId))
-    .where(
-      and(
-        ownedTicket(caller, owned),
-        eq(messages.direction, 'outbound'),
-        eq(messages.kind, 'reply'),
-        notReaction(),
-        isNull(messages.readAt),
-      ),
-    );
-  return sql<number>`(${unread})`;
+    .where(and(ownedTicket(caller, owned), unreadReply()));
+}
+
+function unreadTotalSql(caller: Caller): SQL<number> {
+  return sql<number>`(${unreadTotalQuery(caller)})`;
+}
+
+/** The badge on its own, for an answer with no ticket row to carry it. */
+async function readUnreadTotal(caller: Caller): Promise<number> {
+  const [row] = await unreadTotalQuery(caller);
+  return row?.count ?? 0;
 }
 
 /**
@@ -338,9 +360,16 @@ function ticketView(row: TicketRow): TicketView {
  * One ticket the caller may read, by its id and `ownedTicket` in one `WHERE`,
  * and — for a poll, which answers it beside the ticket — the user's unread
  * badge in the same statement. Without it the badge is not counted at all.
+ * On `executor`, so the read marker reads its answer inside its own
+ * transaction, after its write: on the pool it would be a second connection
+ * held by one request (§6.91).
  */
-async function ownedTicketRow(caller: Caller, ticketId: string, { withTotal = false } = {}) {
-  const [row] = await db
+async function ownedTicketRow(
+  caller: Caller,
+  ticketId: string,
+  { withTotal = false, executor = db }: { withTotal?: boolean; executor?: Executor } = {},
+) {
+  const [row] = await executor
     .select({
       ...ticketColumns,
       unreadTotal: withTotal ? unreadTotalSql(caller) : sql<number>`0`,
@@ -406,11 +435,22 @@ export type MessagesPage = {
   unreadTotal: number;
 };
 
-const cursorOf = (row: MessageRow): string => encodeCursor({ time: row.cursorTime, id: row.id });
+const cursorOf = (row: MessageRow): string =>
+  encodeCursor('messages', { time: row.cursorTime, id: row.id });
 
-/** The row-value comparison with a cursor, its instant bound as the text Postgres printed. */
-function vsCursor(op: '<' | '>' | '<=', cursor: Cursor): SQL {
-  return sql`(${messages.createdAt}, ${messages.id}) ${sql.raw(op)} (${cursor.time}::timestamptz, ${cursor.id}::uuid)`;
+/**
+ * The row-value comparison with a cursor, its instant bound as the text
+ * Postgres printed. A message's `(created_at, id)` unless the columns are
+ * named — the list's are a ticket's `(last_message_at, id)` — so every page of
+ * this API binds a cursor one way.
+ */
+function vsCursor(
+  op: '<' | '>' | '<=',
+  cursor: Cursor,
+  time: AnyPgColumn = messages.createdAt,
+  id: AnyPgColumn = messages.id,
+): SQL {
+  return sql`(${time}, ${id}) ${sql.raw(op)} (${cursor.time}::timestamptz, ${cursor.id}::uuid)`;
 }
 
 /**
@@ -521,7 +561,7 @@ export async function readMessages(
       ? cursorOf(last)
       : asked.kind === 'before'
         ? asked.text
-        : encodeCursor(THREAD_START),
+        : encodeCursor('messages', THREAD_START),
   });
 }
 
@@ -533,6 +573,243 @@ async function readMessage(
 ): Promise<MessageView | null> {
   const [row] = await threadSelect(caller, ticketId, false, eq(messages.id, messageId)).limit(1);
   return row ? messageView(caller, row) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Listing
+// ---------------------------------------------------------------------------
+
+/** Which page of the list a request asks for (`listAsked`, `lib/api/requests.ts`). */
+export type ListAsked = { cursor: Cursor | null; limit: number; trackingNumber: string | null };
+
+export type TicketsListPage = {
+  tickets: TicketView[];
+  olderCursor: string | null;
+  unreadTotal: number;
+};
+
+/**
+ * A page of the caller's tickets, newest first by `(last_message_at, id)`,
+ * one row more than the page so the caller knows whether anything is left,
+ * every status, and only those opened with one tracking number when one is
+ * asked for. The order and the `before` comparison change together, as the
+ * inbox's do: the id breaks a tie on the instant, so a page boundary between
+ * two tickets stamped alike neither repeats nor skips one.
+ *
+ * The identity is named on the joined ownership row as well as inside
+ * `ownedTicket`, so the planner can drive from `api_tickets_identity_idx`, a
+ * few rows per user, rather than walk every app ticket in
+ * `conversations_channel_idx` order. `ownedTicket` stays whole: it is the one
+ * copy of the scope, and the ownership row joined here is immutable, so naming
+ * it twice can never disagree. The tracking number is matched on that same
+ * row, and never read from `conversation_shipments`, which also holds numbers
+ * an agent typed in a note; matched as the shipments code reads a number
+ * everywhere (`normaliseTrackingNumber`), whatever its case and hyphens, since
+ * a number typed in the composer as `sb-ab12` is the platform's `SB-AB12`
+ * and a shipment screen asking with the one must find a ticket opened with
+ * the other. Stored and answered as sent: only the comparison is folded, and
+ * the stored side only as far as `TrackingNumber` lets it vary
+ * (`trackingFoldSql`, whose test holds the two folds together).
+ *
+ * The badge rides in the same statement, uncorrelated and so computed once,
+ * so it and every `unreadCount` on the page are one snapshot; it reads every
+ * ticket the user may read, whatever the filter or the cursor. Exported so a
+ * test can read the parameters it binds: the cursor's instant goes in as the
+ * text Postgres printed, never through a `Date`.
+ */
+export function listStatement(caller: Caller, asked: ListAsked) {
+  return db
+    .select({
+      ...ticketColumns,
+      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
+      unreadTotal: unreadTotalSql(caller),
+    })
+    .from(conversations)
+    .innerJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(
+      and(
+        eq(apiTickets.identityId, caller.identityId),
+        ownedTicket(caller),
+        asked.trackingNumber === null
+          ? undefined
+          : sql`${trackingFoldSql(apiTickets.trackingNumber)} = ${normaliseTrackingNumber(asked.trackingNumber)}`,
+        asked.cursor === null
+          ? undefined
+          : vsCursor('<', asked.cursor, conversations.lastMessageAt, conversations.id),
+      ),
+    )
+    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+    .limit(asked.limit + 1);
+}
+
+/**
+ * `GET /tickets`: a page of the caller's tickets with the user's unread badge.
+ * One statement, and a second only for a page with no ticket on it — past the
+ * last page, a tracking number matching nothing, a user with none — where no
+ * row is there to carry the badge, which is then read on its own, still
+ * unfiltered. Never null: a user with no tickets has an empty list, not a
+ * missing one.
+ */
+export async function listTickets(caller: Caller, asked: ListAsked): Promise<TicketsListPage> {
+  const rows = await listStatement(caller, asked);
+  const more = rows.length > asked.limit;
+  const page = rows.slice(0, asked.limit);
+  const oldest = page.at(-1);
+  return {
+    tickets: page.map((row) => ticketView(row)),
+    olderCursor:
+      more && oldest ? encodeCursor('tickets', { time: oldest.cursorTime, id: oldest.id }) : null,
+    unreadTotal: rows[0]?.unreadTotal ?? (await readUnreadTotal(caller)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Marking read
+// ---------------------------------------------------------------------------
+
+export type ReadOutcome =
+  | { kind: 'read'; ticket: TicketView; unreadTotal: number; marked: number }
+  /** The ticket is not the caller's to read, for any reason, whatever `upTo` names. */
+  | { kind: 'not_found' }
+  /** `upTo` is not a message this API returns on this ticket. */
+  | { kind: 'not_on_ticket' }
+  /**
+   * The session was no longer live once the marker held the account, or the
+   * identity names no live contact any more (`holdAccount`).
+   */
+  | { kind: 'revoked' };
+
+/**
+ * Thrown inside the marker's transaction when the ticket is gone by the time
+ * its answer is read, so the rows it marked roll back with it.
+ */
+class GoneAfterMarking extends Error {}
+
+/**
+ * The marker's write: the ticket's unread replies (`unreadReply`) at or before
+ * `upTo` in the thread's own order, `(created_at, id)`, on a ticket the caller
+ * may read — the id and `ownedTicket` in the statement that acts, as an
+ * uncorrelated `EXISTS`, which runs once and locks no ticket.
+ *
+ * `read_at is null`, part of `unreadReply`, is the guard that makes marking
+ * idempotent: marking twice, or backwards, matches no row, writes nothing and
+ * fires no notification, and a marker that waited on another for a row
+ * re-checks it and skips it, so `read_at` is never moved or unset.
+ * `delivery_status` becomes `read` only from `sent` or `delivered`: a reply
+ * stored as failed keeps its receipt in the console, which draws `failed` and
+ * `bounced` as errors, rather than reading as delivered and read.
+ *
+ * Exported so a test can read the parameters it binds.
+ */
+export function markStatement(executor: Executor, caller: Caller, ticketId: string, upTo: Cursor) {
+  return executor
+    .update(messages)
+    .set({
+      readAt: sql`now()`,
+      deliveryStatus: sql`case when ${messages.deliveryStatus} in ('sent', 'delivered')
+        then 'read'::delivery_status else ${messages.deliveryStatus} end`,
+    })
+    .where(
+      and(
+        eq(messages.conversationId, ticketId),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(conversations)
+            .where(and(eq(conversations.id, ticketId), ownedTicket(caller))),
+        ),
+        unreadReply(),
+        vsCursor('<=', upTo),
+      ),
+    )
+    .returning({ id: messages.id });
+}
+
+/**
+ * `POST /tickets/{id}/read`: marks the team's replies on one of the caller's
+ * tickets read up to `upTo`, which the agent then sees as Read, and answers the
+ * ticket and the new badge. One transaction, read and written on `tx`
+ * throughout — a pooled read inside it is §6.91's self-deadlock:
+ *
+ * 1. **The account, then the requester, held** (`holdAccount`), as both sends
+ *    hold them: a marker that comes after a revoke for the account, a sign-out
+ *    included, finds its session no longer live and marks nothing; a contact
+ *    merge committed since the gate is followed, and one not yet begun waits,
+ *    so the marker never answers `404` for the user's own ticket — the answer
+ *    the SDK meets by dropping the ticket and failing its outbox. Contact
+ *    first, then the replies, the order a merge and a contact's purge lock in;
+ *    the ticket's row is never locked.
+ * 2. **One statement decides the answer**: the ticket, scoped, joined to
+ *    `upTo` on it. No row is `404`: not the caller's, for any reason, which
+ *    wins over anything `upTo` names, so asking about another user's ticket
+ *    learns nothing from the `400`. A null `upToTime` is `400`: `upTo` is a
+ *    note, a system row, a forward, a reaction, another ticket's message or
+ *    nothing at all — anything the thread does not return (`kind = 'reply'`
+ *    and `notReaction()`, in the query). It also reads `upTo`'s own timestamp
+ *    text, the cursor's form, for the bound. A plain read: it locks nothing.
+ * 3. **The write**, scoped again in its own `WHERE` (`markStatement`), so a
+ *    ticket deleted, merged or marked spam since step 2 marks nothing.
+ * 4. **The answer**, after the write and in the same transaction, so it sees
+ *    it: a data-modifying CTE would read the snapshot from before the update.
+ *    Each statement reads its own snapshot, so a spam mark, a delete or a
+ *    merge committed between the write and this read leaves no ticket to
+ *    answer: the transaction then rolls back (`GoneAfterMarking`) and answers
+ *    `404`, so a request the app is told failed marks nothing the agent sees
+ *    as Read.
+ *
+ * `created_at` is not commit order, so a reply stamped before `upTo` and
+ * committed after the app's last poll is marked with it, a moment before the
+ * app draws it. Accepted: the thread is ordered by `(created_at, id)`, the
+ * app's next poll merges the reply into place before `upTo`
+ * (`AFTER_OVERLAP_SECONDS`), and nothing is ever unmarked.
+ */
+export async function markTicketRead(
+  caller: Caller,
+  ticketId: string,
+  upTo: string,
+): Promise<ReadOutcome> {
+  const now = new Date();
+  try {
+    return await db.transaction(async (tx) => {
+      const holder = await holdAccount(tx, caller, now);
+      if (!holder) return { kind: 'revoked' as const };
+
+      // The message by its primary key, so the join is at most one row. A join
+      // rather than a scalar subquery in the select list: drizzle writes a
+      // one-table select's fields unqualified, and `conversation_id = id` there
+      // compared the message with itself.
+      const [found] = await tx
+        .select({ upToTime: sql<string | null>`${messages.createdAt}::text` })
+        .from(conversations)
+        .leftJoin(
+          messages,
+          and(
+            eq(messages.id, upTo),
+            eq(messages.conversationId, conversations.id),
+            eq(messages.kind, 'reply'),
+            notReaction(),
+          ),
+        )
+        .where(and(eq(conversations.id, ticketId), ownedTicket(holder)))
+        .limit(1);
+      if (!found) return { kind: 'not_found' as const };
+      if (found.upToTime === null) return { kind: 'not_on_ticket' as const };
+
+      const marked = await markStatement(tx, holder, ticketId, { time: found.upToTime, id: upTo });
+      const after = await ownedTicketRow(holder, ticketId, { withTotal: true, executor: tx });
+      if (!after) throw new GoneAfterMarking();
+      return {
+        kind: 'read' as const,
+        ticket: ticketView(after),
+        unreadTotal: after.unreadTotal,
+        marked: marked.length,
+      };
+    });
+  } catch (error) {
+    if (error instanceof GoneAfterMarking) return { kind: 'not_found' };
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------

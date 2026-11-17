@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ShipBlu Support: the myBlu ticket API",
-    "version": "2026-11-16",
+    "version": "2026-11-17",
     "description": "The HTTP API the myBlu app reaches support through, and the webhook it is told of replies by. The guide, `docs/myblu-api.md` in the shipblu-support repository, says what every field means, what an SDK must do, and the scenarios it is checked with; this document is the shapes.\n\nTwo planes. The **server plane** is myBlu's backend, holding `MYBLU_API_TOKEN`: it mints and ends sessions and does nothing else. The **client plane** is the app, through the SDK, holding a session token for one user: it does everything else, as that user.\n\nEvery client-plane request carries `ShipBlu-Client`. Every answer carries `ShipBlu-Request-Id` and `Cache-Control: no-store`. JSON, UTF-8, ISO-8601 instants in UTC, UUID ids, no credential in a URL and no trailing slash.\n\n**It changes by addition.** Fields and enum values appear without notice, and a client ignores a field it does not know and keeps an enum value it does not know. What an operation sends and answers is fixed from the release that ships it; a breaking change is `/api/v2`. Each change is a dated line in `docs/myblu-api-changelog.md`, whose newest date is `info.version`."
   },
   "servers": [
@@ -89,7 +89,7 @@
                       "openapi": "3.1.0",
                       "info": {
                         "title": "ShipBlu Support: the myBlu ticket API",
-                        "version": "2026-11-16"
+                        "version": "2026-11-17"
                       }
                     }
                   }
@@ -948,7 +948,7 @@
             "name": "trackingNumber",
             "in": "query",
             "required": false,
-            "description": "Only tickets opened with this tracking number, so a shipment screen finds its ticket after a reinstall.",
+            "description": "Only tickets opened with this tracking number, whatever its case and hyphens (`sb-ab12` finds a ticket opened with `SBAB12`), so a shipment screen finds its ticket after a reinstall.",
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9-]{1,64}$"
@@ -4159,7 +4159,7 @@
             "description": "What a send may carry. They move with the server, so a client checks against these rather than numbers of its own."
           },
           "support": {
-            "description": "The support team's hours. Absent until the stage that carries them ships; a client draws nothing for it then.",
+            "description": "The support team's hours. Absent until the stage that carries them ships, and from an answer whose hours the server could not read; a client draws nothing for it then.",
             "$ref": "#/components/schemas/SupportHours"
           },
           "polling": {
