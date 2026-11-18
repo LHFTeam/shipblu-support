@@ -524,6 +524,7 @@ GET    /api/v1/tickets/{id}      client plane: one ticket                    (st
 GET    /api/v1/tickets/{id}/messages   a page of a thread, by cursor         (stage 4)
 POST   /api/v1/tickets/{id}/messages   the user's reply                      (stage 4)
 POST   /api/v1/tickets/{id}/read client plane: mark the team's replies read  (stage 5)
+POST   <MYBLU_WEBHOOK_URL>       to myBlu's backend: the team wrote; push    (stage 6)
 ```
 
 Two planes, and neither takes a cookie. **myBlu's backend** holds `MYBLU_API_TOKEN` and
@@ -545,6 +546,14 @@ phone changes what an agent sees and never what another app user reads. There is
 stream: the app polls a cursor and obeys the `pollAfterSeconds` each answer carries.
 Unread is the team's replies with no `read_at`, kept on the server so two devices show one
 badge; marking them read from the app is what the console then draws as Read.
+
+The push is myBlu's to send, so the app is told of an answer while it is closed through
+its own backend: for every reply the team writes on an `api` ticket the worker posts one
+signed webhook, `message.created`, carrying ids and no text (`notify_myblu`,
+`lib/api/webhook.ts`), and the backend pushes to that user's devices. It is a hint, not
+the delivery — the reply is in the app on its next poll whether or not the push lands, so
+a failed webhook never marks a reply failed — and with `MYBLU_WEBHOOK_URL` unset nothing is
+queued or sent.
 
 ## Deployment
 

@@ -26,6 +26,7 @@ export type JobType =
   | 'run_time_automations'
   | 'send_csat'
   | 'notify_low_rating'
+  | 'notify_myblu'
   | 'rollup_metrics'
   | 'snapshot_backlog'
   | 'import_freshdesk_kb'

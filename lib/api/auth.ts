@@ -5,6 +5,7 @@ import { invalidRequest, notConfigured, rateLimited } from './errors';
 import { admitServerPlane, spendBadBearer, type ServerPlaneBudget } from './limits';
 import { apiError } from './respond';
 import { ShipBluClientHeader } from './schemas';
+import { usableSecret } from './secrets';
 import { lookupSession, type Caller, type SessionLookup } from './sessions';
 
 /**
@@ -27,30 +28,6 @@ import { lookupSession, type Caller, type SessionLookup } from './sessions';
 const log = logger('api');
 
 /**
- * Below this, a value counts as unset. A minting token is what a leak turns
- * into every user, so one short enough to have been typed by hand, or cut off
- * when pasted, is treated as no token at all rather than as a weak one.
- * Checked here, at first use, and never in `lib/env.ts`, where a format rule
- * turns one mistyped value into a console that does not load.
- */
-const MIN_TOKEN_CHARS = 32;
-
-const warned = new Set<string>();
-
-function usable(name: string, value: string | undefined): string | null {
-  if (!value) return null;
-  if (value.length < MIN_TOKEN_CHARS) {
-    if (!warned.has(name)) {
-      warned.add(name);
-      // The name and the rule, never the value or its length.
-      log.warn(`${name} is shorter than ${MIN_TOKEN_CHARS} characters and counts as unset`);
-    }
-    return null;
-  }
-  return value;
-}
-
-/**
  * The bearers the server plane accepts now: `MYBLU_API_TOKEN` and, while a
  * rotation is under way, `MYBLU_API_TOKEN_PREVIOUS`. Empty while the current
  * value is unusable, whatever the previous one holds — the current value is
@@ -58,9 +35,9 @@ function usable(name: string, value: string | undefined): string | null {
  */
 export function serverPlaneTokens(): string[] {
   const e = env();
-  const current = usable('MYBLU_API_TOKEN', e.MYBLU_API_TOKEN);
+  const current = usableSecret('MYBLU_API_TOKEN', e.MYBLU_API_TOKEN);
   if (!current) return [];
-  const previous = usable('MYBLU_API_TOKEN_PREVIOUS', e.MYBLU_API_TOKEN_PREVIOUS);
+  const previous = usableSecret('MYBLU_API_TOKEN_PREVIOUS', e.MYBLU_API_TOKEN_PREVIOUS);
   return previous ? [current, previous] : [current];
 }
 
@@ -69,8 +46,9 @@ export function serverPlaneTokens(): string[] {
  * both planes answer `503 not_configured` — the client plane before it reads a
  * session — so every stage deploys before anybody at myBlu holds a value, and
  * unsetting it stops the whole API at the next restart rather than a day later.
+ * The webhook asks it too, so no push points at an API that answers nothing.
  */
-function apiSwitchedOn(): boolean {
+export function apiSwitchedOn(): boolean {
   return serverPlaneTokens().length > 0;
 }
 

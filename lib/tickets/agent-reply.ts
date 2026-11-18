@@ -1,14 +1,13 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
-import { enqueue } from '@/lib/queue';
 import { runAutomations } from '@/lib/automations';
 import { afterHoldEnded } from '@/lib/routing/after-hold';
 import { endHold } from '@/lib/routing/end-hold';
 import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { isReadOnlyChannel, type ConversationChannel } from '@/lib/tickets/channel-policy';
-import { carrierFor, rowIsDelivery } from '@/lib/tickets/outbound';
+import { enqueueAutomatedDelivery, rowIsDelivery } from '@/lib/tickets/outbound';
 
 /**
  * The row an agent's reply is stored as, less what every reply shares and what
@@ -35,8 +34,10 @@ export type AgentReplyMessage = Omit<
  * does.) What each sender checks before it gets here — permission, read-only
  * channels, the messaging windows, the template's account — stays in its action.
  *
- * Whether the row is its own delivery is decided here once, for the status it
- * is written with and for whether a carrier is queued below: each sender
+ * Whether the row is its own delivery is decided here, for the status it is
+ * written with, from the answer that decides whether a carrier is queued below
+ * (`carrierFor`, which `rowIsDelivery` is derived from and
+ * `enqueueAutomatedDelivery` asks): each sender
  * stating its own status had to repeat `rowIsDelivery`, and one that forgot
  * wrote a web chat or app reply `pending` with nothing queued behind it. A
  * read-only channel (the bot) has neither a carrier nor a client reading the
@@ -56,7 +57,6 @@ export async function storeAgentReply(
         'nobody on the team writes there, and its action should have refused it first',
     );
   }
-  const carrier = carrierFor(channel);
   const delivered = rowIsDelivery(channel);
 
   const inserted = await db
@@ -115,18 +115,17 @@ export async function storeAgentReply(
     });
   }
 
-  // Web chat and the myBlu app have no outbound provider: writing the row,
-  // above, *is* delivery, because the customer's client — the widget's open
-  // stream, the app's poll — reads the same table (`rowIsDelivery`).
-  if (carrier) {
-    await enqueue(
-      carrier,
-      { messageId },
-      // dedupeKey on the message id: a double-submit or a retried action can
-      // never queue the same reply twice.
-      { priority: 10, dedupeKey: `send:${messageId}` },
-    );
-  }
+  // The send, through the door every reply's delivery goes through
+  // (`enqueueAutomatedDelivery`): the carrier, keyed on the message so a
+  // double-submit or a retried action never queues the same reply twice; or,
+  // where the row is the delivery (`rowIsDelivery`) — web chat's widget and
+  // the myBlu app read the table — nothing, but on the app the push that tells
+  // the user's phone the reply is there. That push is best-effort: the reply
+  // above is already the delivery, and a push that cannot be queued is logged,
+  // never answered to the agent as a reply that failed. One door, not this
+  // branch written out again here, so a new channel or event cannot reach
+  // automated replies and miss an agent's.
+  await enqueueAutomatedDelivery(channel, messageId, 10);
 
   // An agent looks a parcel up on the shipping platform and pastes the number
   // into their answer, which is why this runs on outbound as well as inbound.
