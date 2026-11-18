@@ -1771,6 +1771,82 @@ a sixth file — then from the SDK's sample at a pre-release tag. Way back:
 revert; the attachment rows and their objects stay on their messages, and the
 console goes on drawing them.
 
+As built: `sendFields` in `lib/api/requests.ts` reads either encoding with the
+operation's own published schemas; `storeFiles`, `insertFiles`, `releaseFiles`
+and `openedStatus` beside the two writers in `lib/api/tickets.ts`, which call
+the widget's `storeVisitorFiles` and `releaseUnlessStored`, exported for it —
+the second lifted out of the widget's own failure branch, so the two surfaces
+judge a lost COMMIT by one function; `attachmentLink` and
+`app/api/v1/attachments/[id]/route.ts`; `uploadFits` and `spendUpload` in
+`lib/api/limits.ts` on `peek` in `lib/http/rate-limit.ts`; `api` in
+`drawsMediaInline`. No shape changed. The choices it made where this plan left
+a question:
+
+- **The files are stored only once nothing on the pool refuses the send**: the
+  key unspent (a replay uploads nothing), the upload budget with room, the
+  new-ticket bucket and the channel row on a create, and on a reply the
+  ticket's status (`openedStatus`), so a closed ticket or an id that is not
+  the user's is refused before 25 MB go to Storage only to be removed. Read
+  through `ownedTicketNow`: `ownedTicket` with its requester read through the
+  identity in the statement, not off the gate's contact, which a merge
+  committed since would have moved, answering the user's own ticket `404`,
+  which the SDK drops. Read first by the identity alone, it answered the
+  status of a ticket an agent had moved to another contact — `409` for a
+  closed one where the locked read says `404`, and an upload for an open one.
+  It only ever refuses; the locked read decides. The ten-open count is not
+  asked early: past it the files are stored and then removed, a cost paid only
+  by a client that does not read `tickets.maxOpen`.
+- **The instant is read after the upload**, as the widget's is: a message
+  stamped before a video's upload could land behind an agent's reply written
+  during it, and no reply clock would start.
+- **What the lock refuses, the files follow.** A transaction that returns
+  without the message — a replay found under the lock, too many open, a
+  session revoked meanwhile, a ticket not found or closed — releases them, and
+  so does one that throws, unless the message was stored after all: a COMMIT
+  whose answer was lost leaves its files on the message, the route answers
+  `500`, and the SDK's retry under the same key replays it, file included.
+- **The upload budget is the widget's per-visitor hundred megabytes an hour**,
+  asked with `peek` so its `429` carries `Retry-After`, and spent only once
+  the message is stored: a send that failed on Storage, which the SDK retries
+  under its key, costs nothing, and a replay is never asked. Counted to the
+  byte, not as the widget counts, a whole megabyte a send rounded up: a phone
+  sends voice notes of a few tens of kilobytes far more often than a browser
+  sends files, and at a megabyte each a hundred of them spent the hour.
+- **A spent key is answered before the body is read** (`keyAnswer`), so a
+  retry of a 25 MB send is not parsed, copied and sniffed for an answer that
+  uses none of it; the writer takes only the `UnspentKey` it hands back, and
+  reads the key again under the account's lock.
+- **Multipart text has its line breaks put back to LF** before the schema
+  counts it: the form encoding writes each as CRLF, so the same words were
+  longer beside a photo than alone, and stored with CRs.
+- **A `files` part that is not a file** — one sent without a filename, which
+  `formData()` reads as text — is `invalid_request` naming `files`, not
+  `file_refused`, since there is no file to name; the guide's "a nameless file
+  is given a name with an extension" is what keeps an SDK off it.
+- **A file is stored as its bytes say**, so a PDF labelled `image/jpeg` is
+  stored as `application/pdf`; only bytes that are no carried type are
+  refused, the widget's rule.
+- **The download answers exactly the files a thread lists**: on a `reply` that
+  is not a reaction, not inline, through `ownedTicket` in the same statement.
+  A file on a reply the team wrote is the user's to fetch too, so the day the
+  console uploads one, nothing here changes.
+
+Tested beside each: `requests.test.ts` for the reading — both encodings, files
+in order and typed by their bytes, a part the operation does not take,
+`empty_message`, `411`, `413`, each `file_refused` reason and whether it names
+the file, a `files` part that is text, a refused field in either encoding, an
+unreadable body; `rate-limit.test.ts` for `peek`; and
+`app/api/v1/files.db.test.ts` through the routes, with Storage stood in for: a
+photo with no words stored under the ticket and the message, answered `text: ""`
+and `subject: null`; words and two files in order, read back by the thread; a
+failed file storing nothing and removing every key tried; the lock refusing
+too many open after the upload, and the file removed; nothing uploaded for a
+closed ticket or another user's; a COMMIT whose answer was lost keeping its
+file, and the retry replaying it without a second upload; the budget spent
+only by a stored send; and the download's link, a team reply's file, and the
+`404` for another user's file, a note's, an inline one, a web chat file, a
+deleted ticket's and a malformed id.
+
 **8. The survey — `plans/csat.md` stage 6.** `api_pull` and the `api` answer
 source, generated, with nothing in a migration using either value;
 `channelSwitch('api')` answering again and `decideSurvey` choosing `api_pull`;

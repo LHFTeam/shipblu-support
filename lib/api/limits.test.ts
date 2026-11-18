@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { admitAddress, admitMint, admitRead, admitServerPlane } from './limits';
+import {
+  admitAddress,
+  admitMint,
+  admitRead,
+  admitServerPlane,
+  spendUpload,
+  UPLOAD_BYTES_LIMIT,
+  uploadFits,
+} from './limits';
 
 /**
  * Which store each of the API's buckets is in. A spray of forged addresses
@@ -46,5 +54,20 @@ describe('the API’s buckets', () => {
     spendTo(600, () => admitServerPlane('revoke'));
     expect(admitServerPlane('revoke').allowed).toBe(false);
     expect(admitServerPlane('mint').allowed).toBe(true);
+  });
+});
+
+describe('the upload budget', () => {
+  // Rounded up to a megabyte a send, a hundred 30 KB voice notes spent the
+  // hour's hundred megabytes.
+  it('counts the bytes a send weighs, not a megabyte a send', () => {
+    const identity = 'identity-voice-notes';
+    const note = 30 * 1024;
+    for (let i = 0; i < 200; i += 1) {
+      expect(uploadFits(identity, note).allowed).toBe(true);
+      spendUpload(identity, note);
+    }
+    expect(uploadFits(identity, UPLOAD_BYTES_LIMIT - 200 * note).allowed).toBe(true);
+    expect(uploadFits(identity, UPLOAD_BYTES_LIMIT - 200 * note + 1).allowed).toBe(false);
   });
 });

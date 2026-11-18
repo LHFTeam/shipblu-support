@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { withTestEnv } from '@/lib/testing/env';
 import { encodeCursor } from './cursor';
-import { answerRead, answerSend, listAsked, markBody, pageAsked } from './requests';
+import { MAX_WIDGET_REQUEST_BYTES } from '@/lib/widget/files';
+import { retryAfterSeconds } from '@/lib/http/rate-limit';
+import {
+  answerRead,
+  answerSend,
+  listAsked,
+  markBody,
+  pageAsked,
+  sendFields,
+  type SendFields,
+} from './requests';
 import { ErrorBody, ReadResult } from './schemas';
 
 /**
@@ -252,5 +262,310 @@ describe('answerRead', () => {
     const send = await refusedAnswer({ refusal: answerSend({ kind: 'revoked' }, 'req-1') });
     expect(marker).toMatchObject({ status: 401, code: 'unauthenticated' });
     expect(marker.message).toBe(send.message);
+  });
+});
+
+/** A JPEG's first bytes, padded to a plausible header (`sniff.test.ts`'s own). */
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Array(32).fill(0)]);
+const PDF = new TextEncoder().encode(`%PDF-1.7\n${' '.repeat(32)}`);
+
+type Part = string | File;
+
+/**
+ * A multipart send as the SDK builds one: the body written out first, so its
+ * `Content-Length` is exact, and sent with it — or without it, or with another
+ * length, where the test asks.
+ */
+async function multipart(
+  parts: [string, Part][],
+  length: 'exact' | 'none' | number = 'exact',
+): Promise<Request> {
+  const form = new FormData();
+  for (const [name, value] of parts) form.append(name, value);
+  const encoded = new Response(form);
+  const bytes = await encoded.arrayBuffer();
+  return new Request('https://support.shipblu.com/api/v1/tickets', {
+    method: 'POST',
+    body: bytes,
+    headers: {
+      'Content-Type': encoded.headers.get('content-type') ?? '',
+      ...(length === 'none'
+        ? {}
+        : { 'Content-Length': String(length === 'exact' ? bytes.byteLength : length) }),
+    },
+  });
+}
+
+const json = (body: unknown) =>
+  new Request('https://support.shipblu.com/api/v1/tickets', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+async function refused(answer: SendFields | { refusal: Response }) {
+  if (!('refusal' in answer)) throw new Error('expected a refusal');
+  expect(answer.refusal.headers.get('cache-control')).toBe('no-store');
+  return { status: answer.refusal.status, ...ErrorBody.parse(await answer.refusal.json()).error };
+}
+
+async function read(answer: SendFields | { refusal: Response }): Promise<SendFields> {
+  if ('refusal' in answer) {
+    throw new Error(`refused: ${JSON.stringify(await answer.refusal.json())}`);
+  }
+  return answer;
+}
+
+describe('sendFields', () => {
+  withTestEnv();
+
+  it('reads JSON as it always has: the fields, trimmed, and no files', async () => {
+    expect(
+      await read(
+        await sendFields(
+          json({ text: '  Where is it? ', locale: 'ar', trackingNumber: 'T1' }),
+          'r',
+          'createTicket',
+        ),
+      ),
+    ).toEqual({ text: 'Where is it?', locale: 'ar', trackingNumber: 'T1', uploads: [] });
+    expect(
+      await refused(await sendFields(json({ text: ' ', locale: 'en' }), 'r', 'sendMessage')),
+    ).toMatchObject({
+      status: 400,
+      code: 'empty_message',
+    });
+  });
+
+  it('reads multipart: the same fields as parts, and each file typed by its bytes, in order', async () => {
+    const fields = await read(
+      await sendFields(
+        await multipart([
+          ['text', ' The box was open '],
+          ['locale', 'en'],
+          ['trackingNumber', '1755021358719'],
+          // Labelled as nothing: admitted by its extension, typed by its bytes.
+          ['files', new File([JPEG], 'IMG_0412.jpg', { type: '' })],
+          ['files', new File([PDF], 'awb.pdf', { type: 'application/pdf' })],
+        ]),
+        'r',
+        'createTicket',
+      ),
+    );
+
+    expect(fields).toMatchObject({
+      text: 'The box was open',
+      locale: 'en',
+      trackingNumber: '1755021358719',
+    });
+    expect(
+      fields.uploads.map(({ filename, contentType, kind }) => ({ filename, contentType, kind })),
+    ).toEqual([
+      { filename: 'IMG_0412.jpg', contentType: 'image/jpeg', kind: 'image' },
+      { filename: 'awb.pdf', contentType: 'application/pdf', kind: 'document' },
+    ]);
+  });
+
+  it('stores a file as its bytes say, whatever it was labelled', async () => {
+    const fields = await read(
+      await sendFields(
+        await multipart([
+          ['locale', 'en'],
+          ['files', new File([PDF], 'scan.jpg', { type: 'image/jpeg' })],
+        ]),
+        'r',
+        'sendMessage',
+      ),
+    );
+    expect(fields.uploads[0]).toMatchObject({ contentType: 'application/pdf', kind: 'document' });
+  });
+
+  it('takes files with no words, and ignores a part the operation does not take', async () => {
+    const fields = await read(
+      await sendFields(
+        await multipart([
+          ['text', ''],
+          ['locale', 'ar'],
+          ['trackingNumber', 'ignored on a reply'],
+          ['files', new File([JPEG], 'photo.jpg', { type: 'image/jpeg' })],
+        ]),
+        'r',
+        'sendMessage',
+      ),
+    );
+    expect(fields.text).toBe('');
+    expect(fields).not.toHaveProperty('trackingNumber');
+    expect(fields.uploads).toHaveLength(1);
+  });
+
+  it('refuses neither words nor files as empty_message', async () => {
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['text', '  '],
+            ['locale', 'en'],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ status: 400, code: 'empty_message' });
+  });
+
+  it('requires Content-Length on multipart, and refuses one past the ceiling before reading', async () => {
+    const parts: [string, Part][] = [
+      ['locale', 'en'],
+      ['files', new File([JPEG], 'photo.jpg', { type: 'image/jpeg' })],
+    ];
+    expect(
+      await refused(await sendFields(await multipart(parts, 'none'), 'r', 'sendMessage')),
+    ).toMatchObject({
+      status: 411,
+      code: 'length_required',
+    });
+    expect(
+      await refused(
+        await sendFields(await multipart(parts, MAX_WIDGET_REQUEST_BYTES + 1), 'r', 'sendMessage'),
+      ),
+    ).toMatchObject({ status: 413, code: 'too_large' });
+  });
+
+  it('refuses a file by the widget’s reasons, naming it where the reason is about one', async () => {
+    const photo = (name = 'photo.jpg') => new File([JPEG], name, { type: 'image/jpeg' });
+
+    // Labelled as something no chat carries, whatever the bytes are.
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['locale', 'en'],
+            ['files', new File([JPEG], 'page.html', { type: 'text/html' })],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ status: 400, code: 'file_refused', reason: 'type', filename: 'page.html' });
+
+    // Labelled a photo, and its bytes are no type a chat carries.
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['locale', 'en'],
+            ['files', new File(['<html>not a photo</html>'], 'fake.jpg', { type: 'image/jpeg' })],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ code: 'file_refused', reason: 'type', filename: 'fake.jpg' });
+
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['locale', 'en'],
+            ['files', new File([], 'blank.jpg', { type: 'image/jpeg' })],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ code: 'file_refused', reason: 'empty', filename: 'blank.jpg' });
+
+    // A sixth file: the count, about all of them, so no file is named.
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['locale', 'en'],
+            ...Array.from({ length: 6 }, (_, i): [string, Part] => ['files', photo(`p${i}.jpg`)]),
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ code: 'file_refused', reason: 'too_many', filename: null });
+  });
+
+  it('refuses a files part that is not a file as invalid_request naming files', async () => {
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['locale', 'en'],
+            ['files', 'not a file'],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ status: 400, code: 'invalid_request', field: 'files' });
+  });
+
+  it('refuses a field its schema refuses, naming it, in either encoding', async () => {
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['text', 'Hi\u0000there'],
+            ['locale', 'en'],
+          ]),
+          'r',
+          'sendMessage',
+        ),
+      ),
+    ).toMatchObject({ code: 'invalid_request', field: 'text' });
+    expect(
+      await refused(
+        await sendFields(
+          await multipart([
+            ['text', 'Hi'],
+            ['locale', 'fr'],
+          ]),
+          'r',
+          'createTicket',
+        ),
+      ),
+    ).toMatchObject({ code: 'invalid_request', field: 'locale' });
+  });
+
+  it('refuses a multipart body it cannot read', async () => {
+    const broken = new Request('https://support.shipblu.com/api/v1/tickets', {
+      method: 'POST',
+      body: '--x\r\n',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=x', 'Content-Length': '5' },
+    });
+    expect(await refused(await sendFields(broken, 'r', 'sendMessage'))).toMatchObject({
+      status: 400,
+      code: 'invalid_request',
+    });
+  });
+});
+
+describe('answerSend, for what files add', () => {
+  withTestEnv();
+
+  it('answers a file that could not be stored 502 upload_failed', async () => {
+    const answer = answerSend({ kind: 'upload_failed' }, 'r');
+    expect(answer.status).toBe(502);
+    expect(ErrorBody.parse(await answer.json()).error.code).toBe('upload_failed');
+  });
+
+  it('answers the upload budget 429 with Retry-After, in words of its own', async () => {
+    const answer = answerSend(
+      {
+        kind: 'rate_limited',
+        // The one rounding every wait is built through, as a bucket answers it.
+        admission: { allowed: false, resetInSeconds: retryAfterSeconds(1_200_000) },
+        bucket: 'uploads',
+      },
+      'r',
+    );
+    expect(answer.status).toBe(429);
+    expect(answer.headers.get('retry-after')).toBe('1200');
+    expect(ErrorBody.parse(await answer.json()).error.message).toMatch(/megabytes/);
   });
 });

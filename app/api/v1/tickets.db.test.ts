@@ -738,7 +738,8 @@ describe('POST /tickets', () => {
     expect(
       await refusal(await create(token, { text: 'x'.repeat(5001), locale: 'en' })),
     ).toMatchObject({ status: 400, code: 'invalid_request', field: 'text' });
-    // Files are stage 7's.
+    // Files are stage 7's, and a multipart body must say its length
+    // (`files.db.test.ts` has the rest of them).
     const multipart = clientRequest('/tickets', token, {
       method: 'POST',
       body: '--x\r\n',
@@ -746,9 +747,8 @@ describe('POST /tickets', () => {
       headers: { 'Content-Type': 'multipart/form-data; boundary=x' },
     });
     expect(await refusal(await postTicket(multipart))).toMatchObject({
-      status: 400,
-      code: 'invalid_request',
-      field: 'Content-Type',
+      status: 411,
+      code: 'length_required',
     });
     expect(await db.select({ id: conversations.id }).from(conversations)).toEqual([]);
   });

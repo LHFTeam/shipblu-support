@@ -536,7 +536,10 @@ files (`storeVisitorFiles`, **The widget carries files**), in the visitor's own
 request: they are still there to try again, and a message stored before its
 files would leave an agent reading about a photo that is not there, so a
 failure refuses the send and gives the files back rather than queueing
-anything. Each upload has its own deadline (`sizedTimeout`). The fourth is the
+anything. Each upload has its own deadline (`sizedTimeout`). The myBlu app's
+two sends upload theirs the same way and through the same function, for the
+same reason: the app's user is there, and the SDK sends the whole message
+again under its key on `502 upload_failed`. The fourth is the
 knowledge-base editor's picture upload (`uploadArticlePicture`), for the same
 reasons as the third. The author is waiting for the `src` to put in their
 draft, and the file exists only in their browser, so a queued job would have
@@ -1585,6 +1588,33 @@ token is the whole chat, read and written, which nothing on the server
 expires. The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
 rather than refusing it, so the route checks `Content-Length` before reading,
 and one is raised only with the other.
+
+**The myBlu app carries files the widget's way, and requires the length.** The
+two sends take `multipart/form-data` beside JSON (`sendFields` in
+`lib/api/requests.ts`), and judge, read and store a file with the widget's own
+functions — `readVisitorUploads`, `storeVisitorFiles` and
+`releaseUnlessStored` — never copies, so a file one surface takes the other
+takes too, typed by the same bytes and stored under the same keys. Two things
+differ, each on purpose. A multipart body without `Content-Length` is
+`411 length_required` rather than read: the SDK builds its body in a file and
+knows its length, and the proxy's truncation is otherwise silent. And the files
+go to Storage only once the pool says the key is unspent and the upload budget
+(100 MB an hour on the identity, counted to the byte, `uploadFits`) has room,
+and on a reply only to a ticket the user owns that is not closed
+(`openedStatus`, through `ownedTicketNow`, whose requester is read through the
+identity in the statement rather than off the gate's contact, so a merge
+cannot make it answer a false `404` and a ticket moved to another contact is
+the locked read's `404`, not its status); the budget is spent once the message
+is stored. The key is asked first of all, before the body is read
+(`keyAnswer`, whose `UnspentKey` is the only key a writer takes), so a retry of
+a 25 MB send is answered without being parsed. Multipart text has its CRLFs put
+back to LF before the schema counts it, as the form encoding wrote them. A file is fetched
+through `GET /attachments/{id}` (`attachmentLink`), which reaches it through its
+message and `ownedTicket`, in one statement: exactly the files a thread lists,
+answered as a five-minute Storage link in JSON, never a redirect. An app
+message of files alone is stored with the widget's stand-in and
+`meta.webchatFiles`, so the console draws the files in its place (`api` is in
+`drawsMediaInline`'s list) and the API answers its `text` as `""`.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the

@@ -519,11 +519,14 @@ DELETE /api/v1/session           client plane: end this session             (sta
 GET    /api/v1/config            client plane: who is signed in, the limits  (stage 3)
                                  ... and the team's hours                    (stage 5)
 POST   /api/v1/tickets           client plane: open a ticket                 (stage 4)
+                                 ... with files, as multipart                (stage 7)
 GET    /api/v1/tickets           client plane: the user's tickets            (stage 5)
 GET    /api/v1/tickets/{id}      client plane: one ticket                    (stage 4)
 GET    /api/v1/tickets/{id}/messages   a page of a thread, by cursor         (stage 4)
 POST   /api/v1/tickets/{id}/messages   the user's reply                      (stage 4)
+                                       ... with files, as multipart          (stage 7)
 POST   /api/v1/tickets/{id}/read client plane: mark the team's replies read  (stage 5)
+GET    /api/v1/attachments/{id}  client plane: a five-minute link to a file  (stage 7)
 POST   <MYBLU_WEBHOOK_URL>       to myBlu's backend: the team wrote; push    (stage 6)
 ```
 
@@ -554,6 +557,12 @@ signed webhook, `message.created`, carrying ids and no text (`notify_myblu`,
 the delivery — the reply is in the app on its next poll whether or not the push lands, so
 a failed webhook never marks a reply failed — and with `MYBLU_WEBHOOK_URL` unset nothing is
 queued or sent.
+
+A message from the app can carry photos, videos, voice notes and PDFs, sent as multipart in
+the message's own request and judged, typed by their bytes and stored by the widget's own
+functions, so a file the widget takes the app takes too. They are stored with the message or
+not at all, and fetched back through a five-minute link the API signs for a file on one of
+the user's own tickets.
 
 ## Deployment
 

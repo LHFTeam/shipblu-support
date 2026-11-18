@@ -7,13 +7,12 @@ import {
   answerSend,
   idempotencyKey,
   pageAsked,
-  refuseMultipart,
-  sendBody,
+  sendFields,
   ticketNotFound,
 } from '@/lib/api/requests';
 import { apiJson, newRequestId } from '@/lib/api/respond';
-import { SendMessageRequest, type MessagesPage } from '@/lib/api/schemas';
-import { readMessages, sendApiMessage } from '@/lib/api/tickets';
+import type { MessagesPage } from '@/lib/api/schemas';
+import { keyAnswer, readMessages, sendApiMessage } from '@/lib/api/tickets';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { logger } from '@/lib/log';
 
@@ -54,8 +53,8 @@ export async function GET(request: Request, context: Context): Promise<Response>
 }
 
 /**
- * The user's message on one of their tickets. A reply to a `resolved` ticket
- * reopens it; one to a `closed` ticket is `409 ticket_closed`, and the app
+ * The user's message on one of their tickets, as JSON or as multipart with
+ * files (`sendFields`). A reply to a `resolved` ticket reopens it; one to a `closed` ticket is `409 ticket_closed`, and the app
  * offers a new ticket. `Idempotency-Key` is required, as on `POST /tickets`:
  * `201` the first time, `200` with `Idempotent-Replayed: true` for a retry,
  * and `409 key_reused` for a key spent on another ticket or on a create.
@@ -82,15 +81,26 @@ export async function POST(request: Request, context: Context): Promise<Response
 
     const keyed = idempotencyKey(request, requestId);
     if ('refusal' in keyed) return keyed.refusal;
-    const multipart = refuseMultipart(request, requestId);
-    if (multipart) return multipart;
-    const read = await sendBody(request, requestId, SendMessageRequest);
+    // A key already spent is answered before the body is read, so a retry of a
+    // 25 MB send is not parsed and copied for an answer that uses none of it.
+    const key = await keyAnswer(caller, keyed.key, 'sendMessage', id);
+    if ('answer' in key) {
+      log.info('message send answered', {
+        route,
+        identity: caller.identityId,
+        outcome: key.answer.kind === 'sent' ? 'replayed' : key.answer.kind,
+        requestId,
+      });
+      return answerSend(key.answer, requestId);
+    }
+    const read = await sendFields(request, requestId, 'sendMessage');
     if ('refusal' in read) return read.refusal;
 
     const outcome = await sendApiMessage(caller, id, {
-      text: read.body.text,
-      locale: read.body.locale,
-      key: keyed.key,
+      text: read.text,
+      locale: read.locale,
+      uploads: read.uploads,
+      key: key.key,
       // Present and parsed: the gate refuses a request without it.
       client: request.headers.get('shipblu-client') ?? '',
     });
@@ -98,6 +108,7 @@ export async function POST(request: Request, context: Context): Promise<Response
       route,
       identity: caller.identityId,
       outcome: outcome.kind === 'sent' && outcome.replayed ? 'replayed' : outcome.kind,
+      files: read.uploads.length,
       requestId,
     });
     return answerSend(outcome, requestId);
