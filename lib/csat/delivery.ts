@@ -13,16 +13,31 @@ export const DELIVERIES = {
   widget_card: 'as a card in the chat',
   meta_template: 'as Messenger’s feedback card',
   meta_quick_reply: 'as rating buttons in the conversation',
+  api_pull: 'in the myBlu app',
 } as const;
 
 export type SurveyDelivery = keyof typeof DELIVERIES;
+
+/**
+ * The delivery that writes no message: the myBlu app fetches its survey from
+ * the API and draws it itself (`GET /api/v1/tickets/{id}/survey`), so there is
+ * no message to carry it and no link to put in one. Every other delivery is a
+ * message, and `MessageDelivery` names those, so a body built for one never
+ * has to say what it would be for the app.
+ */
+export const PULLED = 'api_pull' satisfies SurveyDelivery;
+
+export type MessageDelivery = Exclude<SurveyDelivery, typeof PULLED>;
 
 /**
  * The deliveries with no link to the survey page: Messenger's card and a
  * tapped quick reply are answered where they were asked, and come back on
  * Meta's webhook with the survey's id in them.
  */
-const LINKLESS = ['meta_template', 'meta_quick_reply'] as const satisfies readonly SurveyDelivery[];
+const LINKLESS = [
+  'meta_template',
+  'meta_quick_reply',
+] as const satisfies readonly MessageDelivery[];
 
 type LinklessDelivery = (typeof LINKLESS)[number];
 
@@ -33,9 +48,9 @@ type LinklessDelivery = (typeof LINKLESS)[number];
  * body is built for them.
  */
 export function carriesLink(
-  delivery: SurveyDelivery,
-): delivery is Exclude<SurveyDelivery, LinklessDelivery> {
-  return !(LINKLESS as readonly SurveyDelivery[]).includes(delivery);
+  delivery: MessageDelivery,
+): delivery is Exclude<MessageDelivery, LinklessDelivery> {
+  return !(LINKLESS as readonly MessageDelivery[]).includes(delivery);
 }
 
 export const ANSWER_SOURCES = {
@@ -43,6 +58,7 @@ export const ANSWER_SOURCES = {
   widget: 'in the chat widget',
   meta_feedback: 'on Messenger’s feedback card',
   meta_quick_reply: 'with a rating button in the conversation',
+  api: 'in the myBlu app',
 } as const;
 
 export type AnswerSource = keyof typeof ANSWER_SOURCES;

@@ -157,20 +157,31 @@ describe('decideSurvey', () => {
     });
   });
 
-  // The trap stage 1 of `plans/myblu-ticket-api.md` springs: once an `api`
-  // ticket is not written as email (`sendsByEmail` false), a channel behind a
-  // switch falls past the email and Meta branches to the last line, which
-  // answers `widget_card` for a widget the app does not have. With no switch
-  // until the app can pull its survey, it is refused where WhatsApp is, with
-  // its switch on.
-  it('surveys nothing on the myBlu app until it can pull its survey, whatever its switch says', () => {
+  // The myBlu app pulls its survey (stage 8 of `plans/myblu-ticket-api.md`).
+  // Its row is its delivery, as web chat's is, so an `api` ticket falls past
+  // the email and Meta branches: stage 1's trap, where that last line answered
+  // `widget_card` for a widget the app does not have. Now it answers before
+  // that line, and never by email (`api_email_fallback` is not built).
+  it('pulls a survey on the myBlu app, never by email, and on a closed ticket too', () => {
     const app = input({ channel: 'api', byEmail: false });
-    expect(decideSurvey(app, ON)).toEqual({ kind: 'skip', reason: 'channel_unsupported' });
-    // A contact with an address changes nothing: the app's tickets are never
-    // surveyed by email (`api_email_fallback` is not built).
+    expect(decideSurvey(app, ON)).toEqual({ kind: 'send', delivery: 'api_pull' });
     expect(decideSurvey({ ...app, lacksRecipient: false }, ON)).toEqual({
+      kind: 'send',
+      delivery: 'api_pull',
+    });
+    // A closed app ticket is still the app's to read, unlike a closed chat.
+    expect(decideSurvey({ ...app, statusCategory: 'closed' }, ON)).toEqual({
+      kind: 'send',
+      delivery: 'api_pull',
+    });
+    // And behind its own switch, and every reason before the delivery.
+    expect(decideSurvey(app, { ...ON, channels: { ...ON.channels, api: false } })).toEqual({
       kind: 'skip',
-      reason: 'channel_unsupported',
+      reason: 'channel_off',
+    });
+    expect(decideSurvey({ ...app, suppressedBy: 'agent' }, ON)).toEqual({
+      kind: 'skip',
+      reason: 'agent_suppressed',
     });
   });
 
@@ -328,14 +339,13 @@ describe('channelSurveyed', () => {
   });
 
   // The decision and the sidebar ask the same function, so they give one
-  // answer: "not sent on this channel", never "switched off" for a switch an
-  // admin may have turned on.
-  it('gives the myBlu app no switch, with its stored value on or off', () => {
-    expect(channelSwitch('api')).toBeNull();
-    expect(channelSurveyed(ON, 'api')).toBe(false);
-    expect(surveyAvailability(ON, 'api')).toBe('unsupported');
+  // answer, the stored `survey_api` included.
+  it('gives the myBlu app its own switch, read by the decision and the sidebar alike', () => {
+    expect(channelSwitch('api')).toBe('api');
+    expect(channelSurveyed(ON, 'api')).toBe(true);
+    expect(surveyAvailability(ON, 'api')).toBe('on');
     expect(surveyAvailability({ ...ON, channels: { ...ON.channels, api: false } }, 'api')).toBe(
-      'unsupported',
+      'channel_off',
     );
   });
 
@@ -374,16 +384,15 @@ describe('anyChannelSurveyed', () => {
     expect(anyChannelSurveyed(only('instagram'))).toBe(true);
   });
 
-  // The CSAT report's "nothing sent" sentence asks this. Counting the stored
-  // `survey_api` would tell an admin a survey goes out once a ticket is
-  // resolved, while the decision skips every one as `channel_unsupported`.
-  it('answers no with only the myBlu app’s switch on, as the decision does', () => {
+  // The CSAT report's "nothing sent" sentence asks this, through the channels
+  // and never the stored switches, so it answers as the decision does.
+  it('answers yes with only the myBlu app’s switch on, as the decision does', () => {
     const appOnly = only('api');
-    expect(anyChannelSurveyed(appOnly)).toBe(false);
+    expect(anyChannelSurveyed(appOnly)).toBe(true);
     expect(anyChannelSurveyed(only())).toBe(false);
     expect(decideSurvey(input({ channel: 'api', byEmail: false }), appOnly)).toEqual({
-      kind: 'skip',
-      reason: 'channel_unsupported',
+      kind: 'send',
+      delivery: 'api_pull',
     });
   });
 });

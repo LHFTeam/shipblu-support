@@ -8,12 +8,14 @@ import { stubFetch } from '@/lib/testing/fetch';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   MessageCreatedEvent,
+  SurveyCreatedEvent,
   WebhookEvent,
   WebhookSignatureHeader,
   WebhookTimestampHeader,
 } from './schemas';
 import {
   decideMessageCreated,
+  decideSurveyCreated,
   deliverWebhook,
   MAX_EVENT_AGE_MS,
   messageCreatedEvent,
@@ -21,6 +23,7 @@ import {
   webhookTarget,
   WEBHOOK_TIMEOUT_MS,
   type MessageSubject,
+  type SurveySubject,
 } from './webhook';
 
 /**
@@ -381,6 +384,124 @@ describe('decideMessageCreated', () => {
     expect(
       decideMessageCreated(subject({ createdAt: new Date(edge.getTime() - 1) }), NOW, true),
     ).toEqual({ kind: 'quiet', reason: 'stale' });
+  });
+});
+
+/** A survey the app pulls, sent on an app ticket an hour ago and still waiting, whose owner can read it. */
+function survey(overrides: Partial<SurveySubject> = {}): SurveySubject {
+  const {
+    messageId: _m,
+    direction: _d,
+    kind: _k,
+    byAgent: _b,
+    createdAt: _c,
+    ...ticket
+  } = subject({
+    status: 'resolved',
+  });
+  return {
+    ...ticket,
+    surveyId: '3b2a1c0d-9e8f-4a7b-8c6d-5e4f3a2b1c0d',
+    surveyStatus: 'sent',
+    delivery: 'api_pull',
+    sentAt: new Date(NOW.getTime() - 3_600_000),
+    ...overrides,
+  };
+}
+
+describe('decideSurveyCreated', () => {
+  // Nothing expires a survey on reopen; a push asking to rate a conversation
+  // the user has since gone on with prompts about the wrong thing.
+  it('sends nothing for a ticket open or pending again, and sends on a closed one', () => {
+    for (const status of ['open', 'pending'] as const) {
+      expect(decideSurveyCreated(survey({ status }), NOW, true)).toEqual({
+        kind: 'quiet',
+        reason: 'reopened',
+      });
+    }
+    expect(decideSurveyCreated(survey({ status: 'closed' }), NOW, true).kind).toBe('send');
+  });
+
+  // As a reply's: the survey is there once the API is back, so the job waits
+  // for it, behind every answer that is final.
+  it('waits while the API is switched off, behind every answer that is final', () => {
+    expect(decideSurveyCreated(survey(), NOW, false)).toEqual({ kind: 'later', reason: 'api_off' });
+    expect(decideSurveyCreated(survey({ surveyStatus: 'answered' }), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'not_waiting',
+    });
+    const late = new Date(NOW.getTime() - MAX_EVENT_AGE_MS - 1);
+    expect(decideSurveyCreated(survey({ sentAt: late }), NOW, false)).toEqual({
+      kind: 'quiet',
+      reason: 'stale',
+    });
+  });
+
+  it('sends a survey waiting on an app ticket its owner can read, as the contract shapes it', () => {
+    const decision = decideSurveyCreated(survey(), NOW, true);
+
+    expect(decision).toEqual({
+      kind: 'send',
+      event: {
+        version: 1,
+        id: 'survey.created:3b2a1c0d-9e8f-4a7b-8c6d-5e4f3a2b1c0d',
+        type: 'survey.created',
+        occurredAt: '2026-11-12T09:00:00.000Z',
+        user: { externalId: 'u_83412' },
+        ticket: { id: '8a1f4c2e-6b3d-4f9a-a7e5-1c2d3e4f5a6b', number: 4812, status: 'resolved' },
+        survey: { id: '3b2a1c0d-9e8f-4a7b-8c6d-5e4f3a2b1c0d', expiresAt: null },
+      },
+    });
+    if (decision.kind !== 'send') throw new Error('unreachable');
+    expect(SurveyCreatedEvent.strict().parse(decision.event)).toEqual(decision.event);
+    expect(WebhookEvent.parse(decision.event)).toEqual(decision.event);
+  });
+
+  it.each([
+    ['a survey sent by email', { delivery: 'email' }],
+    ['one sent as a message on the ticket', { delivery: 'reply' }],
+    ['a survey row with no delivery', { delivery: null }],
+    ['one on a web chat ticket', { channel: 'webchat' }],
+    ['one never sent', { sentAt: null }],
+  ])('refuses %s, whatever the ticket is like', (_, overrides) => {
+    expect(decideSurveyCreated(survey({ ...overrides, withdrawn: true }), NOW, true)).toMatchObject(
+      {
+        kind: 'refuse',
+      },
+    );
+  });
+
+  it('sends nothing for a survey no longer waiting: answered, or superseded by a newer one', () => {
+    for (const surveyStatus of ['answered', 'expired', 'skipped'] as const) {
+      expect(decideSurveyCreated(survey({ surveyStatus }), NOW, true)).toEqual({
+        kind: 'quiet',
+        reason: 'not_waiting',
+      });
+    }
+  });
+
+  it('asks the ticket the questions a reply’s push asks it, in the same order', () => {
+    const owner = survey().owner!;
+    for (const [overrides, reason] of [
+      [{ withdrawn: true, surveyStatus: 'answered' }, 'withdrawn'],
+      [{ owner: null }, 'not_in_app'],
+      [{ requesterContactId: 'contact-2' }, 'not_in_app'],
+      [{ owner: { ...owner, isBlocked: true } }, 'refused'],
+      [{ owner: { ...owner, deletedAt: NOW } }, 'refused'],
+    ] as const) {
+      expect(decideSurveyCreated(survey(overrides), NOW, true)).toEqual({ kind: 'quiet', reason });
+    }
+  });
+
+  it('counts its day from when the survey was sent, and sends one on the edge', () => {
+    const edge = new Date(NOW.getTime() - MAX_EVENT_AGE_MS);
+    expect(decideSurveyCreated(survey({ sentAt: edge }), NOW, true).kind).toBe('send');
+    expect(
+      decideSurveyCreated(survey({ sentAt: new Date(edge.getTime() - 1) }), NOW, true),
+    ).toEqual({
+      kind: 'quiet',
+      reason: 'stale',
+    });
   });
 });
 

@@ -527,7 +527,10 @@ POST   /api/v1/tickets/{id}/messages   the user's reply                      (st
                                        ... with files, as multipart          (stage 7)
 POST   /api/v1/tickets/{id}/read client plane: mark the team's replies read  (stage 5)
 GET    /api/v1/attachments/{id}  client plane: a five-minute link to a file  (stage 7)
+GET    /api/v1/tickets/{id}/survey     the ticket's satisfaction survey      (stage 8)
+POST   /api/v1/tickets/{id}/survey     the user's rating, and a comment      (stage 8)
 POST   <MYBLU_WEBHOOK_URL>       to myBlu's backend: the team wrote; push    (stage 6)
+                                 ... and a survey is waiting                 (stage 8)
 ```
 
 Two planes, and neither takes a cookie. **myBlu's backend** holds `MYBLU_API_TOKEN` and
@@ -563,6 +566,12 @@ the message's own request and judged, typed by their bytes and stored by the wid
 functions, so a file the widget takes the app takes too. They are stored with the message or
 not at all, and fetched back through a five-minute link the API signs for a file on one of
 the user's own tickets.
+
+The app draws its own satisfaction survey. When the team surveys an `api` ticket it writes
+the survey and nothing else — no message, no link, no email — and the app reads it, worded
+in the survey's language, and answers it through the API, by the same rules as every other
+way a customer answers one: the first rating wins, and a comment can follow. A second
+webhook, `survey.created`, tells myBlu's backend one is waiting.
 
 ## Deployment
 

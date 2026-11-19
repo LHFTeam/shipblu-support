@@ -95,7 +95,7 @@ import {
  */
 
 /** The date of the newest line in `docs/myblu-api-changelog.md`; the test holds the two together. */
-const CONTRACT_VERSION = '2026-11-18';
+const CONTRACT_VERSION = '2026-11-19';
 
 const TITLE = 'ShipBlu Support: the myBlu ticket API';
 
@@ -342,6 +342,7 @@ const TICKET: z.input<typeof Ticket> = {
   canReply: true,
   createdAt: '2026-11-12T09:29:58.123Z',
   lastMessageAt: '2026-11-12T09:41:07.004Z',
+  lastActivityAt: '2026-11-12T09:41:07.004Z',
   unreadCount: 1,
   preview: {
     from: 'agent',
@@ -355,6 +356,7 @@ const TICKET: z.input<typeof Ticket> = {
 const NEW_TICKET: z.input<typeof Ticket> = {
   ...TICKET,
   lastMessageAt: OPENING.createdAt,
+  lastActivityAt: OPENING.createdAt,
   unreadCount: 0,
   preview: { from: 'customer', text: OPENING.text, hasAttachments: false },
 };
@@ -363,6 +365,7 @@ const NEW_TICKET: z.input<typeof Ticket> = {
 const ANSWERED_TICKET: z.input<typeof Ticket> = {
   ...TICKET,
   lastMessageAt: ANSWER.createdAt,
+  lastActivityAt: ANSWER.createdAt,
   unreadCount: 0,
   preview: { from: 'customer', text: ANSWER.text, hasAttachments: false },
 };
@@ -376,6 +379,9 @@ const RESOLVED_TICKET: z.input<typeof Ticket> = {
   status: 'resolved',
   createdAt: '2026-11-09T14:02:11.418Z',
   lastMessageAt: '2026-11-10T08:15:40.200Z',
+  // Its survey was given an hour after the last message, which is what put
+  // it where it sits in the list.
+  lastActivityAt: '2026-11-10T09:15:41.002Z',
   preview: {
     from: 'agent',
     text: 'The refund was sent to your wallet this morning. Is there anything else?',
@@ -908,7 +914,7 @@ function paths(): Json {
         stage: '5',
         summary: "The user's tickets",
         description:
-          'Newest first, by `(lastMessageAt, id)`, paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.',
+          'Newest first, by `(lastActivityAt, id)` — the later of the newest message and the newest survey given — paged back with `before`. Polled by re-reading the first page and merging by `id`, at `pollAfterSeconds`.',
         plane: 'client',
         parameters: queryParameters(ListTicketsQuery),
         answers: answer({
@@ -1122,7 +1128,7 @@ function paths(): Json {
         stage: '8',
         summary: "The ticket's survey",
         description:
-          'The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none, and for a survey the team decided not to send.',
+          'The satisfaction survey on a resolved ticket, worded on the server in its own locale. `404 not_found` while the ticket has none: before it is resolved, while it is open or pending again after the user wrote, and for a survey the team decided not to send. A ticket resolved again has its survey back.',
         plane: 'client',
         parameters: [ticketPath],
         answers: answer({
@@ -1143,7 +1149,7 @@ function paths(): Json {
         stage: '8',
         summary: 'Answer the survey',
         description:
-          'Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers.',
+          'Posted when a rating is tapped; a comment is a second `POST` carrying the same rating. The first rating wins whichever way it came, so draw what this answers. `404 not_found` whenever `GET` is: a ticket open or pending again takes no rating.',
         plane: 'client',
         parameters: [ticketPath],
         body: jsonBody('AnswerSurveyRequest', {

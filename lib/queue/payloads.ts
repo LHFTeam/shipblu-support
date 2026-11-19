@@ -196,6 +196,7 @@ export const JOB_PAYLOADS = {
   // since nothing failed; the line is the answer to read.
   notify_myblu: z.discriminatedUnion('event', [
     z.strictObject({ event: z.literal('message.created'), messageId: z.uuid() }),
+    z.strictObject({ event: z.literal('survey.created'), surveyId: z.uuid() }),
   ]),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL

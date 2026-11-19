@@ -654,7 +654,11 @@ never retried — is right for both.
 - `GET /tickets` is ordered by `(lastMessageAt, id)` descending and pages back
   with `?before=<olderCursor>`. It has no `after`: a ticket that gets a
   message moves to the top, so the list is polled by re-reading its first page
-  and merging by `id`.
+  and merging by `id`. From stage 8 the order is `(lastActivityAt, id)`, the
+  later of the newest message and the newest survey the app was given: a
+  survey writes no message, so ordered by the message alone a ticket far down
+  the list whose survey was written never reached the page the SDK re-reads,
+  and its `survey` summary never arrived without the push.
 - A cursor is opaque base64url of Postgres's own timestamp text and the row
   id, the inbox's form (`lib/tickets/inbox-filters.ts`): a JS `Date` holds
   milliseconds where `timestamptz` holds microseconds, and a round trip skips
@@ -1131,6 +1135,7 @@ with the questions it settled by its recommended default:
   "canReply": true,
   "createdAt": "2026-11-12T09:29:58.123Z",
   "lastMessageAt": "2026-11-12T09:41:07.004Z",
+  "lastActivityAt": "2026-11-12T09:41:07.004Z",
   "unreadCount": 1,
   "preview": { "from": "agent", "text": "We have asked the courier…", "hasAttachments": false },
   "survey": null
@@ -1860,6 +1865,81 @@ answer through the route reaches `recordAnswer(…, 'api')` and comes back as
 stored; another identity's ticket is a 404; `survey.created` queues once), and
 with the app's staging build against staging, resumed for the window. Way
 back: `survey_api` off.
+
+As built: migration `0064_csat_api_pull`, the two `ALTER TYPE … ADD VALUE`
+statements and nothing else; `PULLED` and `MessageDelivery` in
+`lib/csat/delivery.ts`, so a function about a message's body or link cannot be
+handed `api_pull`; `decideSurvey`'s `api` branch; `sendSurvey`'s pulled path
+in `lib/csat/index.ts`, typed so a message delivery still answers a message
+id; `lib/api/survey.ts` (`readSurvey`, `answerSurvey`, `appSurveyRow`) and
+`app/api/v1/tickets/[id]/survey/route.ts`; `survey` on the ticket through
+`ticketColumns`; `enqueueSurveyCreated` in `lib/api/notify.ts`;
+`readSurveySubject`, `decideSurveyCreated` and `surveyCreatedEvent` in
+`lib/api/webhook.ts`, the ticket's half shared with `message.created`
+(`ticketPart`, `inApp`); the handler switching on the payload's `event`; and
+`notify_myblu`'s survey arm in `purgeJobs`, matched by its survey as
+`notify_low_rating` is. No shape changed. The choices it made where this plan
+left a question:
+
+- **A ticket's survey is its newest that is not `skipped`.** A skipped row is
+  a survey the team decided not to send, which to the app is none: a ticket
+  resolved, reopened and resolved again inside the resurvey window keeps its
+  first survey and gains a `skipped` row, and the app still sees the first.
+  The route and the ticket's summary read one ordering (`surveyOrder`,
+  `notSkipped`), so a list never prompts for a survey the route does not serve.
+- **A closed ticket is surveyed as a resolved one is.** `decideSurvey` answers
+  `api_pull` before the email branch, so nothing about the contact's address
+  matters, and the app reads the survey on a closed ticket as on a resolved
+  one.
+- **A ticket open or pending again has no survey** — not on the route, its
+  POST, the summary or `lastActivityAt` (`appSurvey`), as the push withholds
+  one (`reopened`). Nothing expires a survey when the user writes again, so
+  without it the list prompted "rate us" in the middle of a live
+  conversation, and a rating was recorded on it. Resolved again, the ticket
+  has its survey back, which is when to ask. A rating tapped in the moment a
+  reply reopens the ticket is still recorded: it is about the resolution the
+  user was shown.
+- **The push is queued in the transaction that writes the survey**, keyed
+  `notify_myblu:survey:<id>` at the survey's carrier priority (50), so it
+  exists exactly when the survey does: a `send_csat` that loses to an earlier
+  run writes neither. It is queued only while `MYBLU_WEBHOOK_URL` is set, as a
+  reply's is; the survey is there to read either way.
+- **The push sends nothing for a survey no longer waiting** (`not_waiting`):
+  answered since, through the app or a link, or superseded. Asked after the
+  ticket's standing, which is `message.created`'s own (`inApp`), so the two
+  events cannot disagree about whether the app could open the ticket. Its day
+  counts from `sent_at`.
+- **An `expired` survey is answered as it stands.** The widget's card and the
+  app's door both draw it closed, so neither records a rating on it, and both
+  ask again under the ticket's lock: `sent` only is `recordAnswer`'s default
+  `ratable`, so a newer send landing between the read and the write cannot
+  take the rating onto the superseded survey. A link and Messenger's card take
+  a superseded survey, as they always did, and say so (`TAKES_SUPERSEDED`).
+- **The answer spends the reads bucket**, as the read marker does: it writes no
+  message, and spent from the sends bucket a tap and its comment would leave
+  the user's next message refused.
+- **The admin's switch says what it does**: "Nothing is sent by email" beside
+  the app's toggle on `/admin/csat`, where it said the switch changed nothing
+  yet. It keeps the value it was saved with, so a switch an admin turned on
+  before this stage surveys from the deploy on.
+
+Tested beside each: `decision.test.ts` for `api_pull` (a closed ticket, the
+switch off, an agent's suppression, `anyChannelSurveyed` with only the app
+on); `webhook.test.ts` for `decideSurveyCreated` (the body the contract
+publishes, read strictly; the refusals for a survey the app does not pull; the
+ticket's standing in `message.created`'s order; `not_waiting`; the day's edge);
+`purge-jobs.db.test.ts` for the survey arm beside the message one; and
+`app/api/v1/survey.db.test.ts` through the routes: `send_csat` on an app ticket
+writing an `api_pull` row with no message, no link and a `csat_sent` line, and
+queuing one push, or none with the URL unset; a closed ticket and an Arabic
+one; the app's switch off leaving a `skipped` row the app never sees; `404`
+before the survey and for another user's ticket and a malformed id; the survey
+worded in its locale with the contract's keys alone; the summary on the ticket
+and in the list; a newer `skipped` row hiding nothing; the first rating kept,
+recorded as the app's, a comment attached after it and a second ignored; an
+`expired` survey answered unchanged; each refused body naming its field; and
+the push signed and sent, sent nothing once answered, and ended for good on a
+survey that is gone. Nine mutations were each caught by a failing test.
 
 The SDK follows the API: 0.1 after stage 4 (text and polling), 0.2 after 5
 (history, unread, the sample app), 0.3 after 6 (push), 0.4 after 7 (files),

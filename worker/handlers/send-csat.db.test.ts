@@ -12,7 +12,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { scheduleSurvey, sendSurvey, ticketSurveyState } from '@/lib/csat';
+import { scheduleSurvey, sendSurvey, ticketSurveyState, type SurveySend } from '@/lib/csat';
 import { saveCsatSettings, UNSET_CSAT_SETTINGS } from '@/lib/csat/settings';
 import type { ClaimedJob } from '@/lib/queue';
 import { withCleanDatabase, withoutCommentChannelCheck } from '@/lib/testing/db';
@@ -374,7 +374,7 @@ describe('send_csat', () => {
   it('commits the carrier with the survey, so no run can leave one without the other', async () => {
     await switchOn();
     const id = await resolvedTicket({ channel: 'email', email: 'a@b.test' });
-    const send = (body: Parameters<typeof sendSurvey>[0]['body']) =>
+    const send = (body: Extract<SurveySend, { body: unknown }>['body']) =>
       sendSurvey({
         conversationId: id,
         locale: 'en',

@@ -377,10 +377,17 @@ describe('notify_myblu', () => {
       .set({ createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000) })
       .where(eq(messages.id, lateReply));
 
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     for (const id of [onSpam, toBlocked, lateReply]) {
       await notifyMyblu(await jobFor(id));
     }
     expect(fetchMock).not.toHaveBeenCalled();
+    // The stale one says so at warn, its id as `key=value`, as every line is
+    // and as the guide and AGENTS.md quote it.
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContain(
+      `[notify_myblu] nothing sent: older than a day messageId=${lateReply} reason=stale`,
+    );
   });
 
   it('sends nothing for a job already queued once the URL is unset, and completes', async () => {

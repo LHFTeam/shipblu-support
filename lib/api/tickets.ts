@@ -47,6 +47,7 @@ import { messageFrom } from './from';
 import { admitNewTicket, MAX_OPEN_TICKETS, newTicketFits, spendUpload, uploadFits } from './limits';
 import { previewText } from './preview';
 import { trackingFoldSql } from './tracking-fold';
+import { appSurveyRow } from './survey';
 import type { AttachmentLink, Message, Ticket } from './schemas';
 import { ownedTicket, ownedTicketNow } from './scope';
 import { holdAccount, requesterNow, type Caller } from './sessions';
@@ -308,18 +309,46 @@ const trackingNumberSql = sql<
   string | null
 >`(select ${apiTickets.trackingNumber} from ${apiTickets} where ${apiTickets.conversationId} = ${conversations.id})`;
 
-const ticketColumns = {
-  id: conversations.id,
-  number: conversations.number,
-  subject: conversations.subject,
-  trackingNumber: trackingNumberSql,
-  status: ticketStatuses.category,
-  statusLabel: shownLabelSql,
-  createdAt: conversations.createdAt,
-  lastMessageAt: conversations.lastMessageAt,
-  unreadCount: unreadCountSql,
-  preview: previewSql,
-};
+/** The ticket's survey as the app sees it: one lateral row per ticket (`appSurveyRow`). */
+type SurveyNow = ReturnType<typeof appSurveyRow>;
+
+/**
+ * `lastActivityAt`: the later of the ticket's newest message and the newest
+ * survey the app was given (`survey.givenAt`), `greatest` passing over the
+ * null of a ticket never surveyed. What the list is ordered and paged by, so a
+ * survey written on a ticket far down the list, which no message moves, still
+ * brings it to the first page the SDK re-reads. Mapped as `last_message_at`
+ * is, to a `Date`; the cursor takes its text.
+ */
+function lastActivityOf(survey: SurveyNow) {
+  return sql<Date>`greatest(${conversations.lastMessageAt}, ${survey.givenAt})`.mapWith(
+    conversations.lastMessageAt,
+  );
+}
+
+/**
+ * A ticket's columns as the read model takes them, off the survey row the
+ * statement joins (`leftJoinLateral(survey, sql\`true\`)`). Built per
+ * statement, as the row is: built once at module scope, the subquery asked
+ * `db` for a builder on import, which reads the environment, and `next build`
+ * imports route modules with none.
+ */
+function ticketColumns(survey: SurveyNow) {
+  return {
+    id: conversations.id,
+    number: conversations.number,
+    subject: conversations.subject,
+    trackingNumber: trackingNumberSql,
+    status: ticketStatuses.category,
+    statusLabel: shownLabelSql,
+    createdAt: conversations.createdAt,
+    lastMessageAt: conversations.lastMessageAt,
+    lastActivityAt: lastActivityOf(survey),
+    unreadCount: unreadCountSql,
+    preview: previewSql,
+    survey: survey.status,
+  };
+}
 
 type TicketRow = {
   id: string;
@@ -330,8 +359,10 @@ type TicketRow = {
   statusLabel: string | null;
   createdAt: Date;
   lastMessageAt: Date;
+  lastActivityAt: Date;
   unreadCount: number;
   preview: PreviewRow | null;
+  survey: 'sent' | 'answered' | 'expired' | null;
 };
 
 function ticketView(row: TicketRow): TicketView {
@@ -350,6 +381,7 @@ function ticketView(row: TicketRow): TicketView {
     canReply: row.status !== 'closed',
     createdAt: row.createdAt.toISOString(),
     lastMessageAt: row.lastMessageAt.toISOString(),
+    lastActivityAt: row.lastActivityAt.toISOString(),
     unreadCount: row.unreadCount,
     preview: preview
       ? {
@@ -358,8 +390,9 @@ function ticketView(row: TicketRow): TicketView {
           hasAttachments: previewFiles.length > 0,
         }
       : null,
-    // The survey's stage (stage 8) fills this in.
-    survey: null,
+    // The survey the app sees, by the rule its route reads it by
+    // (`lib/api/survey.ts`), so a list never prompts for one it cannot open.
+    survey: row.survey ? { status: row.survey } : null,
   };
 }
 
@@ -376,13 +409,15 @@ async function ownedTicketRow(
   ticketId: string,
   { withTotal = false, executor = db }: { withTotal?: boolean; executor?: Executor } = {},
 ) {
+  const survey = appSurveyRow();
   const [row] = await executor
     .select({
-      ...ticketColumns,
+      ...ticketColumns(survey),
       unreadTotal: withTotal ? unreadTotalSql(caller) : sql<number>`0`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(survey, sql`true`)
     .where(and(eq(conversations.id, ticketId), ownedTicket(caller)))
     .limit(1);
   return row ?? null;
@@ -462,7 +497,7 @@ const cursorOf = (row: MessageRow): string =>
 function vsCursor(
   op: '<' | '>' | '<=',
   cursor: Cursor,
-  time: AnyPgColumn = messages.createdAt,
+  time: AnyPgColumn | SQL = messages.createdAt,
   id: AnyPgColumn = messages.id,
 ): SQL {
   return sql`(${time}, ${id}) ${sql.raw(op)} (${cursor.time}::timestamptz, ${cursor.id}::uuid)`;
@@ -604,12 +639,20 @@ export type TicketsListPage = {
 };
 
 /**
- * A page of the caller's tickets, newest first by `(last_message_at, id)`,
- * one row more than the page so the caller knows whether anything is left,
- * every status, and only those opened with one tracking number when one is
- * asked for. The order and the `before` comparison change together, as the
- * inbox's do: the id breaks a tie on the instant, so a page boundary between
- * two tickets stamped alike neither repeats nor skips one.
+ * A page of the caller's tickets, newest first by `(lastActivityAt, id)` —
+ * the later of the newest message and the newest survey the app was given
+ * (`lastActivityOf`) — one row more than the page so the caller knows
+ * whether anything is left, every status, and only those opened with one
+ * tracking number when one is asked for. The order and the `before`
+ * comparison change together, on the same expression, as the inbox's do: the
+ * id breaks a tie on the instant, so a page boundary between two tickets
+ * stamped alike neither repeats nor skips one. Ordered by the message alone, a
+ * survey written on a ticket below the first page — one resolved long after
+ * its last message — moved nothing, and the SDK, which re-reads only that page,
+ * never saw its `survey` turn up. The order is computed per row, so no index
+ * serves it: the identity's own tickets, a few per user, are what it sorts,
+ * each reading its surveys once, in the lateral row the order and the cursor
+ * both name (`appSurveyRow`).
  *
  * The identity is named on the joined ownership row as well as inside
  * `ownedTicket`, so the planner can drive from `api_tickets_identity_idx`, a
@@ -633,15 +676,18 @@ export type TicketsListPage = {
  * text Postgres printed, never through a `Date`.
  */
 export function listStatement(caller: Caller, asked: ListAsked) {
+  const survey = appSurveyRow();
+  const lastActivity = lastActivityOf(survey);
   return db
     .select({
-      ...ticketColumns,
-      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
+      ...ticketColumns(survey),
+      cursorTime: sql<string>`${lastActivity}::text`,
       unreadTotal: unreadTotalSql(caller),
     })
     .from(conversations)
     .innerJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(survey, sql`true`)
     .where(
       and(
         eq(apiTickets.identityId, caller.identityId),
@@ -651,10 +697,10 @@ export function listStatement(caller: Caller, asked: ListAsked) {
           : sql`${trackingFoldSql(apiTickets.trackingNumber)} = ${normaliseTrackingNumber(asked.trackingNumber)}`,
         asked.cursor === null
           ? undefined
-          : vsCursor('<', asked.cursor, conversations.lastMessageAt, conversations.id),
+          : vsCursor('<', asked.cursor, lastActivity, conversations.id),
       ),
     )
-    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+    .orderBy(desc(lastActivity), desc(conversations.id))
     .limit(asked.limit + 1);
 }
 

@@ -215,16 +215,18 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
-        {/* No switch until the stage that lets the app pull its survey
-            (`plans/myblu-ticket-api.md`, stage 8). A switch that changed
-            nothing still saved, and whatever an admin set today would have
-            taken effect, unannounced, the day that stage shipped. So the form
-            posts nothing for the app and the action leaves `survey_api` as it
-            is stored (`saveCsatSettings`); the switch returns with stage 8. */}
-        <p className="text-xs text-(--color-text-secondary)">
-          {CHANNEL_LABELS.api} customers are not surveyed yet. Their switch arrives with the release
-          that lets the app show its survey.
-        </p>
+        {/* The app pulls its survey and draws it itself (`api_pull`,
+            `plans/myblu-ticket-api.md` stage 8): no message, no link, and no
+            email, since an app ticket's contact address can be a previous
+            holder of the phone's. The push (`survey.created`) goes only while
+            myBlu's webhook is set and the API is on, so the hint promises it
+            only on that condition rather than of every survey. */}
+        <Toggle
+          name="surveyApi"
+          label={CHANNEL_LABELS.api}
+          hint="The app shows the survey on the ticket itself and moves the ticket to the top of its list. The user's phone is told only while myBlu's webhook is set up. Nothing is sent by email."
+          defaultChecked={settings.channels.api}
+        />
         <p className="text-xs text-(--color-text-secondary)">
           WhatsApp customers are not answered from this platform, so they are not surveyed from it
           either.

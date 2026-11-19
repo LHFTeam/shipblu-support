@@ -7,6 +7,7 @@ import {
   contactIdentities,
   contacts,
   conversations,
+  csatSurveys,
   messages,
   ticketStatuses,
 } from '@/db/schema';
@@ -16,7 +17,7 @@ import { logger } from '@/lib/log';
 import { messageFrom } from './from';
 import { webhookUrl } from './notify';
 import { MIN_SECRET_CHARS, usableSecret } from './secrets';
-import type { MessageCreatedEvent } from './schemas';
+import type { MessageCreatedEvent, SurveyCreatedEvent } from './schemas';
 import { contactRefused, externalUserIdOf } from './sessions';
 
 /**
@@ -157,20 +158,19 @@ export function signatureHeader(
     .join(',');
 }
 
-/** What the job reads about the message it was queued for, in one statement. */
-export type MessageSubject = {
-  messageId: string;
-  direction: 'inbound' | 'outbound';
-  kind: string;
-  byAgent: boolean;
-  createdAt: Date;
+/**
+ * What every event reads about the ticket it is about, in the statement that
+ * reads its subject: the ticket, its status, and its owner — the ownership
+ * row's identity and the contact it hangs off now, null when the ticket has no
+ * ownership row.
+ */
+export type TicketPart = {
   ticketId: string;
   number: number;
   channel: string;
   status: z.input<typeof MessageCreatedEvent>['ticket']['status'];
   withdrawn: boolean;
   requesterContactId: string | null;
-  /** The ownership row's identity, and the contact it hangs off now; null when the ticket has no ownership row. */
   owner: {
     identifier: string;
     contactId: string;
@@ -180,51 +180,43 @@ export type MessageSubject = {
 };
 
 /**
- * The message, its ticket and the ticket's owner, or null when the message is
- * gone. Left joins past the ticket, so a ticket with no ownership row — an
- * account deleted since, whose rows the revoke removed — reads as one with no
- * owner rather than as a missing message, and the job says which it met.
- *
- * A read, not a lock: the event says something happened, and the receiver
- * reads what the ticket is like now through the client plane.
+ * The ticket's columns for a subject's statement, which joins the ticket, its
+ * status and — left, so a ticket with no ownership row reads as one with no
+ * owner rather than as a missing subject — its owner.
  */
-export async function readMessageSubject(messageId: string): Promise<MessageSubject | null> {
-  const [row] = await db
-    .select({
-      messageId: messages.id,
-      direction: messages.direction,
-      kind: messages.kind,
-      authorAgentId: messages.authorAgentId,
-      createdAt: messages.createdAt,
-      ticketId: conversations.id,
-      number: conversations.number,
-      channel: conversations.channel,
-      status: ticketStatuses.category,
-      deletedAt: conversations.deletedAt,
-      isSpam: conversations.isSpam,
-      mergedIntoId: conversations.mergedIntoId,
-      requesterContactId: conversations.requesterContactId,
-      identifier: contactIdentities.identifier,
-      ownerContactId: contactIdentities.contactId,
-      ownerIsBlocked: contacts.isBlocked,
-      ownerDeletedAt: contacts.deletedAt,
-    })
-    .from(messages)
-    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .leftJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
-    .leftJoin(contactIdentities, eq(contactIdentities.id, apiTickets.identityId))
-    .leftJoin(contacts, eq(contacts.id, contactIdentities.contactId))
-    .where(eq(messages.id, messageId))
-    .limit(1);
-  if (!row) return null;
+const ticketColumns = {
+  ticketId: conversations.id,
+  number: conversations.number,
+  channel: conversations.channel,
+  status: ticketStatuses.category,
+  deletedAt: conversations.deletedAt,
+  isSpam: conversations.isSpam,
+  mergedIntoId: conversations.mergedIntoId,
+  requesterContactId: conversations.requesterContactId,
+  identifier: contactIdentities.identifier,
+  ownerContactId: contactIdentities.contactId,
+  ownerIsBlocked: contacts.isBlocked,
+  ownerDeletedAt: contacts.deletedAt,
+};
 
+/** `ticketColumns` as a row reads them: the owner's half null when no ownership row joined. */
+type TicketColumns = {
+  ticketId: string;
+  number: number;
+  channel: string;
+  status: TicketPart['status'];
+  deletedAt: Date | null;
+  isSpam: boolean;
+  mergedIntoId: string | null;
+  requesterContactId: string | null;
+  identifier: string | null;
+  ownerContactId: string | null;
+  ownerIsBlocked: boolean | null;
+  ownerDeletedAt: Date | null;
+};
+
+function ticketPart(row: TicketColumns): TicketPart {
   return {
-    messageId: row.messageId,
-    direction: row.direction,
-    kind: row.kind,
-    byAgent: row.authorAgentId !== null,
-    createdAt: row.createdAt,
     ticketId: row.ticketId,
     number: row.number,
     channel: row.channel,
@@ -243,6 +235,92 @@ export async function readMessageSubject(messageId: string): Promise<MessageSubj
   };
 }
 
+/** What the job reads about the message it was queued for, in one statement. */
+export type MessageSubject = TicketPart & {
+  messageId: string;
+  direction: 'inbound' | 'outbound';
+  kind: string;
+  byAgent: boolean;
+  createdAt: Date;
+};
+
+/**
+ * The message, its ticket and the ticket's owner, or null when the message is
+ * gone. A ticket with no ownership row — an account deleted since, whose rows
+ * the revoke removed — reads as one with no owner rather than as a missing
+ * message, and the job says which it met.
+ *
+ * A read, not a lock: the event says something happened, and the receiver
+ * reads what the ticket is like now through the client plane.
+ */
+export async function readMessageSubject(messageId: string): Promise<MessageSubject | null> {
+  const [row] = await db
+    .select({
+      messageId: messages.id,
+      direction: messages.direction,
+      kind: messages.kind,
+      authorAgentId: messages.authorAgentId,
+      createdAt: messages.createdAt,
+      ...ticketColumns,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
+    .leftJoin(contactIdentities, eq(contactIdentities.id, apiTickets.identityId))
+    .leftJoin(contacts, eq(contacts.id, contactIdentities.contactId))
+    .where(eq(messages.id, messageId))
+    .limit(1);
+  if (!row) return null;
+
+  return {
+    ...ticketPart(row),
+    messageId: row.messageId,
+    direction: row.direction,
+    kind: row.kind,
+    byAgent: row.authorAgentId !== null,
+    createdAt: row.createdAt,
+  };
+}
+
+/** What the job reads about the survey it was queued for, in one statement. */
+export type SurveySubject = TicketPart & {
+  surveyId: string;
+  surveyStatus: 'sent' | 'answered' | 'skipped' | 'expired';
+  delivery: string | null;
+  /** When it was sent: the instant the event reports, and its day counts from. */
+  sentAt: Date | null;
+};
+
+/** The survey, its ticket and the ticket's owner, or null when the survey is gone; read as `readMessageSubject` reads. */
+export async function readSurveySubject(surveyId: string): Promise<SurveySubject | null> {
+  const [row] = await db
+    .select({
+      surveyId: csatSurveys.id,
+      surveyStatus: csatSurveys.status,
+      delivery: csatSurveys.delivery,
+      sentAt: csatSurveys.sentAt,
+      ...ticketColumns,
+    })
+    .from(csatSurveys)
+    .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
+    .leftJoin(contactIdentities, eq(contactIdentities.id, apiTickets.identityId))
+    .leftJoin(contacts, eq(contacts.id, contactIdentities.contactId))
+    .where(eq(csatSurveys.id, surveyId))
+    .limit(1);
+  if (!row) return null;
+
+  return {
+    ...ticketPart(row),
+    surveyId: row.surveyId,
+    surveyStatus: row.surveyStatus,
+    delivery: row.delivery,
+    sentAt: row.sentAt,
+  };
+}
+
 /** Why a job sends nothing and completes: each a state the ticket can honestly be in. */
 export type QuietReason =
   /** Deleted, marked spam or merged away since the reply: out of the app, as `ownedTicket` takes it out. */
@@ -257,29 +335,68 @@ export type QuietReason =
   /** The owner's contact is blocked or deleted: every request of theirs is refused, so a push is one they cannot open. */
   | 'refused'
   /** Older than `MAX_EVENT_AGE_MS`. */
-  | 'stale';
+  | 'stale'
+  /**
+   * A survey no longer waiting for an answer: answered since — in the app, or
+   * through a link — or superseded by a newer one. A push asking the user to
+   * rate it would open a survey with nothing to tap.
+   */
+  | 'not_waiting'
+  /**
+   * The ticket is open or pending again: a survey asks how a resolved ticket
+   * went, and a push asking to rate one the user has since written on — a
+   * reply right after the resolve, or a receiver failing until the job's
+   * retries ran late — prompts about a conversation still going.
+   */
+  | 'reopened';
 
-export type Decision =
-  | { kind: 'send'; event: z.input<typeof MessageCreatedEvent> }
+export type Decision<E> =
+  | { kind: 'send'; event: E }
   | { kind: 'quiet'; reason: QuietReason }
   /**
    * Not now. The API is switched off (`apiSwitchedOn`), so every request the
    * app makes answers `503 not_configured` and a push would point at nothing
-   * it can open — but the reply is still there for when it comes back on. So
-   * the attempt fails, a plain error the queue retries, as an unusable target
-   * does, rather than completing: a token unset or pasted short for ten
-   * minutes during a rotation then costs a few retries, not every push in
-   * those ten minutes. The day's bound holds because `stale` is asked first,
-   * on every attempt.
+   * it can open — but the reply or the survey is still there for when it comes
+   * back on. So the attempt fails, a plain error the queue retries, as an
+   * unusable target does, rather than completing: a token unset or pasted
+   * short for ten minutes during a rotation then costs a few retries, not
+   * every push in those ten minutes. The day's bound holds because `stale` is
+   * asked first, on every attempt.
    */
   | { kind: 'later'; reason: 'api_off' }
   /**
-   * Not a message the webhook is ever about: an inbound one, a note, or one on
-   * another channel. Only a payload written by hand names one, since both
-   * doors queue only the team's replies on `api`, so it is refused rather than
-   * sent — which is what stops a hand-made payload carrying a note's id out.
+   * Not a subject the webhook is ever about: for `message.created` an inbound
+   * message, a note, or one on another channel; for `survey.created` a survey
+   * the app does not pull. Only a payload written by hand names one, since the
+   * doors queue only the team's replies and the app's surveys on `api`, so it
+   * is refused rather than sent — which is what stops a hand-made payload
+   * carrying a note's id out.
    */
   | { kind: 'refuse'; reason: string };
+
+/**
+ * Whether the app could open what a push about this ticket points at, and
+ * whose app it is: the user's `externalId`, read off the ownership row's
+ * identity, or why not. The states `ownedTicket` refuses the app, in its
+ * order; one function, so the two events cannot push for a ticket one of them
+ * would leave alone.
+ */
+function inApp(
+  ticket: TicketPart,
+): { kind: 'in_app'; externalId: string } | { kind: 'quiet'; reason: QuietReason } {
+  if (ticket.withdrawn) return { kind: 'quiet', reason: 'withdrawn' };
+  const owner = ticket.owner;
+  const externalId = owner ? externalUserIdOf(owner.identifier) : null;
+  if (!owner || externalId === null || owner.contactId !== ticket.requesterContactId) {
+    return { kind: 'quiet', reason: 'not_in_app' };
+  }
+  if (contactRefused(owner)) return { kind: 'quiet', reason: 'refused' };
+  return { kind: 'in_app', externalId };
+}
+
+function stale(at: Date, now: Date): boolean {
+  return now.getTime() - at.getTime() > MAX_EVENT_AGE_MS;
+}
 
 /**
  * Whether to send `message.created` for this message now, and the body if so.
@@ -294,24 +411,20 @@ export type Decision =
  * retry made while it is off still completes once the event is past its day
  * or the ticket has left the app.
  */
-export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: boolean): Decision {
+export function decideMessageCreated(
+  subject: MessageSubject,
+  now: Date,
+  apiOn: boolean,
+): Decision<z.input<typeof MessageCreatedEvent>> {
   if (subject.direction !== 'outbound' || subject.kind !== 'reply') {
     return { kind: 'refuse', reason: 'not a reply from the team' };
   }
   if (subject.channel !== 'api') {
     return { kind: 'refuse', reason: `a reply on ${subject.channel}, not on the myBlu app` };
   }
-  if (subject.withdrawn) return { kind: 'quiet', reason: 'withdrawn' };
-
-  const owner = subject.owner;
-  const externalId = owner ? externalUserIdOf(owner.identifier) : null;
-  if (!owner || externalId === null || owner.contactId !== subject.requesterContactId) {
-    return { kind: 'quiet', reason: 'not_in_app' };
-  }
-  if (contactRefused(owner)) return { kind: 'quiet', reason: 'refused' };
-  if (now.getTime() - subject.createdAt.getTime() > MAX_EVENT_AGE_MS) {
-    return { kind: 'quiet', reason: 'stale' };
-  }
+  const standing = inApp(subject);
+  if (standing.kind === 'quiet') return standing;
+  if (stale(subject.createdAt, now)) return { kind: 'quiet', reason: 'stale' };
   if (!apiOn) return { kind: 'later', reason: 'api_off' };
 
   return {
@@ -320,7 +433,42 @@ export function decideMessageCreated(subject: MessageSubject, now: Date, apiOn: 
       messageId: subject.messageId,
       from: messageFrom(subject),
       occurredAt: subject.createdAt,
-      externalId,
+      externalId: standing.externalId,
+      ticket: { id: subject.ticketId, number: subject.number, status: subject.status },
+    }),
+  };
+}
+
+/**
+ * Whether to send `survey.created` for this survey now, and the body if so:
+ * `decideMessageCreated`'s order, for a survey the app pulls (`api_pull`),
+ * still waiting for an answer, on a ticket still resolved or closed — nothing
+ * expires a survey when its ticket reopens, only a newer send does, so the
+ * ticket's status is asked here. Its day counts from when it was sent.
+ */
+export function decideSurveyCreated(
+  subject: SurveySubject,
+  now: Date,
+  apiOn: boolean,
+): Decision<z.input<typeof SurveyCreatedEvent>> {
+  if (subject.delivery !== 'api_pull' || subject.channel !== 'api' || subject.sentAt === null) {
+    return { kind: 'refuse', reason: 'not a survey the myBlu app pulls' };
+  }
+  const standing = inApp(subject);
+  if (standing.kind === 'quiet') return standing;
+  if (subject.surveyStatus !== 'sent') return { kind: 'quiet', reason: 'not_waiting' };
+  if (subject.status !== 'resolved' && subject.status !== 'closed') {
+    return { kind: 'quiet', reason: 'reopened' };
+  }
+  if (stale(subject.sentAt, now)) return { kind: 'quiet', reason: 'stale' };
+  if (!apiOn) return { kind: 'later', reason: 'api_off' };
+
+  return {
+    kind: 'send',
+    event: surveyCreatedEvent({
+      surveyId: subject.surveyId,
+      occurredAt: subject.sentAt,
+      externalId: standing.externalId,
       ticket: { id: subject.ticketId, number: subject.number, status: subject.status },
     }),
   };
@@ -348,6 +496,28 @@ export function messageCreatedEvent(values: {
     user: { externalId: values.externalId },
     ticket: { id: values.ticket.id, number: values.ticket.number, status: values.ticket.status },
     message: { id: values.messageId, from: values.from },
+  };
+}
+
+/**
+ * `survey.created`'s body, in `message.created`'s order with `survey` in
+ * `message`'s place. `expiresAt` is null: nothing lapses a survey but a newer
+ * one, which the app then reads as `expired`.
+ */
+export function surveyCreatedEvent(values: {
+  surveyId: string;
+  occurredAt: Date;
+  externalId: string;
+  ticket: z.input<typeof SurveyCreatedEvent>['ticket'];
+}): z.input<typeof SurveyCreatedEvent> {
+  return {
+    version: 1,
+    id: `survey.created:${values.surveyId}`,
+    type: 'survey.created',
+    occurredAt: values.occurredAt.toISOString(),
+    user: { externalId: values.externalId },
+    ticket: { id: values.ticket.id, number: values.ticket.number, status: values.ticket.status },
+    survey: { id: values.surveyId, expiresAt: null },
   };
 }
 

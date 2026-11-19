@@ -241,8 +241,11 @@ function surveyCard(
  * contact their token resolved to, so a survey id from anywhere else — a
  * guess, another visitor's — answers nothing. Nor does one a newer survey
  * superseded: the card draws that one closed, and a door that took what the
- * card refuses would be a second opinion. Everything else is `recordAnswer`'s,
- * the one door every answer goes through.
+ * card refuses would be a second opinion. Refused off the read below, and
+ * again under the ticket's lock by `recordAnswer`'s default `ratable`, since a
+ * newer survey sent between the two would otherwise take the rating onto the
+ * one the card now draws closed. Everything else is `recordAnswer`'s, the one
+ * door every answer goes through.
  *
  * The rating returned is the stored one, which is the visitor's own or an
  * earlier answer's — first answer wins — so a card whose first post lost its
