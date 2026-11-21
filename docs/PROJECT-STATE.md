@@ -2308,8 +2308,9 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   with the token set and a test phone no WhatsApp contact holds: mint, create,
   see "myBlu app" and the header line in the inbox, answer from the console,
   read the answer back, then purge the ticket and the contact — this writes to
-  production, and the purge is what removes it. **The SDK's 0.1 is cut from
-  here.** Way back: switch the `api` row off, which stops new tickets while the
+  production, and the purge is what removes it. **No SDK version is cut
+  here,** though the plan first cut 0.1 at this point: the SDK's first version
+  follows stage 8. Way back: switch the `api` row off, which stops new tickets while the
   app's reads and replies go on; or unset the token, which stops the whole API.
   Not a revert, once one `api` ticket exists: the build before this one scopes
   the help centre's portal by contact with only the read-only channels left
@@ -2339,8 +2340,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   read counts as none) and `opensAt` looked for a year ahead. Production's
   default schedule, read for the stage's design on 2026-11-13, is Cairo 10:00
   to 18:00, Saturday to Thursday, with the Sales Team's override shut on
-  Saturday. **A pilot can run from here;**
-  the SDK's 0.2 follows. After the release carrying stages 4 and 5 is on
+  Saturday. **A pilot can run from here.** After the release carrying stages 4 and 5 is on
   `main`, and once an `api` ticket exists (the pilot's, or the owner's test
   ticket before it is purged), read the plans on production, read-only: first
   `select to_regclass('public.api_tickets')`, the `api` row and ticket counts,
@@ -2390,8 +2390,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   no text and no phone, and a signature the guide's `verify` accepts under the
   throwaway; then purge the ticket and the contact, and unset the URL (or set
   it to myBlu's receiver, with a fresh secret handed to the backend, once that
-  receiver exists and verifies). **The launch waits for this.** The SDK's 0.3
-  follows. Way back: unset the URL, which stops new jobs at once on the web
+  receiver exists and verifies). **The launch waits for this.** Way back: unset the URL, which stops new jobs at once on the web
   service and makes the queued ones send nothing once the worker restarts; a
   revert leaves any `notify_myblu` row queued without a handler, failing until
   it is `dead`, which is harmless.
@@ -2443,7 +2442,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   the survey from `curl`, answer it, add a comment, and check the ticket's
   timeline reads the survey as sent and rated "in the myBlu app", and that one
   `survey.created` reached the bin; then purge the ticket and the contact, and
-  put both switches back. This writes to production. The SDK's 1.0 follows.
+  put both switches back. This writes to production. The SDK's first
+  version follows: `1.0.0-rc.1` under `next`, which these checks run the
+  sample app against, then `1.0.0` under `latest`. No 0.x is cut, since all
+  eight stages reached production in one release (2026-11-21).
   Way back: `survey_api` off on `/admin/csat`, which surveys no further app
   ticket and leaves those sent readable; a revert also leaves the enum values,
   which nothing then writes.
