@@ -454,9 +454,43 @@ describe('belowMinimum', () => {
     expect(belowMinimum('sdk-ts/0.1.9 app/5.4.1 ios/18.1', minimums)).toBe('sdk-ts/0.1.9');
     expect(belowMinimum('sdk-ts/0.2.0 app/5.3.9 ios/18.1', minimums)).toBe('app/5.3.9');
     expect(belowMinimum('sdk-ts/0.10.0 app/5.4 ios/1.0', minimums)).toBeNull();
-    // A pre-release reads as its numbers; a version with none is older than any.
-    expect(belowMinimum('sdk-ts/0.2.0-beta.1 app/6.0.0', minimums)).toBeNull();
+    // A pre-release comes before its release; a version with no numbers is
+    // older than any.
+    expect(belowMinimum('sdk-ts/0.2.0-beta.1 app/6.0.0', minimums)).toBe('sdk-ts/0.2.0-beta.1');
+    expect(belowMinimum('sdk-ts/0.2.1-beta.1 app/6.0.0', minimums)).toBeNull();
     expect(belowMinimum('sdk-ts/dev app/6.0.0', minimums)).toBe('sdk-ts/dev');
     expect(belowMinimum('sdk-swift/0.0.1 app/6.0.0', minimums)).toBeNull();
+  });
+
+  // The SDK's first version is `1.0.0-rc.1`. Read by its numbers alone it was
+  // `1.0.0`, so a minimum of `1.0.0` retired no candidate, and `1.0.1`, the one
+  // that did, refused `1.0.0` too.
+  it('retires the release candidates with the release they lead to', () => {
+    const minimums = new Map([['sdk-ts', '1.0.0']]);
+    expect(belowMinimum('sdk-ts/1.0.0-rc.1 app/5.4.1', minimums)).toBe('sdk-ts/1.0.0-rc.1');
+    expect(belowMinimum('sdk-ts/1.0.0-rc.9 app/5.4.1', minimums)).toBe('sdk-ts/1.0.0-rc.9');
+    expect(belowMinimum('sdk-ts/1.0.0 app/5.4.1', minimums)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.1-rc.1 app/5.4.1', minimums)).toBeNull();
+    // Build metadata is not read.
+    expect(belowMinimum('sdk-ts/1.0.0+42 app/5.4.1', minimums)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.0-rc.1+42 app/5.4.1', minimums)).toBe('sdk-ts/1.0.0-rc.1+42');
+  });
+
+  it('orders two pre-releases of one release as semver does', () => {
+    const atRc2 = new Map([['sdk-ts', '1.0.0-rc.2']]);
+    expect(belowMinimum('sdk-ts/1.0.0-rc.1', atRc2)).toBe('sdk-ts/1.0.0-rc.1');
+    expect(belowMinimum('sdk-ts/1.0.0-rc.2', atRc2)).toBeNull();
+    // Numbers by value, not as text.
+    expect(belowMinimum('sdk-ts/1.0.0-rc.10', atRc2)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.0', atRc2)).toBeNull();
+    expect(belowMinimum('sdk-ts/0.9.0', atRc2)).toBe('sdk-ts/0.9.0');
+
+    // 1.0.0-1 < 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-beta: a number before a
+    // word, the shorter of two that agree first, words in ASCII order.
+    const atAlpha1 = new Map([['sdk-ts', '1.0.0-alpha.1']]);
+    expect(belowMinimum('sdk-ts/1.0.0-1', atAlpha1)).toBe('sdk-ts/1.0.0-1');
+    expect(belowMinimum('sdk-ts/1.0.0-alpha', atAlpha1)).toBe('sdk-ts/1.0.0-alpha');
+    expect(belowMinimum('sdk-ts/1.0.0-alpha.1', atAlpha1)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.0-beta', atAlpha1)).toBeNull();
   });
 });

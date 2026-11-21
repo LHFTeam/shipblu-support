@@ -286,9 +286,9 @@ async function presentedSession(
  *
  * Empty: no build is refused yet, and none should be before one exists that
  * this server cannot serve. To stop serving one, add its name and the first
- * version still served — `['sdk-ts', '0.2.0']` — in the change that needs it,
- * with a dated line in `docs/myblu-api-changelog.md`; it takes effect when that
- * change deploys. A code constant rather than a variable, because which builds
+ * version still served — `['sdk-ts', '1.0.0']`, which also retires every
+ * `1.0.0-rc.N` before it — in the change that needs it, with a dated line in
+ * `docs/myblu-api-changelog.md`; it takes effect when that change deploys. A code constant rather than a variable, because which builds
  * a server can answer is a fact about its code, and a value set in the
  * dashboard could refuse every installed app on one typo.
  */
@@ -296,10 +296,9 @@ export const MINIMUM_VERSIONS: ReadonlyMap<string, string> = new Map();
 
 /**
  * The first token in a `ShipBlu-Client` header older than its minimum, as the
- * header spelled it, or null. A version is compared by its leading dotted
- * numbers, so `0.3.0-beta.1` reads as `0.3.0`; one with no numbers to read is
- * older than any minimum, since nothing can say it is not. A token whose name
- * has no minimum is not judged.
+ * header spelled it, or null. A version is ordered as semver orders it
+ * (`olderThan`); one with no numbers to read is older than any minimum, since
+ * nothing can say it is not. A token whose name has no minimum is not judged.
  */
 export function belowMinimum(
   header: string,
@@ -313,19 +312,55 @@ export function belowMinimum(
   return null;
 }
 
+/**
+ * Whether `version` comes before `minimum` in semver's order: the dotted
+ * numbers first, a missing one read as 0, then a pre-release (`-rc.1`) before
+ * the release it leads to, and two pre-releases of one release by their
+ * identifiers. Build metadata (`+…`) and anything else after that is not read.
+ *
+ * Read by its numbers alone, as it was, `1.0.0-rc.1` was `1.0.0`, and the SDK's
+ * first version is that release candidate: a minimum of `1.0.0` would have let
+ * every candidate build through, and the one that retired them, `1.0.1`, would
+ * have refused `1.0.0` with them.
+ */
 function olderThan(version: string, minimum: string): boolean {
-  const have = dotted(version);
-  const need = dotted(minimum) ?? [];
+  const have = semver(version);
   if (!have) return true;
-  for (let i = 0; i < Math.max(have.length, need.length); i += 1) {
-    const a = have[i] ?? 0;
-    const b = need[i] ?? 0;
+  const need = semver(minimum) ?? { core: [], pre: null };
+  for (let i = 0; i < Math.max(have.core.length, need.core.length); i += 1) {
+    const a = have.core[i] ?? 0;
+    const b = need.core[i] ?? 0;
     if (a !== b) return a < b;
+  }
+  return preReleaseBefore(have.pre, need.pre);
+}
+
+/**
+ * Semver's pre-release order for one release: a release (null) after every
+ * pre-release of it; identifiers compared in turn, numbers by value and before
+ * any word, words in ASCII order; and of two that agree as far as the shorter
+ * goes, the shorter first.
+ */
+function preReleaseBefore(have: string[] | null, need: string[] | null): boolean {
+  if (have === null) return false;
+  if (need === null) return true;
+  for (let i = 0; i < Math.max(have.length, need.length); i += 1) {
+    const a = have[i];
+    const b = need[i];
+    if (a === undefined) return true;
+    if (b === undefined) return false;
+    if (a === b) continue;
+    const aNumber = /^\d+$/.test(a);
+    const bNumber = /^\d+$/.test(b);
+    if (aNumber && bNumber) return Number(a) < Number(b);
+    if (aNumber !== bNumber) return aNumber;
+    return a < b;
   }
   return false;
 }
 
-function dotted(version: string): number[] | null {
-  const core = /^\d+(?:\.\d+)*/.exec(version)?.[0];
-  return core ? core.split('.').map(Number) : null;
+function semver(version: string): { core: number[]; pre: string[] | null } | null {
+  const match = /^(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?/.exec(version);
+  if (!match) return null;
+  return { core: match[1]!.split('.').map(Number), pre: match[2]?.split('.') ?? null };
 }
