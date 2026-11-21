@@ -2310,7 +2310,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   read the answer back, then purge the ticket and the contact — this writes to
   production, and the purge is what removes it. **No SDK version is cut
   here,** though the plan first cut 0.1 at this point: the SDK's first version
-  follows stage 8. Way back: switch the `api` row off, which stops new tickets while the
+  follows stage 8. Way back: switch the `api` row off, which stops new
+  tickets while the
   app's reads and replies go on; or unset the token, which stops the whole API.
   Not a revert, once one `api` ticket exists: the build before this one scopes
   the help centre's portal by contact with only the read-only channels left
@@ -2340,7 +2341,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   read counts as none) and `opensAt` looked for a year ahead. Production's
   default schedule, read for the stage's design on 2026-11-13, is Cairo 10:00
   to 18:00, Saturday to Thursday, with the Sales Team's override shut on
-  Saturday. **A pilot can run from here.** After the release carrying stages 4 and 5 is on
+  Saturday. **A pilot can run from here.** After the release carrying
+  stages 4 and 5 is on
   `main`, and once an `api` ticket exists (the pilot's, or the owner's test
   ticket before it is purged), read the plans on production, read-only: first
   `select to_regclass('public.api_tickets')`, the `api` row and ticket counts,
@@ -2390,7 +2392,8 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   no text and no phone, and a signature the guide's `verify` accepts under the
   throwaway; then purge the ticket and the contact, and unset the URL (or set
   it to myBlu's receiver, with a fresh secret handed to the backend, once that
-  receiver exists and verifies). **The launch waits for this.** Way back: unset the URL, which stops new jobs at once on the web
+  receiver exists and verifies). **The launch waits for this.** Way back:
+  unset the URL, which stops new jobs at once on the web
   service and makes the queued ones send nothing once the worker restarts; a
   revert leaves any `notify_myblu` row queued without a handler, failing until
   it is `dead`, which is harmless.
