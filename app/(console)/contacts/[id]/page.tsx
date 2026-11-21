@@ -16,7 +16,7 @@ import {
   searchMergeCandidates,
 } from '@/lib/contacts/merge';
 import { shipmentsForContact, shippingAccountsForContact } from '@/lib/shipments/queries';
-import { formatDateTime } from '@/lib/format';
+import { channelLabel, formatDateTime } from '@/lib/format';
 import { LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { ConversationTable } from '../conversation-table';
 import { SyncBadge } from '../page';
@@ -142,8 +142,11 @@ export default async function ContactPage({
           <ul className="flex flex-col gap-1 text-xs">
             {contact.identities.map((identity) => (
               <li key={identity.id} className="flex items-center gap-2">
+                {/* The channel's name as the badges say it, never its enum
+                    value: `api` told an agent nothing, where "myBlu app" says
+                    the identity is the app's vouched-for account. */}
                 <span className="w-20 shrink-0 text-(--color-text-secondary)">
-                  {identity.channel}
+                  {channelLabel(identity.channel)}
                 </span>
                 <span className="min-w-0 break-all">{identity.identifier}</span>
                 {identity.isVerified ? <Badge tone="success">Verified</Badge> : null}

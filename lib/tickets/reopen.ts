@@ -11,10 +11,10 @@ type ReopenReason = 'customer_replied' | 'visitor_replied';
 /**
  * Put a resolved ticket back in the open queue, and say so on its timeline.
  *
- * One copy, for the five inbound paths that reopen — email, WhatsApp, Meta, the
- * widget and the portal. Each wrote its own, and they had to agree on the
- * update, the snapshot and the event down to its key names, because the reports
- * read all five as one. What stays with the caller is whether to reopen at all:
+ * One copy, for the six inbound paths that reopen — email, WhatsApp, Meta, the
+ * widget, the portal and the customer API (`sendApiMessage`). The first five
+ * each wrote their own, and they had to agree on the update, the snapshot and
+ * the event down to its key names, because the reports read all six as one. What stays with the caller is whether to reopen at all:
  * only a `resolved` ticket reopens, and email also stores an autoresponder's
  * message on a resolved ticket without reopening it. A check here would hide a
  * decision that differs by channel inside the one step that does not.

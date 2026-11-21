@@ -127,7 +127,8 @@ export const csatSettings = pgTable('csat_settings', {
   resurveyAfterDays: integer('resurvey_after_days').notNull().default(14),
 
   // One switch per deliverable channel. `portal` rides email's; WhatsApp has
-  // none, for the reason `plans/csat.md` gives.
+  // none, for the reason `plans/csat.md` gives. `survey_api` decides
+  // nothing until the myBlu app can pull its survey (`channelSwitch`).
   surveyEmail: boolean('survey_email').notNull().default(false),
   surveyWebchat: boolean('survey_webchat').notNull().default(false),
   surveyFacebook: boolean('survey_facebook').notNull().default(false),

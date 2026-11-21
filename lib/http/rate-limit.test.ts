@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { allow, fits } from './rate-limit';
+import {
+  admit,
+  admitVouched,
+  allow,
+  allowVouched,
+  fits,
+  forwardedChain,
+  peekVouched,
+  retryAfterSeconds,
+} from './rate-limit';
 
 /** The counter every public endpoint shares, and the cost a budget in megabytes spends. */
 
@@ -31,6 +40,42 @@ describe('allow', () => {
   });
 });
 
+describe('admit', () => {
+  it('answers as allow does, sharing its buckets', () => {
+    const k = key();
+    expect(admit(k, 2, HOUR).allowed).toBe(true);
+    expect(allow(k, 2, HOUR)).toBe(true);
+    expect(admit(k, 2, HOUR).allowed).toBe(false);
+  });
+
+  it('says how long until the window turns, in whole seconds', () => {
+    const k = key();
+    expect(admit(k, 1, 60_000).resetInSeconds).toBe(60);
+    // Refused, and told the same window rather than a fresh one: a refusal is
+    // spent but does not move the end of the window.
+    const refused = admit(k, 1, 60_000);
+    expect(refused.allowed).toBe(false);
+    expect(refused.resetInSeconds).toBeGreaterThan(0);
+    expect(refused.resetInSeconds).toBeLessThanOrEqual(60);
+  });
+
+  it('never says zero, which a client would read as "ask again now"', () => {
+    expect(admit(key(), 1, 10).resetInSeconds).toBe(1);
+  });
+
+  // The one rounding every `Retry-After` comes from: whole seconds, rounded
+  // up, and never below one, a window already past included.
+  it('rounds every wait into Retry-After the one way', () => {
+    expect([200, 1_000, 1_001, 6_100, 0, -50].map(retryAfterSeconds)).toEqual([1, 1, 2, 7, 1, 1]);
+  });
+
+  it('starts a window again once it has passed', () => {
+    const k = key();
+    expect(admit(k, 1, -1).allowed).toBe(true);
+    expect(admit(k, 1, HOUR)).toEqual({ allowed: true, resetInSeconds: 3600 });
+  });
+});
+
 describe('fits', () => {
   it('says whether a cost would fit, and spends nothing', () => {
     const k = key();
@@ -50,5 +95,76 @@ describe('fits', () => {
     const k = key();
     allow(k, 10, -1, 10);
     expect(fits(k, 10, 10)).toBe(true);
+  });
+});
+
+describe('peekVouched', () => {
+  it('answers as admit would, and spends nothing', () => {
+    const k = key();
+    expect(peekVouched(k, 10, HOUR, 10)).toEqual({ allowed: true, resetInSeconds: 3600 });
+    expect(peekVouched(k, 10, HOUR, 10).allowed).toBe(true);
+    expect(peekVouched(k, 10, HOUR, 11).allowed).toBe(false);
+  });
+
+  it('counts what admit has spent, and says when that window turns', () => {
+    const k = key();
+    admitVouched(k, 10, HOUR, 7);
+    expect(peekVouched(k, 10, HOUR, 3).allowed).toBe(true);
+    const refused = peekVouched(k, 10, HOUR, 4);
+    expect(refused.allowed).toBe(false);
+    expect(refused.resetInSeconds).toBeGreaterThan(3500);
+    expect(refused.resetInSeconds).toBeLessThanOrEqual(3600);
+  });
+
+  it('forgets a window that has passed', () => {
+    const k = key();
+    admitVouched(k, 10, -1, 10);
+    expect(peekVouched(k, 10, HOUR, 10).allowed).toBe(true);
+  });
+});
+
+describe('forwardedChain', () => {
+  const chain = (value?: string) =>
+    forwardedChain(new Headers(value === undefined ? {} : { 'x-forwarded-for': value }));
+
+  it('keeps the hops the proxies appended after the one a caller wrote', () => {
+    // The first hop is the caller's claim; the last is what connected to the platform.
+    expect(chain('10.0.0.9, 203.0.113.7')).toBe('10.0.0.9, 203.0.113.7');
+    expect(chain(' 198.51.100.4 ')).toBe('198.51.100.4');
+  });
+
+  it('is null with no header, or one with no hop in it', () => {
+    expect(chain()).toBeNull();
+    expect(chain(' , ,')).toBeNull();
+  });
+
+  it('keeps the last eight hops and bounds each, however much a caller writes', () => {
+    const written = Array.from({ length: 40 }, (_, i) => `192.0.2.${i}`).join(',');
+    const kept = chain(`${'x'.repeat(5_000)}, ${written}, 203.0.113.7`)!.split(', ');
+    expect(kept).toHaveLength(8);
+    expect(kept.at(-1)).toBe('203.0.113.7');
+    expect(chain(`${'x'.repeat(5_000)}, 203.0.113.7`)).toBe(`${'x'.repeat(64)}, 203.0.113.7`);
+  });
+});
+
+describe('the vouched store', () => {
+  // A spray of made-up keys fills the shared store, which then drops its oldest
+  // buckets: the API's plane, mint and identity buckets are not among them.
+  it('keeps its buckets counting while made-up keys flood the shared store', () => {
+    const plane = key();
+    const agent = key();
+    const address = key();
+    expect(admitVouched(plane, 1, HOUR).allowed).toBe(true);
+    // A signed-in agent's own throttle, through the boolean twin, in the same store.
+    expect(allowVouched(agent, 1, HOUR)).toBe(true);
+    expect(admit(address, 1, HOUR).allowed).toBe(true);
+
+    for (let i = 0; i < 25_000; i += 1) admit(`spray:${i}`, 1, HOUR);
+
+    // The shared bucket was among the oldest, and is gone: its count starts again.
+    expect(admit(address, 1, HOUR).allowed).toBe(true);
+    // The vouched ones still count the request each had.
+    expect(admitVouched(plane, 1, HOUR).allowed).toBe(false);
+    expect(allowVouched(agent, 1, HOUR)).toBe(false);
   });
 });

@@ -3,9 +3,9 @@
  * mode and the classifier are asked (`routingStartFor`). Two things stop one
  * whatever the mode says, and both are decided by ingest, not by the row:
  *
- * - **another row files them.** Email, the Meta rows and web chat each file
- *   under the oldest active row of their type, so a second one's mode does
- *   nothing.
+ * - **another row files them.** Email, the Meta rows, web chat and the myBlu
+ *   app (`apiChannel`) each file under the oldest active row of their type,
+ *   so a second one's mode does nothing.
  * - **an active owner.** An owned number's ticket is stamped with its owner in
  *   the insert, and a ticket with an assignee is never held
  *   (`lib/routing/start.ts`).
@@ -29,7 +29,7 @@ export type FilingInput = {
  * row, while none is active, is stood in for by its platform's row — that is
  * not this one. `rows` oldest first, ties by id: the order every ingest path
  * picks "the row of this type" by (`defaultEmailChannel`, `channelFor`,
- * `webchatChannel`).
+ * `webchatChannel`), and `apiChannel` for the myBlu app's.
  */
 export function filingRowFor<T extends FilingInput>(channel: T, rows: readonly T[]): T | null {
   if (channel.type === 'whatsapp' || channel.type === 'whatsapp_bot') return channel;
@@ -54,12 +54,29 @@ export function ownedByActiveAgent(channel: FilingInput): boolean {
   return channel.type === 'whatsapp' && channel.ownerActive === true;
 }
 
+/**
+ * Why a new ticket on `channel` does not reach the question of its mode, or
+ * null when it does. One answer, in one order, for the readiness panel and
+ * `/reports/routing`, so the two name the same reason for a row:
+ *
+ * - `inactive`: a row switched off files nothing new.
+ * - `another_row`: another row of its type files its tickets.
+ * - `owned`: its number's active owner is stamped on each one.
+ */
+export type FilingGap = 'inactive' | 'another_row' | 'owned';
+
+/** `rows` as `filingRowFor` takes them. */
+export function filingGap<T extends FilingInput>(channel: T, rows: readonly T[]): FilingGap | null {
+  if (!channel.isActive) return 'inactive';
+  if (filingRowFor(channel, rows) !== channel) return 'another_row';
+  if (ownedByActiveAgent(channel)) return 'owned';
+  return null;
+}
+
 /** True when a new ticket on `channel` reaches the question of its mode. `rows` as `filingRowFor` takes them. */
 export function filesRoutableTickets<T extends FilingInput>(
   channel: T,
   rows: readonly T[],
 ): boolean {
-  return (
-    channel.isActive && filingRowFor(channel, rows) === channel && !ownedByActiveAgent(channel)
-  );
+  return filingGap(channel, rows) === null;
 }

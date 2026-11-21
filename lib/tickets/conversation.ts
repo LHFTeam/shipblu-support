@@ -34,7 +34,7 @@ import {
 } from './channel-policy';
 import { assignmentVisibility } from './visibility';
 import { metaIndex } from './message-media';
-import { describeActorLabel } from './event-labels';
+import { appBuild, describeActorLabel, releaseReason } from './event-labels';
 import {
   foldReactions,
   type PlacedReaction,
@@ -224,6 +224,21 @@ export type ConversationDetail = {
    */
   unverifiedSubmitter: boolean;
   /**
+   * The build of the myBlu app that opened the ticket — `iOS 5.4.1` — when the
+   * app's API did, read off its `opened_from_app` event as the badge above is
+   * read off its own, for the header line saying who vouched for the
+   * requester. An empty string for an event naming no build; null for every
+   * ticket the app did not open.
+   */
+  openedFromApp: string | null;
+  /**
+   * Why the ticket left the myBlu app — `the account was deleted` — read off
+   * its `released_from_app` event, so the header can say that nobody reads a
+   * reply here any more; null while the app still shows it, and on every
+   * ticket the app did not open.
+   */
+  releasedFromApp: string | null;
+  /**
    * What this ticket is about, and why it happened.
    *
    * Loaded here rather than by the sidebar because the resolve control needs the
@@ -344,17 +359,26 @@ export async function getConversation(
    * once fifty things had happened, which is exactly the escalated ticket where
    * an agent most needs it.
    */
-  const unverified = await db
-    .select({ id: conversationEvents.id })
+  const provenance = await db
+    .select({ type: conversationEvents.type, data: conversationEvents.data })
     .from(conversationEvents)
     .where(
       and(
         eq(conversationEvents.conversationId, row.conversation.id),
-        eq(conversationEvents.type, 'unverified_submitter'),
+        inArray(conversationEvents.type, [
+          'unverified_submitter',
+          'opened_from_app',
+          'released_from_app',
+        ]),
       ),
     )
-    .limit(1);
-  const unverifiedSubmitter = unverified.length > 0;
+    .orderBy(asc(conversationEvents.createdAt))
+    .limit(10);
+  const unverifiedSubmitter = provenance.some((event) => event.type === 'unverified_submitter');
+  const opened = provenance.find((event) => event.type === 'opened_from_app');
+  const openedFromApp = opened ? (appBuild(opened.data) ?? '') : null;
+  const released = provenance.find((event) => event.type === 'released_from_app');
+  const releasedFromApp = released ? (releaseReason(released.data) ?? 'it left the app') : null;
 
   // A Meta direct message's platform, or null: worked out once, because it
   // decides both whether the switch of default app is read (in the reads below)
@@ -514,6 +538,8 @@ export async function getConversation(
       ? formName({ nameAr: row.formNameAr!, nameEn: row.formNameEn!, slug: row.formSlug }, 'en')
       : null,
     unverifiedSubmitter,
+    openedFromApp,
+    releasedFromApp,
     metaThread,
     subcategories,
     rootCauseId: row.conversation.rootCauseId,

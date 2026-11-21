@@ -372,8 +372,11 @@ export const csatStatusEnum = pgEnum('csat_status', ['sent', 'answered', 'skippe
  * `widget_card`, the same message drawn by the widget as a card the visitor
  * answers in the chat; `meta_template`, Messenger's customer feedback card;
  * and `meta_quick_reply`, five rating buttons under the question in an
- * Instagram (or, when Messenger refuses its card, a Facebook) conversation.
- * The myBlu pull is added by the stage that builds it.
+ * Instagram (or, when Messenger refuses its card, a Facebook) conversation;
+ * and `api_pull`, the myBlu app's, which writes no message at all: the app
+ * fetches its survey from `GET /api/v1/tickets/{id}/survey` and draws it
+ * itself (`plans/myblu-ticket-api.md`, stage 8). Added after every value
+ * before it, so no migration uses it in the transaction that adds it.
  */
 export const csatDeliveryEnum = pgEnum('csat_delivery', [
   'email_link',
@@ -381,6 +384,7 @@ export const csatDeliveryEnum = pgEnum('csat_delivery', [
   'widget_card',
   'meta_template',
   'meta_quick_reply',
+  'api_pull',
 ]);
 
 /**
@@ -389,13 +393,15 @@ export const csatDeliveryEnum = pgEnum('csat_delivery', [
  * arrives as its own webhook), or a tapped quick reply. The answer is the same
  * 1–5 whichever; this is so the timeline can say where it came from, and so a
  * report can tell a channel's response rate from how its survey was drawn.
- * The myBlu API joins when its stage lands.
+ * `api` is the myBlu app, answering through `POST /api/v1/tickets/{id}/survey`
+ * (`plans/myblu-ticket-api.md`, stage 8).
  */
 export const csatAnswerSourceEnum = pgEnum('csat_answer_source', [
   'page',
   'widget',
   'meta_feedback',
   'meta_quick_reply',
+  'api',
 ]);
 
 /**

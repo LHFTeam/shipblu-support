@@ -146,6 +146,15 @@ const BY_EXTENSION = new Map<string, WidgetFileKind>([
 ]);
 
 /**
+ * The two lists as the myBlu API publishes them on `GET /config`
+ * (`limits.contentTypes`, `limits.extensions`), so an app checks a file against
+ * what this server admits rather than a copy of its own. Read off the maps
+ * above, so a type the widget learns is published the day it does.
+ */
+export const WIDGET_CONTENT_TYPES: readonly string[] = [...BY_TYPE.keys()];
+export const WIDGET_EXTENSIONS: readonly string[] = [...BY_EXTENSION.keys()];
+
+/**
  * The file picker's `accept`, so the picker filters before anything uploads.
  *
  * Families rather than the list above, because on a phone the family is what

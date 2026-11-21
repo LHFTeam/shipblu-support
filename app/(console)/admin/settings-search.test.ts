@@ -42,6 +42,9 @@ describe('settings search', () => {
     ['email addresses', '/admin/channels'],
     ['mailboxes', '/admin/channels'],
     ['statuses', '/admin/statuses'],
+    ['myBlu', '/admin/channels'],
+    ['mobile app', '/admin/channels'],
+    ['api', '/admin/channels'],
   ])('leads "%s" to %s', (query, href) => {
     expect(search(query)).toContain(href);
   });

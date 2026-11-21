@@ -7,7 +7,7 @@ import { asDate } from '@/lib/reports/live';
 import { within, type ReportWindow } from '@/lib/reports/rollup';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { ROUTING_OUTCOMES, type RoutingOutcome } from './decide';
-import { filesRoutableTickets } from './filing';
+import { filingGap, type FilingGap } from './filing';
 import { ROUTING_GRACE_MS } from './hold';
 import { routingModeOf, type RoutingMode } from './mode';
 import { SETTLE_ACTOR } from './settle-label';
@@ -875,10 +875,14 @@ export type RoutingChannel = {
   mode: RoutingMode;
   /**
    * Whether a new ticket on the row reaches the question of its mode at all
-   * (`filesRoutableTickets`): false for a row another of its type files for,
-   * and for a number whose active owner is stamped on its tickets.
+   * (`filesRoutableTickets`), and when it does not, why (`gap`): another row of
+   * its type files for it, its number's active owner is stamped on its
+   * tickets, it is off, or no ingest path files under its type yet. The page
+   * names the reason a row has rather than one sentence covering every row,
+   * which told an admin a myBlu app row was filed for by another row.
    */
   files: boolean;
+  gap: FilingGap | null;
 };
 
 /**
@@ -917,7 +921,8 @@ export async function routingChannels(): Promise<RoutingChannel[]> {
         type: row.type,
         isActive: row.isActive,
         mode: routingModeOf(row),
-        files: filesRoutableTickets(row, oldestFirst),
+        files: filingGap(row, oldestFirst) === null,
+        gap: filingGap(row, oldestFirst),
       },
     }))
     .sort((a, b) => a.byName - b.byName)

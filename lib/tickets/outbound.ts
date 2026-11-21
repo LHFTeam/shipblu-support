@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
+import { enqueueMessageCreated } from '@/lib/api/notify';
 import { feedbackTemplateTag, metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
 import {
@@ -51,8 +52,9 @@ import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
  *   whatsapp_bot         always. Its conversations are the customer bot's, and
  *                        nobody on the team writes to them (`isReadOnlyChannel`):
  *                        a message there lands in front of a customer part-way
- *                        through the bot's flow, and `carrierFor` would queue it
- *                        as an email besides. The out-of-hours acknowledgement
+ *                        through the bot's flow, and nothing would carry it
+ *                        besides (`carrierFor` answers null; it once answered
+ *                        `send_email`, and the message was queued as an email). The out-of-hours acknowledgement
  *                        and the survey turned the bot away themselves, but the
  *                        automation engine asked only this, so an `on_update`
  *                        rule's `send_reply` fired by an edit on a bot ticket
@@ -142,10 +144,10 @@ export function automatedReplyBlocked(
 export type AutomatedReply = {
   conversationId: string;
   channel: ConversationChannel;
-  /** The requester's address; used where the carrier is email and there is nowhere else to send. */
+  /** The requester's address; stored only where the message goes out by email (`sendsByEmail`). */
   requesterEmail: string | null;
   bodyText: string;
-  /** Ignored on any channel `carrierFor` does not answer `send_email` for, which sends text. */
+  /** Ignored on any channel that does not send by email (`sendsByEmail`), which sends text. */
   bodyHtml: string | null;
   /** Shown on the timeline in place of an agent's name: `automation:Out of hours`. */
   actorLabel: string;
@@ -203,18 +205,20 @@ export async function writeAutomatedReply(
     );
   }
 
-  // Asked of the carrier rather than of the channel name, because `send_email`
-  // is what carries `portal` and `api` as well as `email` — and it is the
-  // carrier that decides whether an HTML part and a recipient are worth
-  // storing. Testing `channel === 'email'` stored a portal reply with no
-  // HTML body and no address, and the worker then rebuilt the body as one
+  // Asked of `sendsByEmail`, which an agent's reply asks too, rather than of
+  // the channel name or of the carrier alone. `send_email` carries `portal` as
+  // well as `email`, and testing `channel === 'email'` stored a portal reply
+  // with no HTML body and no address, which the worker then rebuilt as one
   // escaped paragraph with every line break in a three-paragraph message lost.
-  const job = carrierFor(reply.channel);
-  const isEmail = job === 'send_email';
-  // Web chat has no carrier: the message is in the database, and the widget's
-  // stream is already reading from it. Marking it pending would leave every
-  // chat reply showing as unsent forever.
-  const isWebchat = reply.channel === 'webchat';
+  // And `carrierFor` once answered `send_email` for web chat and the myBlu app,
+  // which nothing carries: asked of that, an automated message there was
+  // stored with an HTML part and the contact's address — on the app, an
+  // address that can be a previous holder of the phone's.
+  const isEmail = sendsByEmail(reply.channel);
+  // No carrier: the message is in the database, where the customer's client —
+  // the widget's stream, the app's poll — reads it. Marking it pending would
+  // leave every such reply showing as unsent forever.
+  const delivered = rowIsDelivery(reply.channel);
 
   const now = new Date();
 
@@ -228,8 +232,8 @@ export async function writeAutomatedReply(
       bodyText: reply.bodyText,
       bodyHtml: isEmail ? reply.bodyHtml : null,
       toAddresses: isEmail && reply.requesterEmail ? [reply.requesterEmail] : [],
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: now } : {}),
+      deliveryStatus: delivered ? 'delivered' : 'pending',
+      ...(delivered ? { deliveredAt: now } : {}),
       meta: reply.meta ?? {},
     })
     .returning({ id: messages.id });
@@ -270,11 +274,17 @@ export async function writeAutomatedReply(
 }
 
 /**
- * Queues the carrier for a message `writeAutomatedReply` wrote: on the pool
- * once it has committed, or on the transaction that wrote it (`on`), so the
- * two commit together. Nothing on web chat, where the row is the delivery.
- * Keyed on the message, which is once-ever for it, so a second call queues
- * nothing.
+ * Queues the delivery of a reply from the team: one `writeAutomatedReply`
+ * wrote, or an agent's (`storeAgentReply`), the one door both go through so a
+ * channel or an event added here reaches both. On the pool once the reply has
+ * committed, or on the transaction that wrote it (`on`), so the two commit
+ * together. Keyed on the message, which is once-ever for it, so a second call
+ * queues nothing.
+ *
+ * No carrier where the row is the delivery (`rowIsDelivery`). On the myBlu
+ * app the push is queued in its place (`enqueueMessageCreated`, which does
+ * nothing on web chat): the reply is already in the app, and myBlu's backend
+ * is told so it can say so on the user's phone.
  */
 export async function enqueueAutomatedDelivery(
   channel: ConversationChannel,
@@ -282,12 +292,12 @@ export async function enqueueAutomatedDelivery(
   priority = 20,
   on?: Executor,
 ): Promise<void> {
-  if (channel === 'webchat') return;
-  await enqueue(
-    carrierFor(channel),
-    { messageId },
-    { priority, dedupeKey: `send:${messageId}`, on },
-  );
+  const carrier = carrierFor(channel);
+  if (carrier) {
+    await enqueue(carrier, { messageId }, { priority, dedupeKey: `send:${messageId}`, on });
+    return;
+  }
+  if (rowIsDelivery(channel)) await enqueueMessageCreated(channel, messageId, { priority, on });
 }
 
 /**
@@ -319,23 +329,23 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * Exhaustive over the enum, with no default arm. This used to send anything it
  * did not recognise to email, which is how a new channel would have mailed its
  * replies to contacts with no address; now a channel added to the enum does not
- * compile until somebody says what carries it. Web chat and the customer bot
- * keep the answer they always had, `send_email`, and neither is meant to be
- * carried by it. A web chat message is never queued, because its row is its
- * delivery: `enqueueAutomatedDelivery`, `storeAgentReply` and `sendsByEmail` set
- * web chat aside by name, and `writeAutomatedReply` names it only for the
- * delivery status, so an automated web chat message is stored with the
- * requester's address and whatever HTML its sender passed, as it always was.
- * The bot's conversations are answered by nobody: the console offers no reply
- * there, every automated sender turns the bot away before it writes, and
+ * compile until somebody says what carries it.
+ *
+ * **Null where nothing carries a message**, so a caller cannot queue one
+ * without saying what happens then: `enqueue(carrierFor(c), …)` does not
+ * compile. Web chat and the myBlu app (`api`) have no carrier because their row
+ * is their delivery (`rowIsDelivery`). The customer bot has none because its
+ * conversations are answered by nobody: the console offers no reply there,
+ * every automated sender turns the bot away before it writes, and
  * `writeAutomatedReply` throws for one that did not (its docstring says who
- * refuses where). So `whatsapp_bot` never reaches this. Until the guard refused
- * it, an `on_update` rule's `send_reply` on a bot ticket was queued here as an
- * email.
+ * refuses where). The three answered `send_email` once, because the return
+ * type had no "nothing carries it", and each sender had to remember to ask
+ * first: an agent's reply to a myBlu ticket was queued as an email, and an
+ * `on_update` rule's `send_reply` on a bot ticket too.
  */
 export function carrierFor(
   channel: ConversationChannel,
-): 'send_whatsapp' | 'send_meta' | 'send_email' {
+): 'send_whatsapp' | 'send_meta' | 'send_email' | null {
   switch (channel) {
     case 'whatsapp':
       return 'send_whatsapp';
@@ -346,11 +356,11 @@ export function carrierFor(
       return 'send_meta';
     case 'email':
     case 'portal':
-    case 'api':
-    // Neither is carried by it; the docstring says why they answer it anyway.
-    case 'webchat':
-    case 'whatsapp_bot':
       return 'send_email';
+    case 'webchat':
+    case 'api':
+    case 'whatsapp_bot':
+      return null;
   }
 }
 
@@ -358,25 +368,51 @@ export function carrierFor(
  * Whether a message on this channel is written as an email: with an HTML part
  * and the recipient's address on the row, for `send_email` to carry.
  *
- * Asked of the carrier for the reason `deliverAutomatedReply` gives: `portal`
+ * Asked of the carrier for the reason `writeAutomatedReply` gives: `portal`
  * rides `send_email` too, and a sender testing `channel === 'email'` wrote an
  * agent's portal reply and a portal CSAT survey with neither part. The worker
  * then fell back to the contact's address at send time and rebuilt the body
  * from plain text.
  *
- * `carrierFor` answers `send_email` for two kinds of channel that do not send
- * by email, so they are excluded by name rather than by carrier. Web chat has no
- * carrier at all — writing its row is its delivery. A read-only channel
- * (`whatsapp_bot`) is answered by nobody: the console offers no reply there,
- * and every automated sender is refused it before the row exists
- * (`writeAutomatedReply` says by what).
- * Answering "email" for it would only be true by accident. `api` does go out by
- * email, and is written as email.
+ * Web chat, the myBlu app and the customer bot have no carrier (`carrierFor`
+ * answers null), so none of them is written as an email. On web chat and the
+ * app an HTML part would be what the console draws in place of the text the
+ * customer's client shows, and an address would name somebody the message
+ * never went to — on the app, possibly a previous holder of the phone.
  */
 export function sendsByEmail(channel: ConversationChannel): boolean {
-  return (
-    channel !== 'webchat' && !isReadOnlyChannel(channel) && carrierFor(channel) === 'send_email'
-  );
+  return carrierFor(channel) === 'send_email';
+}
+
+/**
+ * Whether writing a message's row is its delivery: no carrier is queued, the
+ * row is written `delivered` — meaning "stored where the customer's client
+ * reads it", not that a provider accepted it — and, through `sendsByEmail`, no
+ * HTML part or address is stored on it.
+ *
+ * One predicate where web chat used to be named at each place it was set
+ * aside: the status and the queueing for an automated message
+ * (`writeAutomatedReply`, `enqueueAutomatedDelivery`), the queueing and the
+ * status for an agent's (`storeAgentReply`, which decides both, so neither
+ * console sender states a status of its own), and `sendsByEmail`.
+ * The myBlu app joined web chat at all five at once; a test naming web chat at
+ * one of them is how the next such channel would be queued as an email at that
+ * one alone.
+ *
+ * Today that is web chat, read through the widget's stream, and the myBlu app
+ * (`api`), through its poll of `/api/v1`: the customer's own client reads the
+ * conversation from this database.
+ *
+ * Derived, not listed: a channel nothing carries (`carrierFor` answers null)
+ * that the team writes to (not `isReadOnlyChannel`). A list of its own kept
+ * beside `carrierFor` had to agree with it by hand, and a channel given no
+ * carrier there but left off the list was written `pending` with no job
+ * behind it — "sending…" for ever, the failure this exists to prevent. Now
+ * the exhaustive switch in `carrierFor` decides it for every channel, a new
+ * one included: no carrier, and not read-only, is a row its customer reads.
+ */
+export function rowIsDelivery(channel: ConversationChannel): boolean {
+  return carrierFor(channel) === null && !isReadOnlyChannel(channel);
 }
 
 /**

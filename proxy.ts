@@ -78,6 +78,14 @@ const PUBLIC_PREFIXES = [
   // /login that the widget cannot follow.
   '/api/widget',
   '/widget',
+  // The myBlu ticket API (`plans/myblu-ticket-api.md`). Neither of its callers
+  // carries a cookie — the app's SDK sends a session token, myBlu's backend the
+  // server plane's — so the cookie check below would turn every call into a
+  // redirect to /login, which no HTTP client reads as a refusal. Being public
+  // here grants nothing: every route checks its bearer in code, and `/api/v1`
+  // never reads a cookie at all. The help-centre host passes `/api` through
+  // already, so without this the fault showed only on the other hosts.
+  '/api/v1',
   '/_next',
 ];
 

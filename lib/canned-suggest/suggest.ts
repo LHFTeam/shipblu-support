@@ -127,7 +127,10 @@ export async function suggestFor(
       agentId: agent.id,
       anchorMessageId,
       channel: conversation.channel,
-      customerLocale: detectLocale(newestCustomerText, subjectWords(conversation.subject)),
+      customerLocale: detectLocale(
+        newestCustomerText,
+        subjectWords(conversation.subject, conversation.channel),
+      ),
       requestVersion: REQUEST_VERSION,
       historyCount: history.messages.length,
       offeredIds: options.map((option) => option.id),

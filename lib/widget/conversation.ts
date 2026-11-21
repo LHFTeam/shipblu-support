@@ -241,8 +241,11 @@ function surveyCard(
  * contact their token resolved to, so a survey id from anywhere else — a
  * guess, another visitor's — answers nothing. Nor does one a newer survey
  * superseded: the card draws that one closed, and a door that took what the
- * card refuses would be a second opinion. Everything else is `recordAnswer`'s,
- * the one door every answer goes through.
+ * card refuses would be a second opinion. Refused off the read below, and
+ * again under the ticket's lock by `recordAnswer`'s default `ratable`, since a
+ * newer survey sent between the two would otherwise take the rating onto the
+ * one the card now draws closed. Everything else is `recordAnswer`'s, the one
+ * door every answer goes through.
  *
  * The rating returned is the stored one, which is the visitor's own or an
  * earlier answer's — first answer wins — so a card whose first post lost its
@@ -302,7 +305,7 @@ export type VisitorUpload = {
 /** A file that could not be stored, so the message it came with was not either. */
 export class VisitorUploadFailed extends Error {}
 
-type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
+export type StoredUpload = Omit<VisitorUpload, 'bytes' | 'extension'> & {
   path: string;
   checksum: string;
   sizeBytes: number;
@@ -419,30 +422,13 @@ export async function appendVisitorMessage(
           // on the chat has words in it — a photo sent with no caption.
           ...(meta.locale ? { locale: meta.locale } : {}),
           // What was sent, for the stand-in's rebuild (`isMediaStandIn`).
-          ...(stored.length > 0
-            ? { webchatFiles: stored.map(({ kind, filename }) => ({ kind, filename })) }
-            : {}),
+          ...webchatFilesMeta(stored),
         },
         createdAt: now,
       });
 
       if (stored.length > 0) {
-        await tx.insert(attachments).values(
-          stored.map((file, index) => ({
-            messageId,
-            storagePath: file.path,
-            // Display only, never a path segment — the key is derived from ids.
-            filename: file.filename,
-            contentType: file.contentType,
-            sizeBytes: file.sizeBytes,
-            checksum: file.checksum,
-            // A millisecond apart, in the order attached: one statement would
-            // give them one `now()`, and the console's thread breaks that tie
-            // by a random id, so an agent read "the first shows the box" under
-            // whichever photo sorted first.
-            createdAt: new Date(now.getTime() + index),
-          })),
-        );
+        await tx.insert(attachments).values(attachmentRows(messageId, stored, now));
       }
 
       if (!existing) {
@@ -463,32 +449,17 @@ export async function appendVisitorMessage(
     });
   } catch (error) {
     if (stored.length === 0) throw error;
-    // A transaction can fail after its COMMIT was sent — the connection lost
-    // before the answer — and then it may have committed (`db/client.ts`). Its
-    // files are then on a stored message, and removing them would leave the
-    // ticket with links to nothing. So the message is looked for by the id it
-    // was given; found, the send succeeded, and the rest of it runs.
-    const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
-    if (outcome === true) {
-      log.warn(
-        `a transaction answered with an error but its message was stored, kept its files message_id=${messageId}`,
-      );
-      result = { conversationId, messageId, createdConversation: !existing };
-    } else {
-      // Unknown is kept as well: an object nothing references costs bytes,
-      // one a stored message references and that is gone is a broken file.
-      if (outcome === false) {
-        await discardPaths(
-          stored.map((file) => file.path),
-          conversationId,
-        );
-      } else {
-        log.warn(
-          `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${stored.map((file) => file.path).join(',')}`,
-        );
-      }
-      throw error;
-    }
+    const outcome = await releaseUnlessStored(
+      messageId,
+      stored.map((file) => file.path),
+      conversationId,
+    );
+    // Found, the send succeeded after all, and the rest of it runs.
+    if (outcome !== 'stored') throw error;
+    log.warn(
+      `a transaction answered with an error but its message was stored, kept its files message_id=${messageId}`,
+    );
+    result = { conversationId, messageId, createdConversation: !existing };
   }
 
   /*
@@ -516,6 +487,85 @@ export async function appendVisitorMessage(
   return result;
 }
 
+/**
+ * What a message sent with files records of them in `messages.meta`: what was
+ * sent, under the widget's key, which `isMediaStandIn` rebuilds the stand-in
+ * from so the console's thread leaves it out where the files are drawn. Empty
+ * for a message without files. One copy for every surface a customer's files
+ * arrive on — the widget's send and the myBlu app's two — so a stand-in the
+ * console hides on one is hidden on the others.
+ */
+export function webchatFilesMeta(stored: readonly Pick<StoredUpload, 'kind' | 'filename'>[]): {
+  webchatFiles?: { kind: StoredUpload['kind']; filename: string }[];
+} {
+  return stored.length > 0
+    ? { webchatFiles: stored.map(({ kind, filename }) => ({ kind, filename })) }
+    : {};
+}
+
+/**
+ * A message's files as `attachments` rows, for the transaction that writes the
+ * message — the widget's and the myBlu app's alike, so a column added to the
+ * table, or a change in what is read off a stored file, reaches both.
+ */
+export function attachmentRows(
+  messageId: string,
+  stored: readonly StoredUpload[],
+  now: Date,
+): (typeof attachments.$inferInsert)[] {
+  return stored.map((file, index) => ({
+    messageId,
+    storagePath: file.path,
+    // Display only, never a path segment — the key is derived from ids.
+    filename: file.filename,
+    contentType: file.contentType,
+    sizeBytes: file.sizeBytes,
+    checksum: file.checksum,
+    // A millisecond apart, in the order attached: one statement would give
+    // them one `now()`, and the console's thread breaks that tie by a random
+    // id, so an agent read "the first shows the box" under whichever photo
+    // sorted first.
+    createdAt: new Date(now.getTime() + index),
+  }));
+}
+
+/**
+ * Removes the files a message's write was to reference, unless the message was
+ * stored after all, for a write that failed or wrote nothing: the widget's
+ * send, and the myBlu app's two (`lib/api/tickets.ts`).
+ *
+ * A transaction can fail after its COMMIT was sent — the connection lost
+ * before the answer — and then it may have committed (`db/client.ts`). Its
+ * files are then on a stored message, and removing them would leave the
+ * ticket with links to nothing. So the message is looked for by the id it was
+ * given: found, the files are kept (`stored`); not there, they are removed
+ * (`released`). An answer that could not be read keeps them too (`kept`): an
+ * object nothing references costs bytes, one a stored message references and
+ * that is gone is a broken file. The log line names every key it kept.
+ */
+export async function releaseUnlessStored(
+  messageId: string,
+  paths: readonly string[],
+  conversationId: string,
+): Promise<'stored' | 'released' | 'kept'> {
+  const outcome = await messageExists(messageId).catch(() => 'unknown' as const);
+  if (outcome === true) return 'stored';
+  if (outcome === false) {
+    await discardPaths(paths, conversationId);
+    return 'released';
+  }
+  // Only about files: the myBlu app asks this of every write that threw, words
+  // alone included, and a line about keeping no files is noise in the log
+  // search during the very outage that causes it. The write's own error is
+  // what reports the failure.
+  if (paths.length > 0) {
+    log.warn(
+      `could not tell whether a message was stored, kept its files message_id=${messageId} paths=${paths.join(',')}`,
+    );
+  }
+  return 'kept';
+}
+
 async function messageExists(messageId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: messages.id })
@@ -540,8 +590,11 @@ async function messageExists(messageId: string): Promise<boolean> {
  * be customer content that no purge could find. Removing a key that was never
  * written succeeds. One written after the removal is not caught here, which is
  * why the failure's line names every key.
+ *
+ * The myBlu app's two sends store theirs through this too (`lib/api/tickets.ts`):
+ * one set of keys, one failure and one clean-up for every customer's upload.
  */
-async function storeVisitorFiles(
+export async function storeVisitorFiles(
   conversationId: string,
   messageId: string,
   files: readonly VisitorUpload[],
@@ -578,9 +631,12 @@ async function storeVisitorFiles(
 /**
  * Removes objects no row will reference. Never throws — `removeObjects` does
  * not — because the caller is already answering a failure, and a leftover is
- * bytes in a private bucket nobody can reach, which the log names.
+ * bytes in a private bucket nobody can reach, which the log names. For a write
+ * known to have stored nothing — a refusal its transaction answered before the
+ * message's insert — where `releaseUnlessStored`'s look for the message would
+ * be a query to learn what the caller already knows.
  */
-async function discardPaths(paths: readonly string[], conversationId: string) {
+export async function discardPaths(paths: readonly string[], conversationId: string) {
   if (paths.length === 0) return;
   const { failed } = await removeObjects([...paths]);
   if (failed.length > 0) {

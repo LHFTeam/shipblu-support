@@ -75,21 +75,27 @@ export function lastCustomerWords<
  * comment made of a photo is `Instagram comment`, sixteen Latin letters beside
  * the customer's three Arabic ones.
  */
-export function subjectWords(subject: string | null): string | null {
+export function subjectWords(subject: string | null, channel: string): string | null {
   if (subject === null || !hasCustomerText(subject)) return null;
   const text = subject.trim();
-  return CUT_LABEL.test(text) || UNNAMED.has(text) ? null : subject;
+  return CUT_LABEL.test(text) || unnamedOn(channel).includes(text) ? null : subject;
 }
 
 /**
  * What ingest names a ticket that arrives with nothing to name it by: an email
- * with no subject, or a chat whose opening message has no first line. Ingest
- * writes from here and `subjectWords` refuses from here, so a name changed in
- * one place is changed in both.
+ * with no subject, or a chat or a myBlu app ticket whose opening message has no
+ * first line. Ingest writes from here and `subjectWords` refuses from here, so
+ * a name changed in one place is changed in both.
+ *
+ * The app's name is here before anything writes it, so `subjectWords` already
+ * refuses it on the day its insert path does: the API answers a ticket's
+ * `subject` through `subjectWords` (`plans/myblu-ticket-api.md`), and a name we
+ * gave a ticket must reach the app as null, for the app to draw its own title.
  */
 export const UNNAMED_SUBJECT = {
   email: '(no subject)',
   webchat: 'Web chat',
+  api: 'myBlu app',
   whatsapp: 'WhatsApp conversation',
   facebook: 'Facebook',
   instagram: 'Instagram',
@@ -97,7 +103,40 @@ export const UNNAMED_SUBJECT = {
   instagramComment: 'Instagram comment',
 } as const;
 
-const UNNAMED: ReadonlySet<string> = new Set(Object.values(UNNAMED_SUBJECT));
+/**
+ * The names ingest gives a ticket on this channel, which are ours only there.
+ *
+ * Keyed on the channel because the names are words somebody can write: a
+ * merchant's email whose subject is `myBlu app`, or a chat that opens with
+ * `Facebook`, is the customer's subject, and read as ours it left the language
+ * guess, the knowledge panel's search and the app's `subject`. A Facebook or
+ * Instagram ticket reads its comment name too, because rolling back Stage 1.2
+ * of `plans/ticket-category-routing.md` files comments on the platform's own
+ * channel. A channel ingest never names (the portal) has none.
+ */
+function unnamedOn(channel: string): readonly string[] {
+  switch (channel) {
+    case 'email':
+      return [UNNAMED_SUBJECT.email];
+    case 'webchat':
+      return [UNNAMED_SUBJECT.webchat];
+    case 'api':
+      return [UNNAMED_SUBJECT.api];
+    case 'whatsapp':
+    case 'whatsapp_bot':
+      return [UNNAMED_SUBJECT.whatsapp];
+    case 'facebook':
+      return [UNNAMED_SUBJECT.facebook, UNNAMED_SUBJECT.facebookComment];
+    case 'instagram':
+      return [UNNAMED_SUBJECT.instagram, UNNAMED_SUBJECT.instagramComment];
+    case 'facebook_comment':
+      return [UNNAMED_SUBJECT.facebookComment];
+    case 'instagram_comment':
+      return [UNNAMED_SUBJECT.instagramComment];
+    default:
+      return [];
+  }
+}
 
 /**
  * Our label for a message with no words: one line in brackets, closed once.

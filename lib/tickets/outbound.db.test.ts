@@ -26,7 +26,7 @@ import { deliverAutomatedReply, enqueueAutomatedDelivery, writeAutomatedReply } 
 
 withCleanDatabase();
 
-async function openTicket(channel: 'email' | 'whatsapp_bot' = 'email') {
+async function openTicket(channel: 'email' | 'whatsapp_bot' | 'webchat' | 'api' = 'email') {
   const [contact] = await db
     .insert(contacts)
     .values({ name: 'Amira', primaryEmail: 'amira@example.test' })
@@ -65,7 +65,9 @@ describe('deliverAutomatedReply', () => {
       direction: 'outbound',
       kind: 'reply',
       authorAgentId: null,
+      bodyHtml: '<p>We have your message.</p>',
       deliveryStatus: 'pending',
+      deliveredAt: null,
       toAddresses: ['amira@example.test'],
     });
 
@@ -99,6 +101,60 @@ describe('deliverAutomatedReply', () => {
     await acknowledge(conversationId, 'Still with us — an agent will be in touch.');
     expect(await stamp()).toEqual(first);
   });
+
+  // Web chat and the myBlu app: the customer's client reads the row, so the row
+  // is the delivery (`rowIsDelivery`). Both ways in, as below: on the pool, as
+  // the acknowledgement and the engine write, and inside a transaction of the
+  // caller's, as the survey does. The sender hands over an HTML part and the
+  // contact's address, as every sender does; neither is stored, because
+  // `isEmail` asks `sendsByEmail` — asked of the carrier, which answers
+  // `send_email` for both, the myBlu reply kept them, and this test without
+  // the HTML part and the address would still have passed.
+  it.each(['webchat', 'api'] as const)(
+    'on %s, stores the reply delivered, with no HTML part and no address, and queues nothing',
+    async (channel) => {
+      const conversationId = await openTicket(channel);
+      const reply = {
+        conversationId,
+        channel,
+        requesterEmail: 'amira@example.test',
+        bodyText: 'We have your message.',
+        bodyHtml: '<p>We have your message.</p>',
+        actorLabel: 'automation:acknowledge',
+        eventType: 'auto_replied',
+      };
+
+      const pooled = await deliverAutomatedReply(reply);
+      const held = await db.transaction(async (tx) => {
+        const messageId = await writeAutomatedReply(tx, reply, { stampFirstAutoReply: false });
+        await enqueueAutomatedDelivery(reply.channel, messageId, 50, tx);
+        return messageId;
+      });
+
+      const stored = await db
+        .select({
+          id: messages.id,
+          bodyText: messages.bodyText,
+          bodyHtml: messages.bodyHtml,
+          toAddresses: messages.toAddresses,
+          deliveryStatus: messages.deliveryStatus,
+          deliveredAt: messages.deliveredAt,
+        })
+        .from(messages)
+        .where(eq(messages.conversationId, conversationId));
+      expect(stored.map((row) => row.id).sort()).toEqual([pooled, held].sort());
+      for (const row of stored) {
+        expect(row).toMatchObject({
+          bodyText: 'We have your message.',
+          bodyHtml: null,
+          toAddresses: [],
+          deliveryStatus: 'delivered',
+          deliveredAt: expect.any(Date),
+        });
+      }
+      expect(await db.select({ id: jobs.id }).from(jobs)).toEqual([]);
+    },
+  );
 
   // Each sender turns the bot away first, in its own way (`writeAutomatedReply`
   // says who refuses where), so the door refuses it too, before the row exists:

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { DateTime } from 'luxon';
+import { describe, expect, it, vi } from 'vitest';
 import { cairo as at, inCairo } from '@/lib/testing/time';
 import type { WeeklySchedule } from '@/db/schema/config';
 import {
@@ -141,6 +142,102 @@ describe('nextOpeningAt', () => {
       schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
     };
     expect(nextOpeningAt(never, at('2026-08-17T12:00'))).toBeNull();
+  });
+
+  // A year of lookahead, as `GET /config` asks, on a schedule that can never
+  // open: a week of days answers it, where the whole year was scanned.
+  it('stops after a week of days on a schedule that never opens, whatever the lookahead', () => {
+    const unreadable: HoursConfig = {
+      ...config,
+      schedule: {
+        ...CAIRO,
+        sun: [{ start: '9am', end: '5pm' }],
+        mon: [],
+        tue: [],
+        wed: [],
+        thu: [],
+      },
+    };
+    const days = vi.spyOn(DateTime.prototype, 'startOf');
+    try {
+      expect(nextOpeningAt(unreadable, at('2026-08-17T12:00'), 366)).toBeNull();
+      expect(days.mock.calls.length).toBeLessThan(10);
+    } finally {
+      days.mockRestore();
+    }
+  });
+
+  it('never stops early on a weekday every holiday ahead has shut', () => {
+    // Open on Mondays alone, and the next five Mondays are holidays: every
+    // other weekday is shut, Monday is not, and the sixth Monday opens.
+    const mondays: HoursConfig = {
+      timezone: 'Africa/Cairo',
+      schedule: {
+        sun: [],
+        mon: [{ start: '09:00', end: '17:00' }],
+        tue: [],
+        wed: [],
+        thu: [],
+        fri: [],
+        sat: [],
+      },
+      holidays: ['2026-08-24', '2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21'].map(
+        (date) => ({
+          date,
+        }),
+      ),
+    };
+    expect(inCairo(nextOpeningAt(mondays, at('2026-08-17T12:00'), 366))).toBe('2026-09-28T09:00');
+  });
+});
+
+/**
+ * The days Cairo's clocks change, which `GET /config`'s `support.opensAt` is
+ * asked across (`lib/api/config.ts`). Egypt springs forward at midnight on the
+ * last Friday of April and falls back at midnight on the last Thursday of
+ * October. Answers are written in UTC, so an implementation that steps whole
+ * days in milliseconds, or counts minutes from a midnight the spring change
+ * skips, cannot agree with them by building them the same way.
+ */
+describe('across a clock change', () => {
+  const only = (days: Partial<WeeklySchedule>): HoursConfig => ({
+    timezone: 'Africa/Cairo',
+    schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], ...days },
+  });
+
+  it('opens on the Sunday after the spring change at the new offset', () => {
+    // Sunday 19 April opens at 07:00 UTC (UTC+2); Sunday 26 April at 06:00 UTC
+    // (UTC+3), seven days less an hour later.
+    expect(nextOpeningAt(config, at('2026-04-16T18:00'))?.toISOString()).toBe(
+      '2026-04-19T07:00:00.000Z',
+    );
+    expect(nextOpeningAt(config, at('2026-04-23T18:00'))?.toISOString()).toBe(
+      '2026-04-26T06:00:00.000Z',
+    );
+  });
+
+  it('opens on the Sunday after the autumn change at the new offset', () => {
+    expect(nextOpeningAt(config, at('2026-10-29T18:00'))?.toISOString()).toBe(
+      '2026-11-01T07:00:00.000Z',
+    );
+  });
+
+  it('opens a day whose midnight the spring change skips at its first real minute', () => {
+    // Friday 24 April 2026 has no 00:00 in Cairo: the clocks go from 23:59:59
+    // on the Thursday to 01:00. A range opening at 00:00 opens at 01:00.
+    const fridayNight = only({ fri: [{ start: '00:00', end: '02:00' }] });
+    expect(nextOpeningAt(fridayNight, at('2026-04-23T20:00'))?.toISOString()).toBe(
+      '2026-04-23T22:00:00.000Z',
+    );
+  });
+
+  it('is open in both copies of an hour the autumn change repeats', () => {
+    // 23:30 on Thursday 29 October 2026 happens at 20:30 UTC (UTC+3) and again
+    // at 21:30 UTC (UTC+2).
+    const lateThursday = only({ thu: [{ start: '22:00', end: '24:00' }] });
+    expect(isWithinBusinessHours(lateThursday, new Date('2026-10-29T20:30:00.000Z'))).toBe(true);
+    expect(isWithinBusinessHours(lateThursday, new Date('2026-10-29T21:30:00.000Z'))).toBe(true);
+    expect(isWithinBusinessHours(lateThursday, new Date('2026-10-29T22:00:00.000Z'))).toBe(false);
   });
 });
 

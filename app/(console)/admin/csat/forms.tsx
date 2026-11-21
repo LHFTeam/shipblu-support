@@ -16,6 +16,7 @@ import {
 } from '@/lib/csat/limits';
 import type { CsatSettings } from '@/lib/csat/settings';
 import type { ActionState } from '@/lib/http/action-state';
+import { CHANNEL_LABELS } from '@/lib/tickets/channel-labels';
 import { saveSurveySettings } from './actions';
 
 const INITIAL: ActionState = { error: null };
@@ -214,10 +215,16 @@ export function SurveySettingsForm({ settings }: { settings: CsatSettings }) {
           hint="Five rating buttons under the question, only while the 24-hour window is open."
           defaultChecked={settings.channels.instagram}
         />
+        {/* The app pulls its survey and draws it itself (`api_pull`,
+            `plans/myblu-ticket-api.md` stage 8): no message, no link, and no
+            email, since an app ticket's contact address can be a previous
+            holder of the phone's. The push (`survey.created`) goes only while
+            myBlu's webhook is set and the API is on, so the hint promises it
+            only on that condition rather than of every survey. */}
         <Toggle
           name="surveyApi"
-          label="API"
-          hint="Tickets opened through the API, by email, when the contact has an address."
+          label={CHANNEL_LABELS.api}
+          hint="The app shows the survey on the ticket itself and moves the ticket to the top of its list. The user's phone is told only while myBlu's webhook is set up. Nothing is sent by email."
           defaultChecked={settings.channels.api}
         />
         <p className="text-xs text-(--color-text-secondary)">

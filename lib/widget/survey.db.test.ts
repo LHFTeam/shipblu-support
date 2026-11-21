@@ -10,7 +10,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { recordAnswer, sendSurvey } from '@/lib/csat';
+import { recordAnswer, sendSurvey, TAKES_SUPERSEDED } from '@/lib/csat';
 import { DEFAULT_WORDING, ratingLabels } from '@/lib/csat/wording';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { answerSurvey, listMessages } from './conversation';
@@ -184,7 +184,10 @@ describe('the survey card', () => {
     // always did.
     expect(await answerSurvey(contactId, first.surveyId, 2, null)).toBeNull();
     expect(await row(first.surveyId)).toMatchObject({ status: 'expired', rating: null });
-    expect(await recordAnswer(first.surveyId, 2, null, 'page')).toBe('recorded');
+    expect(await recordAnswer(first.surveyId, 2, null, 'widget')).toBe('ignored');
+    expect(await recordAnswer(first.surveyId, 2, null, 'page', { ratable: TAKES_SUPERSEDED })).toBe(
+      'recorded',
+    );
     expect(await row(first.surveyId)).toMatchObject({ status: 'answered', answerSource: 'page' });
   });
 

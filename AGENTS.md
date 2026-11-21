@@ -179,6 +179,7 @@ app/(console)/   agent console: inbox, contacts, kb, reports, settings (admin/)
 app/(auth)/      login, first-admin setup, invites
 app/help/        public help centre and customer portal (served on its own host)
 app/api/         webhooks, SSE, widget, attachments, health
+app/api/v1/      the myBlu ticket API; its shapes are lib/api/schemas.ts
 app/widget/      the embeddable chat widget iframe
 lib/<domain>/    all business logic, one directory per domain
 components/      shared UI primitives (ui.tsx) and small client components
@@ -214,6 +215,21 @@ The layers point one way, and `npm run lint` holds them: `lib/` and `worker/`
 never import from `app/`, and `components/` never import from `db/` — not even a
 type, since a component that needs a row's shape can take it from the `lib/`
 function that reads it.
+
+**The myBlu API's contract is `lib/api/schemas.ts`.** Every shape `/api/v1`
+reads or answers, its webhook and its push payload are zod schemas there, and
+`lib/api/openapi.ts` publishes them as `docs/myblu-api.openapi.json`, committed
+because the app's developers, their mock and the SDK read it before the routes
+behind it exist. `npm run api:openapi` rewrites the file from the schemas;
+`lib/api/openapi.test.ts` fails when the two disagree, when an answer is a
+closed object, when an enum in an answer does not say that values are added, or
+when a union in an answer that a field tells apart, as the webhook's `type`
+tells its events apart, has no arm open on that field. The API changes by
+addition: what an app build depends on is fixed, a breaking
+change is `/api/v2`, and every change is a dated line in
+`docs/myblu-api-changelog.md`, whose newest date is the document's version.
+`docs/myblu-api.md` is the guide for myBlu's teams; `plans/myblu-ticket-api.md`
+is the reasoning.
 
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
@@ -520,7 +536,10 @@ files (`storeVisitorFiles`, **The widget carries files**), in the visitor's own
 request: they are still there to try again, and a message stored before its
 files would leave an agent reading about a photo that is not there, so a
 failure refuses the send and gives the files back rather than queueing
-anything. Each upload has its own deadline (`sizedTimeout`). The fourth is the
+anything. Each upload has its own deadline (`sizedTimeout`). The myBlu app's
+two sends upload theirs the same way and through the same function, for the
+same reason: the app's user is there, and the SDK sends the whole message
+again under its key on `502 upload_failed`. The fourth is the
 knowledge-base editor's picture upload (`uploadArticlePicture`), for the same
 reasons as the third. The author is waiting for the `src` to put in their
 draft, and the file exists only in their browser, so a queued job would have
@@ -541,6 +560,23 @@ legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
+
+**A job that tells another system something keeps its retries inside what the
+receiver remembers.** `notify_myblu` posts the myBlu webhook, and the receiver
+dedupes on the event's `id` for a day because the worker runs a job at least
+once. A retry after that day can meet an `id` the receiver has forgotten and
+push twice, so the job is queued with `maxAttempts: 30`, whose last attempt
+falls about seventeen hours in on the queue's backoff (`NOTIFY_MAX_ATTEMPTS` in
+`lib/api/notify.ts`, added up from `retryDelaySeconds` in its test), and it
+refuses an event older than twenty-three hours (`MAX_EVENT_AGE_MS`), which holds
+the bound when the queue itself is late. The default of five would give up five
+minutes in, inside a receiver's own deploy. Each attempt has a ten-second
+deadline and follows no redirect. A receiver that refuses is a plain error and
+the queue's retry, never `PermanentJobError`. A dead delivery resent by hand
+(`npm run job -- notify_myblu event=message.created messageId=…`) therefore
+sends only in the six hours or so between the job's death and the event's
+twenty-third hour; after that it logs `nothing sent: older than a day` at
+`warn` and exits 0, and the push is gone, on purpose.
 
 **A Facebook or Instagram batch is retried whole when any item in it fails**
 (`process-meta-webhook.ts`), so the items that worked run again on every retry,
@@ -715,19 +751,37 @@ survey and the survey's thanks after a tapped rating — at **24 hours** on a
 Facebook or Instagram direct message, not at seven days. The seven days belong
 to a human.
 It refuses the customer bot's tickets outright, whatever the clock says:
-nobody on the team writes there, and `carrierFor` would queue the message as
-an email. The engine asked only this guard, so until it refused the bot an
-`on_update` rule's reply on a bot ticket was written and queued. The
-acknowledgement and the survey turn the bot away themselves, and the survey
+nobody on the team writes there, and nothing carries the message
+(`carrierFor` answers null; it once queued it as an email). The engine asked
+only this guard, so until it refused the bot an `on_update` rule's reply on a
+bot ticket was written and queued. The acknowledgement and the survey turn the
+bot away themselves, and the survey
 asks this guard only on Meta's channels, so the door refuses it as well:
 `writeAutomatedReply` throws on a read-only channel before the row exists, for
 any sender that did not refuse it first. The guard is shared with WhatsApp's
 template rule because a guard only some of the
 senders apply is not a guard, and it refuses before the row is written:
 delivery refuses it too, but by then the customer's timeline carries a reply
-that permanently failed. Route a new automated sender through it and through
-`carrierFor`, which is the same lesson twice — `send_csat` kept private copies
-of both and so surveyed Facebook tickets by email.
+that permanently failed. Route a new automated sender through it, through
+`carrierFor` and through `rowIsDelivery`, which is the same lesson three times —
+`send_csat` kept private copies of the first two and so surveyed Facebook tickets
+by email. `carrierFor` answers null for web chat and the myBlu app (`api`),
+whose row is the delivery — written `delivered` with no HTML part and no
+address and queued nowhere — and for the bot, which nobody answers, so
+`enqueue(carrierFor(c), …)` does not compile until a caller says what happens
+then. `rowIsDelivery` says what status the row is written with — derived from
+`carrierFor`, no carrier and not read-only, so the two cannot disagree — and
+`storeAgentReply` writes an agent's with it, so no sender states one; and
+`sendsByEmail` whether it carries an HTML part and an address, at every sender —
+never a test naming one channel, which is how the code queued an `api` reply as
+an email at every place that set web chat aside by name, back when
+`carrierFor` answered `send_email` for both. And a sender queues its carrier
+through `enqueueAutomatedDelivery`, which is also where the myBlu app's push is
+queued in a carrier's place: a sender queueing its own job tells the app's user
+nothing. A sender that greets the customer by name asks `withholdsCustomerName`
+(`lib/tickets/channel-policy.ts`) first: never under a public comment. The
+myBlu app is greeted by name, by the owner's decision: a number rarely changes
+hands, and the name is the one the app sends, kept current.
 
 **One exception, and it is Meta's, asked for by name.** Messenger's customer
 feedback card has a tag of its own, `CUSTOMER_FEEDBACK`, valid on that card and
@@ -1346,6 +1400,172 @@ under the switch's lock, in the save's own transaction (`webchatEditRefusal`):
 the card only the widget's row, the editor only another, since a switch can
 change which that is under an open page.
 
+**The myBlu app uses the oldest active `api` row** (`apiChannel`,
+`lib/api/channel.ts`): its default group, and so the hours the app is told,
+and its routing mode. An admin adds and edits it on `/admin/channels` like any
+row — `saveChannel` stores it with an empty config — and switches it with
+`setApiChannelActive`, built as web chat's switch is: its own form behind
+`ConfirmSubmit`, `switchApiChannel` deciding under a transaction lock from the
+stored type, and `lib/api/channel-rows.ts` asked by the page and the action.
+One difference is deliberate, so do not align it with the widget's: the last
+active row may go off. That is what the switch is for. With no row on, the app
+opens no new ticket (`503 not_configured`), while customers keep reading and
+replying on the tickets they have (`plans/myblu-ticket-api.md`, _Tickets_).
+
+**A request to `/api/v1` is somebody only through its bearer.** Two planes
+(`lib/api/auth.ts`): the server plane is myBlu's backend holding
+`MYBLU_API_TOKEN`, which mints and ends sessions and does nothing else, and the
+client plane is the app holding a session token for one user. A request body
+naming a phone, a contact or a ticket's owner is a claim. Only the session says
+who is asking, and only the server plane says who a session is: a route takes
+its caller from `clientPlane()`, never from a field, and the phone on
+`POST /sessions` decides nothing but which contact a new account joins.
+`pendingApiContact` and `resolveApiContactIn` in `lib/tickets/contacts.ts`
+decide that, the reads before the transaction and the writes in it: the
+number's WhatsApp contact, joined under its row lock and its identities re-read
+in the next statement, while no other account hangs off it and, under the
+number's advisory lock, no other account's contact holds the number; otherwise
+a contact of the account's own, with `primary_phone` only for a number nobody
+holds, decided under the same lock, so two accounts on one phone are never
+offered to an agent as a merge. No `whatsapp` identity is ever written from a
+session. A contact's name is the backend's, brought up to date at every mint
+where the two differ (`keepNameCurrent`), by the owner's decision: it renames a
+joined WhatsApp contact too, and replaces an agent's edit. A mint and a revoke for one
+account each take the account's advisory lock first (`lockAccount` in
+`lib/api/sessions.ts`), so a revoke ends a session a mint wrote while it ran
+rather than missing an uncommitted row, and a mint reads the contact through
+the identity in its transaction, so a merge landing meanwhile is followed
+rather than answered `403 blocked`. `api_sessions` holds a
+SHA-256 of the `sbu_…` token, as `sessions` and `contact_sessions` do, so a
+dump authenticates nobody. Its life is twenty-four hours, fixed, so a request
+writes nothing, and the contact is read through the identity on every request
+and never cached: a merge moves a live session, and a block or a revoke is the
+next request's answer — but for `DELETE /session`, whose gate (`endingPlane`)
+ends a blocked contact's session rather than refusing it, since a `403` there
+left a token the app had wiped live until the block was lifted. A text field
+the server stores refuses U+0000 in its schema (`storable` in
+`lib/api/schemas.ts`), because Postgres's `text` refuses it as a `500`.
+`/api/v1` never reads a cookie — a console cookie with
+no bearer is `401` — and takes no credential in a URL. While `MYBLU_API_TOKEN`
+is unset or under 32 characters both planes answer `503 not_configured`, the
+client plane before it reads a session. That is how the routes deploy before
+myBlu holds a value, and unsetting it is the way back. `ShipBlu-Client` is
+required on the client plane, and a `426` is decided on it from
+`MINIMUM_VERSIONS` beside the gate, empty until a build is to be refused —
+everywhere but `DELETE /session`, which judges no header, so a build too old
+to be served still ends its session. **An
+`/api/v1` log line carries the identity's uuid and the route, never a token, a
+phone, an `externalUserId` or a body.** A route's failure goes through
+`answering()` (`lib/api/errors.ts`), which logs a scrubbed copy: drizzle words
+a failed query with its parameters, and Postgres puts the offending values in
+`detail`.
+
+**Every `/api/v1` read and write of a ticket is scoped by the identity that
+opened it, the session's contact and `channel = 'api'`, in the same `WHERE` as
+the id.** `ownedTicket(caller)` in `lib/api/scope.ts` is that predicate, the one
+copy: the ownership row (`api_tickets`, written in the transaction that creates
+the ticket and never updated) by the session's identity, `requester_contact_id`
+the session's contact, the channel, and not deleted, spam or merged. Every
+function in `lib/api/tickets.ts` takes the caller as its first argument, so a
+new read cannot leave it out and still compile; not yours, not found, deleted,
+merged and not-`api` are one `404` from one query, and an id that is not a UUID
+is that `404` before any; one that is, in either case, is lower-cased first
+(`canonicalUuid`), since which ticket a key was spent on is compared in code.
+The identity is what a contact cannot give — a merge
+re-points identities and two can land on one contact — so a second identity on
+the same contact reads none of the first's tickets, and `revokeSessions` deletes
+an identity's ownership rows on `account_deleted` and `number_released`, which
+takes its tickets out of the app and leaves them on the contact. The portal
+excludes `api` from its list, its ticket page and its reply through one list
+(`notOnThePortal`), since a ticket's number is guessable. **`kind = 'reply'` is
+in the query, never a filter over rows already read**, with `notReaction()`, so
+a note, a system row or a forward is never in the payload; only `body_text` is
+read for a message's words, and `text` is `""` for the stand-in written for
+files alone, as the widget answers it. A ticket and a message are named field
+lists built fresh, as `publicTracking()` builds its answer. **No credential in a
+URL, and no stream: a cursor to poll.** The cursor is base64url of Postgres's
+own timestamp text, the row id and an HMAC of the two under `APP_SECRET`
+(`lib/api/cursor.ts`), refused before any query when this server did not sign
+it: judged by its spelling alone, a cursor built by hand read the thread from
+wherever it named. A change of `APP_SECRET` therefore refuses every cursor an
+app holds, once; the app drops each and reads the newest page, as
+`invalid_cursor` tells it to. `after` re-reads a few seconds before
+its cursor, because `created_at` is not commit order, and never lets that
+re-read fill a page, or a full page whose cursor did not move would send the
+client round for the same rows forever. `createApiTicket` is an ingest path, not
+a parameter on `createTicket`: the pool's reads, one transaction holding the
+routing window in its insert and `startRouting` on `tx`, then the ingest
+lifecycle. It takes the account's lock first (`holdAccount`), as a mint and a
+revoke do, and re-reads the key and counts the open tickets under it. Both
+writes take their one `now` once they hold every lock they wait on, so a
+message's `created_at` is never older than its commit by a wait, which
+`after`'s few seconds of overlap could not cover. Both file under the contact
+read through the identity inside their transaction and held `FOR KEY SHARE`
+(`holdRequester`), never the gate's: a contact merge committed between the two
+left a create on the folded contact, `201` and then `404` for good — and a
+replay reads through the contact the identity names then (`requesterNow`), for
+the same reason. The work after the commit is owed in the transaction, as a
+`finish_api_message` job due a minute on, which the request takes and runs
+(`lib/api/finish.ts`): a request that ended after its commit was retried, the
+retry answered as a replay, and the ticket kept none of its rules, its policy,
+its assignee or its out-of-hours reply. The
+`Idempotency-Key` is stored as `messages.channel_message_id =
+'api:<identityId>:<key>'`, pre-checked on the pool with the unique index as the
+backstop, and every message the user wrote returns it as `clientId` on every
+read. The list (`GET /tickets`) is scoped by the identity on its joined
+ownership row as well as by `ownedTicket`, so it drives from
+`api_tickets_identity_idx`; it is ordered by `(lastActivityAt, id)` — the later
+of the newest message and the newest survey the app was given, so a survey,
+which writes no message, still brings its ticket to the first page the SDK
+re-reads — with the cursor compared on the same expression, filters on the tracking number stored on that
+row and never on `conversation_shipments`, and reads no channel row. Its
+cursor is the thread's format signed under a purpose of its own (`CursorKind`,
+a required argument on both sides), so a thread's cursor is `invalid_cursor` on
+the list and the list's on a thread, rather than a bound on the wrong column.
+Unread is `unreadReply()` in `lib/api/tickets.ts`, the one predicate
+`unreadCount` and `unreadTotal` count and `POST /tickets/{id}/read` clears;
+that route is the only writer of `messages.read_at` on `api`, scoped by
+`ownedTicket` in its own `UPDATE`, guarded by `read_at is null` so it never
+moves or unsets one, and it sets `read` only from `sent` or `delivered`, so a
+failure keeps its receipt. Its transaction holds the account, then the
+requester (`holdAccount`), as the sends do, so a mark waits its turn behind
+every send, create, mint, revoke and other mark on the account, and one after a
+revoke or a sign-out marks nothing. The API changes by addition, and what
+`docs/myblu-api.md` says a field means is fixed once an app build depends on
+it.
+
+**The myBlu webhook is a hint, and the poll is the truth.** A reply on an `api`
+ticket is delivered when its row is written (`rowIsDelivery`); what is queued in
+a carrier's place is `notify_myblu`, which tells myBlu's backend so it can push
+to the user's phone. `enqueueMessageCreated` (`lib/api/notify.ts`) queues it,
+called from the two doors every outbound reply passes — `storeAgentReply` and
+`enqueueAutomatedDelivery` — so a new writer of a team's reply on `api` goes
+through one of them or the user is never told. It queues only on `api` and only
+while `MYBLU_WEBHOOK_URL` is set, keyed `notify_myblu:message:<id>`, once ever.
+On the pool it is best-effort and logs a failure rather than throwing: the
+reply is stored, and a throw would read to the agent as a reply that failed.
+**A failed push never marks a reply failed**, which differs from every carrier:
+nothing in the job writes to the message. The job carries ids only and rebuilds
+the body from the rows on every attempt (`lib/api/webhook.ts`), with
+`user.externalId` read off the ticket's ownership row and never the contact,
+and it sends nothing — and completes — for a ticket the app could not open now:
+withdrawn, released by a revoke, a requester that is not the owner's contact, a
+blocked user, or an event past its day. The API switched off is not one of
+them: the reply is there once it is back on, so the attempt fails, retried, and
+a token unset for the minutes of a rotation costs no push; the age is asked
+first, so the retries still end within the day. A payload naming a note, an
+inbound message or another channel's reply is `PermanentJobError`: only a
+hand-written one can. The URL must be `https` with no userinfo and no query
+string, and the secret at least 32 characters; both are judged when a job runs
+(`webhookTarget`), never in `lib/env.ts`, and an unusable value fails every job
+that would send by name, retried, so a value corrected within the day still
+sends — and a URL set before its secret is a queue of failing jobs, not a quiet
+switch. The URL unset completes the jobs already queued with nothing sent,
+which is the way back, and the web service and the worker read it through one
+`webhookUrl()`. `webhook.test.ts` reads the guide's test vector and its JavaScript
+`verify` and runs both against what the job signs and sends, so the guide and
+the sender cannot drift apart.
+
 **The widget carries files, and their type is read from the bytes.** A
 visitor's photo, PDF, video or voice recording rides in the message's own POST
 (`/api/widget/message`, multipart where the text-only body stays JSON), never
@@ -1370,6 +1590,64 @@ token is the whole chat, read and written, which nothing on the server
 expires. The 25 MB ceiling sits under `proxyClientMaxBodySize`, which truncates a body
 rather than refusing it, so the route checks `Content-Length` before reading,
 and one is raised only with the other.
+
+**The myBlu app carries files the widget's way, and requires the length.** The
+two sends take `multipart/form-data` beside JSON (`sendFields` in
+`lib/api/requests.ts`), and judge, read and store a file with the widget's own
+functions — `readVisitorUploads`, `storeVisitorFiles` and
+`releaseUnlessStored` — never copies, so a file one surface takes the other
+takes too, typed by the same bytes and stored under the same keys. Two things
+differ, each on purpose. A multipart body without `Content-Length` is
+`411 length_required` rather than read: the SDK builds its body in a file and
+knows its length, and the proxy's truncation is otherwise silent. And the files
+go to Storage only once the pool says the key is unspent and the upload budget
+(100 MB an hour on the identity, counted to the byte, `uploadFits`) has room,
+and on a reply only to a ticket the user owns that is not closed
+(`openedStatus`, through `ownedTicketNow`, whose requester is read through the
+identity in the statement rather than off the gate's contact, so a merge
+cannot make it answer a false `404` and a ticket moved to another contact is
+the locked read's `404`, not its status); the budget is spent once the message
+is stored. The key is asked first of all, before the body is read
+(`keyAnswer`, whose `UnspentKey` is the only key a writer takes), so a retry of
+a 25 MB send is answered without being parsed. Multipart text has its CRLFs put
+back to LF before the schema counts it, as the form encoding wrote them. A file is fetched
+through `GET /attachments/{id}` (`attachmentLink`), which reaches it through its
+message and `ownedTicket`, in one statement: exactly the files a thread lists,
+answered as a five-minute Storage link in JSON, never a redirect. An app
+message of files alone is stored with the widget's stand-in and
+`meta.webchatFiles`, so the console draws the files in its place (`api` is in
+`drawsMediaInline`'s list) and the API answers its `text` as `""`.
+
+**The myBlu app's survey is pulled, never sent.** An `api` ticket's survey is
+`api_pull` (`decideSurvey`, while `survey_api` is on, a closed ticket
+included): `sendPulledSurvey` writes the row and a `csat_sent` line with no
+message, no token and no link, and touches the ticket so an open page wakes, and the app reads it through
+`GET /tickets/{id}/survey` and answers through `POST` (`lib/api/survey.ts`),
+which goes through `recordAnswer(…, 'api')` like every other door: the first
+rating wins, a comment attaches once, and the route answers the survey as it
+stands. It is never emailed, because the contact's address can be a previous
+holder's of the phone (`api_email_fallback`, not built). `PULLED` is kept out
+of `MessageDelivery` (`lib/csat/delivery.ts`), so a function about a message's
+body or link does not compile with it; it and `sendSurvey` share the lock, the
+re-read and the supersession (`writeSurveyRow`) and nothing after. A ticket's
+survey is its newest `api_pull` that is not `skipped`, while the ticket is
+resolved or closed — `surveyOrder` and `appSurvey`, read by the route, its
+POST, the ticket's `survey` summary and its `lastActivityAt` alike (one lateral
+row per ticket, `appSurveyRow`), so a list never prompts for a survey the route
+does not serve, nor serves one the push refuses: a ticket the user has written
+on again has no survey until it is resolved again, as the push withholds one
+(`reopened`). An `expired` one is answered unchanged, as the widget's card
+answers it; the rating is written only on a survey still `sent` under the
+ticket's lock, so a newer send landing between the read and the write does not
+leave it on the superseded one. That is `recordAnswer`'s default `ratable`,
+which the widget's card takes too; only a link and Messenger's card, which
+always took a superseded survey, pass `TAKES_SUPERSEDED`, so a new door that
+forgets the option refuses rather than lets through. `survey.created` is queued by `enqueueSurveyCreated` in the
+transaction that writes the survey, keyed `notify_myblu:survey:<id>`, so it
+exists exactly when the survey does; the job judges the ticket with
+`message.created`'s own `inApp`, so the two events cannot disagree about
+whether the app could open it, and sends nothing for a survey no longer `sent`
+or on a ticket open again.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
@@ -1739,7 +2017,8 @@ README says why it is a setting and not a rule. The rules:
   the row's lock. `routingLock()` asks `routingModeOf` which rows those are, so
   the form, the action and the panel give one reason.
 - **Only a ticket an inbound ingest path inserts routes** — email, WhatsApp, a
-  Meta direct message or comment, the widget — and only while the classifier is
+  Meta direct message or comment, the widget, and the customer API
+  (`createApiTicket`) — and only while the classifier is
   in `apply` (`routingStartFor`): off or in shadow it files nothing, and a hold
   would wait out every window for nothing. Never a `createTicket` ticket, which
   brings its own group, a continuation, a reopen, imported history or a
@@ -1916,9 +2195,10 @@ README says why it is a setting and not a rule. The rules:
   ticket, so a resolve handed over never ran its rules, and nothing races that
   pass, since the router assigns nobody a ticket nobody may work. A group move
   still drops the kept pick there (`endHold`), for a ticket reopened before the
-  router's claim. And a customer's message, on each of the five paths that
+  router's claim. And a customer's message, on each of the six paths that
   continue a ticket — email, WhatsApp, a Meta direct message or comment, the
-  widget and the portal's reply — runs its own (`afterInboundMessage`) beside
+  widget, the portal's reply and the customer API's — runs its own
+  (`afterInboundMessage`) beside
   the router's. It is no decision about where the ticket goes, its pass races
   the rota as it does on every ticket once anybody holds one, and deferring it
   would reach into the transaction each of those paths stores its message in.
@@ -2949,6 +3229,18 @@ identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
 list of values (§6.46).
 
+**A column in a one-table select's field list is written unqualified.** drizzle
+qualifies columns in a `WHERE` always, and in the select list only once the
+query joins something. So a correlated subquery written as a `sql` field of
+`db.select({…}).from(conversations)` —
+`(select … from ${messages} where ${messages.conversationId} = ${conversations.id})`
+— reaches Postgres as `"conversation_id" = "id"`, both of which resolve to
+`messages`, and compares the message with itself. Nothing refuses it: it plans,
+it runs, and it answers null. The read marker met it (stage 5 of
+`plans/myblu-ticket-api.md`) and joins instead; a select with a join, as
+`ownedTicketRow` has, writes every column with its table. Read `toSQL()` back
+for any such field.
+
 There is no browser test suite. Playwright was declared — a dependency and a
 `test:e2e` script — with no config and not one spec, and was removed rather than
 kept as a promise (`plans/refactor-in-stages.md`, 0.5). It comes back in the PR
@@ -3057,8 +3349,20 @@ deleting it, and drop the sections that genuinely do not apply.
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.
   The bucket is private; mint short-lived signed URLs.
-- Public endpoints (KB feedback and views, the widget) are rate limited in
-  memory — do not add a row per rejected request.
+- Public endpoints (KB feedback and views, the widget, the myBlu API) are rate
+  limited in memory — do not add a row per rejected request. The myBlu API's
+  buckets are keyed on the session's identity wherever a request has one, and
+  on the address only where it has none (`lib/api/limits.ts`). The address is
+  the first `X-Forwarded-For` value, which a caller writes, so no address
+  bucket stands between a bearer and its answer: the session is read first,
+  and refused bearers are counted only to turn the next refusal's `401` into a
+  `429` (the owner's decision on #531). That also means a forged address can
+  fill the store every public endpoint shares, which then drops its oldest
+  buckets, so a bucket keyed on something no unauthenticated caller can
+  choose — a signed-in agent, a plane, an account the server plane vouched
+  for, a session's identity — goes in the store of its own (`admitVouched`,
+  `allowVouched`), wherever it is asked, where the spray cannot evict it. A row that records
+  who asked keeps the whole chain (`forwardedChain`), never that first value.
 - **A host page telling the widget who its visitor is makes a claim, not a
   statement of fact.** It arrives from a browser. An unsigned identity may only
   decorate the contact the visitor's token already resolved to — it never adopts

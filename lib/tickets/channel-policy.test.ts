@@ -13,6 +13,7 @@ import {
   hiddenChannels,
   isCommentChannel,
   isCommentTicket,
+  withholdsCustomerName,
   isMetaChannel,
   isReadOnlyChannel,
   isRestrictedChannel,
@@ -168,6 +169,8 @@ it('draws files inline only on a chat, so email and anything added later stay at
     'facebook_comment',
     'instagram',
     'instagram_comment',
+    // The myBlu app, a chat on a phone, from its files (stage 7).
+    'api',
     'whatsapp_bot',
   ]);
 });
@@ -214,6 +217,24 @@ describe('the Meta channels', () => {
     // The prefix is anchored: ':comment:' elsewhere in an id is not a comment.
     expect(isCommentTicket('whatsapp', 'whatsapp:comment:1')).toBe(false);
     expect(isCommentTicket('email', 'x-facebook:comment:1')).toBe(false);
+  });
+
+  // The one place a sender asks before it greets by name: a comment's reply is
+  // public. The myBlu app greets by name, its name kept current from the app.
+  it('withhold the customer’s name on a comment thread, however it is filed, and nowhere else', () => {
+    expect(withholdsCustomerName('facebook_comment', null)).toBe(true);
+    expect(withholdsCustomerName('instagram', 'instagram:comment:17890')).toBe(true);
+    for (const channel of [
+      'email',
+      'whatsapp',
+      'webchat',
+      'facebook',
+      'instagram',
+      'portal',
+      'api',
+    ]) {
+      expect(withholdsCustomerName(channel, null), channel).toBe(false);
+    }
   });
 
   // Offered with the ingest that writes them (Stage 1.2), so the views are

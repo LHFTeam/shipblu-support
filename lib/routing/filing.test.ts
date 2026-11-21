@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { filesRoutableTickets, filingRowFor, ownedByActiveAgent, type FilingInput } from './filing';
+import {
+  filesRoutableTickets,
+  filingGap,
+  filingRowFor,
+  ownedByActiveAgent,
+  type FilingInput,
+} from './filing';
 
 type Row = FilingInput & { name: string };
 
@@ -39,5 +45,25 @@ describe('which row a channel’s tickets are filed under', () => {
     const deactivated = { ...owned, ownerActive: false };
     expect(ownedByActiveAgent(deactivated)).toBe(false);
     expect(filesRoutableTickets(deactivated, [deactivated])).toBe(true);
+  });
+
+  // One reason per row, in one order, so the readiness panel and the routing
+  // report name the same one. A type nothing files under yet is that reason
+  // first: switched off or not, the first of its type or not, no ticket of its
+  // has ever been held.
+  it('names one reason a row files nothing routable, a type not filed yet first', () => {
+    const first = row('First');
+    const second = row('Second');
+    const off = row('Off', { isActive: false });
+    expect(filingGap(first, [first, second])).toBeNull();
+    expect(filingGap(second, [first, second])).toBe('another_row');
+    expect(filingGap(off, [off, first])).toBe('inactive');
+    expect(filingGap(row('Owned', { type: 'whatsapp', ownerActive: true }), [])).toBe('owned');
+
+    // The myBlu app files under its oldest active row, as web chat does.
+    const app = row('App', { type: 'api' });
+    const appOff = row('App off', { type: 'api', isActive: false });
+    expect(filingGap(app, [app])).toBeNull();
+    expect(filingGap(appOff, [appOff, app])).toBe('inactive');
   });
 });

@@ -985,10 +985,20 @@ describe('routingChannels', () => {
     }
 
     const rows = (await routingChannels()).filter((row) => row.type === 'webchat');
-    expect(rows.map((row) => [row.name, row.files])).toEqual([
-      ['Ada web chat', false],
-      ['Zed web chat', true],
+    expect(rows.map((row) => [row.name, row.files, row.gap])).toEqual([
+      ['Ada web chat', false, 'another_row'],
+      ['Zed web chat', true, null],
     ]);
+  });
+
+  // The page names each row's own reason: a myBlu app row, the only one of
+  // its kind and nobody's, files its own tickets, and was once said to be
+  // filed for by another row.
+  it('says a myBlu app row, the only one of its kind, files its own tickets', async () => {
+    const app = await channel({ type: 'api', name: 'myBlu app', routingMode: 'category' });
+
+    const row = (await routingChannels()).find((candidate) => candidate.id === app)!;
+    expect(row).toMatchObject({ files: true, gap: null });
   });
 });
 

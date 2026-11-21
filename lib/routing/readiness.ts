@@ -17,7 +17,7 @@ import {
   type ConversationChannel,
 } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured } from '@/lib/typesafe/client';
-import { filesRoutableTickets, filingRowFor, ownedByActiveAgent } from './filing';
+import { filingGap, filingRowFor, ownedByActiveAgent } from './filing';
 import { routingModeOf, routingStartFor, type RoutingMode, type RoutingStart } from './mode';
 import { routingLock, type RoutingLock } from './mode-copy';
 
@@ -204,10 +204,10 @@ type RuleInput = {
 
 /**
  * Oldest first, ties by id — the order every ingest path picks "the row of
- * this type" by (`defaultEmailChannel`, `channelFor`, `webchatChannel`), so
- * "is this the row tickets are filed under?" is answered the way they answer
- * it. The owner by a join rather than through `numberOwnership`, which reads
- * every number's history beside it.
+ * this type" by (`defaultEmailChannel`, `channelFor`, `webchatChannel`, and
+ * `apiChannel` for the myBlu app's), so "is this the row tickets are filed
+ * under?" is answered the way they answer it. The owner by a join rather than
+ * through `numberOwnership`, which reads every number's history beside it.
  */
 function readChannels(): Promise<ChannelInput[]> {
   return db
@@ -285,7 +285,8 @@ function assessReadiness(input: {
     const mode = routingModeOf(channel);
     const filingRow = filingRowFor(channel, input.channels);
     const owned = ownedByActiveAgent(channel) ? (channel.ownerName ?? 'its owner') : null;
-    const files = filesRoutableTickets(channel, input.channels);
+    const gap = filingGap(channel, input.channels);
+    const files = gap === null;
     const starts = files ? routingStartFor(mode, classifier.mode) : null;
     const base = {
       id: channel.id,
@@ -306,7 +307,8 @@ function assessReadiness(input: {
       warnings.push({ kind: 'never_routes', reason: lock });
       return { ...base, warnings };
     }
-    if (!channel.isActive) warnings.push({ kind: 'inactive' });
+    // In `filingGap`'s order, so the panel and the report name one reason.
+    if (gap === 'inactive') warnings.push({ kind: 'inactive' });
     else if (filingRow && filingRow !== channel) {
       warnings.push({ kind: 'not_filing_row', filingRow: filingRow.name });
     }

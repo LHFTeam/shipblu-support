@@ -7,6 +7,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { enqueueSurveyCreated } from '@/lib/api/notify';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
@@ -21,7 +22,13 @@ import {
   type SurveyAvailability,
   type SurveyTrigger,
 } from './decision';
-import { carriesLink, type AnswerSource, type SurveyDelivery } from './delivery';
+import {
+  carriesLink,
+  PULLED,
+  type AnswerSource,
+  type MessageDelivery,
+  type SurveyDelivery,
+} from './delivery';
 import type { SurveyMessageMeta } from './meta-survey';
 import { LOW_RATING_MAX, MAX_COMMENT } from './limits';
 import { ALERT_PRIORITY } from './low-rating';
@@ -248,18 +255,23 @@ async function surveyedWithin(tx: Tx, conversationId: string, days: number): Pro
   return rows.length > 0;
 }
 
-export type SurveySend = {
+/** What every send of a survey is given, whatever carries it. */
+type SurveySendBase = {
   conversationId: string;
   /** `ar` or `en`: what it goes out in. */
   locale: 'ar' | 'en';
-  delivery: SurveyDelivery;
   snapshot: SurveySnapshot;
   /** `csat_settings.resurvey_after_days`, read by the job. */
   resurveyAfterDays: number;
   /** The wording rule it goes out with, for the page to ask the same question. */
   ruleId: string | null;
+};
+
+/** A survey a message carries (`sendSurvey`). */
+export type SurveySend = SurveySendBase & {
   /** The requester's address, where the carrier is email. */
   requesterEmail: string | null;
+  delivery: MessageDelivery;
   /**
    * The message, given the link it will carry — none on Meta's two
    * deliveries (`carriesLink`), whose answer comes back on Meta's own
@@ -272,8 +284,11 @@ export type SurveySend = {
   };
 };
 
-export type SendOutcome =
-  | { kind: 'sent'; surveyId: string; messageId: string }
+/** The myBlu app's survey (`sendPulledSurvey`): no message and no link, since the app pulls it. */
+export type PulledSurveySend = SurveySendBase;
+
+/** Why a send wrote no survey: the answers both sends share. */
+type NotSent =
   /** The ticket already carries a survey inside the window; nothing was written. */
   | { kind: 'surveyed' }
   /** The ticket changed under the job since it decided; the reason is the job's to record. */
@@ -281,9 +296,14 @@ export type SendOutcome =
   /** The ticket is gone. */
   | { kind: 'drop' };
 
+/** What `sendSurvey` answers: the survey and the message that carries it. */
+export type SendOutcome = { kind: 'sent'; surveyId: string; messageId: string } | NotSent;
+
+/** What `sendPulledSurvey` answers: the survey, which no message carries. */
+export type PulledSendOutcome = { kind: 'sent'; surveyId: string } | NotSent;
+
 /**
- * Writes the survey and the message that carries it, as one transaction, and
- * says what happened — which is the whole of this module's idempotency:
+ * The half of a send both deliveries take, inside the send's transaction:
  *
  * - **The ticket row is locked first, and the decision's facts re-read behind
  *   it.** Two jobs for one ticket — a resolve, a reopen and a resolve seconds
@@ -292,6 +312,85 @@ export type SendOutcome =
  *   reply reopened the ticket between the job's read and this write is the
  *   case the delay exists for, so the status and the "don't survey" flag
  *   are read again here, where nothing can change them until the commit.
+ * - **The ticket's last survey, unanswered, is superseded.** Most are never
+ *   answered, so without this the next resolution would meet
+ *   `csat_surveys_open_idx` on the old row and the job would die. Its link
+ *   still records an answer if the customer gets round to it.
+ * - **The new survey's row**, with its snapshot and when it was sent.
+ *
+ * Answers the survey's id, or why none was written.
+ */
+async function writeSurveyRow(
+  tx: Tx,
+  send: SurveySendBase,
+  delivery: SurveyDelivery,
+  tokenHash: string | null,
+): Promise<{ surveyId: string } | NotSent> {
+  await lockTicket(tx, send.conversationId);
+
+  const [ticket] = await tx
+    .select({
+      deletedAt: conversations.deletedAt,
+      isSpam: conversations.isSpam,
+      mergedIntoId: conversations.mergedIntoId,
+      suppressedBy: suppressedBy(),
+      statusCategory: ticketStatuses.category,
+    })
+    .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(eq(conversations.id, send.conversationId))
+    .limit(1);
+  if (!ticket || ticket.deletedAt || ticket.isSpam || ticket.mergedIntoId) return { kind: 'drop' };
+  if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
+    return { kind: 'skip', reason: 'reopened' };
+  }
+  if (ticket.suppressedBy !== null) {
+    return { kind: 'skip', reason: suppressionReason(ticket.suppressedBy) };
+  }
+  // `decideSurvey`'s rule, again behind the lock and in its order — after
+  // the agent's or the rule's flag: closed in between, a chat is one the
+  // visitor can no longer open.
+  if (isClosedChat(send.snapshot.channel, ticket.statusCategory)) {
+    return { kind: 'skip', reason: 'chat_closed' };
+  }
+
+  if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) {
+    return { kind: 'surveyed' };
+  }
+
+  await tx
+    .update(csatSurveys)
+    .set({ status: 'expired' })
+    .where(
+      and(eq(csatSurveys.conversationId, send.conversationId), eq(csatSurveys.status, 'sent')),
+    );
+
+  const rows = await tx
+    .insert(csatSurveys)
+    .values({
+      conversationId: send.conversationId,
+      status: 'sent',
+      tokenHash,
+      // Snapshotted at send time: reassigning the ticket next week must not
+      // silently move this score onto somebody else's record.
+      agentId: send.snapshot.agentId,
+      groupId: send.snapshot.groupId,
+      channel: send.snapshot.channel,
+      delivery,
+      locale: send.locale,
+      ruleId: send.ruleId,
+      sentAt: new Date(),
+    })
+    .returning({ id: csatSurveys.id });
+  return { surveyId: rows[0]!.id };
+}
+
+/**
+ * Writes the survey and the message that carries it, as one transaction, and
+ * says what happened — which is the whole of this module's idempotency. The
+ * lock, the re-read and the supersession are `writeSurveyRow`'s, shared with
+ * the app's pulled survey; then:
+ *
  * - **The survey, the message, the event and the carrier job commit
  *   together.** A worker stopped between them, or a pool error on the way,
  *   left a `sent` row with no message, which the retry counted as surveyed;
@@ -302,10 +401,6 @@ export type SendOutcome =
  *   on the same transaction (`enqueueAutomatedDelivery(…, tx)`), the job
  *   exists exactly when its survey does, and the worker cannot see it
  *   before.
- * - **The ticket's last survey, unanswered, is superseded.** Most are never
- *   answered, so without this the next resolution would meet
- *   `csat_surveys_open_idx` on the old row and the job would die. Its link
- *   still records an answer if the customer gets round to it.
  *
  * The raw token exists only in the link — it is hashed on the way into the
  * database and never recoverable — so a survey link that gets lost cannot be
@@ -318,64 +413,9 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
   const url = token ? `${publicBaseUrl()}/${send.locale}/csat/${token}` : null;
 
   return db.transaction(async (tx) => {
-    await lockTicket(tx, send.conversationId);
-
-    const [ticket] = await tx
-      .select({
-        deletedAt: conversations.deletedAt,
-        isSpam: conversations.isSpam,
-        mergedIntoId: conversations.mergedIntoId,
-        suppressedBy: suppressedBy(),
-        statusCategory: ticketStatuses.category,
-      })
-      .from(conversations)
-      .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-      .where(eq(conversations.id, send.conversationId))
-      .limit(1);
-    if (!ticket || ticket.deletedAt || ticket.isSpam || ticket.mergedIntoId)
-      return { kind: 'drop' };
-    if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
-      return { kind: 'skip', reason: 'reopened' };
-    }
-    if (ticket.suppressedBy !== null) {
-      return { kind: 'skip', reason: suppressionReason(ticket.suppressedBy) };
-    }
-    // `decideSurvey`'s rule, again behind the lock and in its order — after
-    // the agent's or the rule's flag: closed in between, a chat is one the
-    // visitor can no longer open.
-    if (isClosedChat(send.snapshot.channel, ticket.statusCategory)) {
-      return { kind: 'skip', reason: 'chat_closed' };
-    }
-
-    if (await surveyedWithin(tx, send.conversationId, send.resurveyAfterDays)) {
-      return { kind: 'surveyed' };
-    }
-
-    await tx
-      .update(csatSurveys)
-      .set({ status: 'expired' })
-      .where(
-        and(eq(csatSurveys.conversationId, send.conversationId), eq(csatSurveys.status, 'sent')),
-      );
-
-    const rows = await tx
-      .insert(csatSurveys)
-      .values({
-        conversationId: send.conversationId,
-        status: 'sent',
-        tokenHash: token ? hashToken(token) : null,
-        // Snapshotted at send time: reassigning the ticket next week must not
-        // silently move this score onto somebody else's record.
-        agentId: send.snapshot.agentId,
-        groupId: send.snapshot.groupId,
-        channel: send.snapshot.channel,
-        delivery: send.delivery,
-        locale: send.locale,
-        ruleId: send.ruleId,
-        sentAt: new Date(),
-      })
-      .returning({ id: csatSurveys.id });
-    const surveyId = rows[0]!.id;
+    const written = await writeSurveyRow(tx, send, send.delivery, token ? hashToken(token) : null);
+    if (!('surveyId' in written)) return written;
+    const { surveyId } = written;
 
     const body = send.body(url);
     const messageId = await writeAutomatedReply(
@@ -404,6 +444,47 @@ export async function sendSurvey(send: SurveySend): Promise<SendOutcome> {
     await enqueueAutomatedDelivery(send.snapshot.channel, messageId, CARRIER_PRIORITY, tx);
 
     return { kind: 'sent', surveyId, messageId };
+  });
+}
+
+/**
+ * The myBlu app's survey (`api_pull`): the app pulls it
+ * (`GET /api/v1/tickets/{id}/survey`) and draws it itself, so the row is the
+ * delivery and nothing carries it — no message, no link, no carrier job. One
+ * transaction, as `sendSurvey`'s, through the same lock, re-read and
+ * supersession (`writeSurveyRow`); then:
+ *
+ * - **The timeline's line**, which `writeAutomatedReply` writes for every
+ *   other delivery, with the same data less the message.
+ * - **`survey.created`**, queued on this transaction so the job exists exactly
+ *   when the survey does (`lib/api/notify.ts`), so myBlu's backend can prompt
+ *   the user with a push.
+ * - **A touch of the ticket**, so its `notify_change` trigger fires, as
+ *   `writeSkip`'s does: no row above notifies — no message is written and the
+ *   ticket's row is not otherwise touched — so an agent who pressed "Send
+ *   now" on an app ticket kept reading "Survey queued" until something else
+ *   changed the ticket. `updated_at` is no queue column, so it wakes this
+ *   ticket and no queue.
+ */
+export async function sendPulledSurvey(send: PulledSurveySend): Promise<PulledSendOutcome> {
+  return db.transaction(async (tx) => {
+    const written = await writeSurveyRow(tx, send, PULLED, null);
+    if (!('surveyId' in written)) return written;
+    const { surveyId } = written;
+
+    await tx.insert(conversationEvents).values({
+      conversationId: send.conversationId,
+      type: 'csat_sent',
+      actorLabel: ACTOR,
+      data: { surveyId, delivery: PULLED, locale: send.locale },
+    });
+    await enqueueSurveyCreated(surveyId, { priority: CARRIER_PRIORITY, on: tx });
+    await tx
+      .update(conversations)
+      .set({ updatedAt: new Date() })
+      .where(eq(conversations.id, send.conversationId));
+
+    return { kind: 'sent', surveyId };
   });
 }
 
@@ -483,6 +564,14 @@ export async function surveyByToken(token: string): Promise<SurveyView | null> {
 export type ResponseOutcome = 'recorded' | 'comment_added' | 'ignored';
 
 /**
+ * `recordAnswer`'s `ratable` for a door that takes a superseded survey: a link
+ * in an email, which always did — the customer may answer the survey they
+ * were sent, whichever came after — and Messenger's feedback card, a message
+ * in the thread like a link in a mail.
+ */
+export const TAKES_SUPERSEDED = ['sent', 'expired'] as const;
+
+/**
  * Records an answer, whichever door it came through — the page a link opens,
  * or the card in the chat widget — so the rules below are one function's and
  * no door can answer them differently. The caller has already established
@@ -497,8 +586,9 @@ export type ResponseOutcome = 'recorded' | 'comment_added' | 'ignored';
  * - No answer yet: the rating is recorded, with where it came from. First
  *   answer wins, enforced by requiring `responded_at` to still be null, so a
  *   link forwarded to a colleague cannot overwrite what the customer said.
- *   A superseded survey still takes one, as its link always did; a skipped
- *   row never does, because there was no survey to answer.
+ *   A superseded survey takes one only through a door that says so
+ *   (`TAKES_SUPERSEDED`); a skipped row never does, because there was no
+ *   survey to answer.
  * - Already answered, comment still empty: the comment is attached without
  *   touching the score. That is the same customer finishing their sentence.
  * - Anything else: ignored.
@@ -508,6 +598,21 @@ export async function recordAnswer(
   rating: number,
   comment: string | null,
   source: AnswerSource,
+  {
+    ratable = ['sent'],
+  }: {
+    /**
+     * The statuses a rating may still be recorded on, asked under the ticket's
+     * lock where the rating is written. `sent` alone unless the door says
+     * otherwise: a door that draws a superseded survey closed — the widget's
+     * card, the app — and checked only a read made before this, let a newer
+     * send in between make the survey `expired` and the rating land on it
+     * anyway. The default is that guard, so a door that forgets the option
+     * refuses rather than lets through; the two that take a superseded survey,
+     * a link and Messenger's card, pass `TAKES_SUPERSEDED`.
+     */
+    ratable?: readonly ('sent' | 'expired')[];
+  } = {},
 ): Promise<ResponseOutcome> {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) return 'ignored';
 
@@ -527,7 +632,7 @@ export async function recordAnswer(
   // `responded_at is null`.
   if (
     subject.respondedAt === null &&
-    (await recordRating(surveyId, subject.conversationId, rating, trimmed, source))
+    (await recordRating(surveyId, subject.conversationId, rating, trimmed, source, ratable))
   ) {
     return 'recorded';
   }
@@ -565,6 +670,7 @@ async function recordRating(
   rating: number,
   comment: string | null,
   source: AnswerSource,
+  ratable: readonly ('sent' | 'expired')[],
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await lockTicket(tx, conversationId);
@@ -575,7 +681,7 @@ async function recordRating(
       .where(
         and(
           eq(csatSurveys.id, surveyId),
-          inArray(csatSurveys.status, ['sent', 'expired']),
+          inArray(csatSurveys.status, [...ratable]),
           isNull(csatSurveys.respondedAt),
         ),
       )

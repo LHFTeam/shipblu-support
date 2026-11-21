@@ -25,7 +25,8 @@
     "test:watch": "vitest",
     "test:db": "vitest run -c vitest.db.config.mts",
     "db:seed": "tsx db/seed.ts",
-    "lint:strict": "eslint -c eslint.strict.config.mjs lib worker app --max-warnings=0"
+    "lint:strict": "eslint -c eslint.strict.config.mjs lib worker app --max-warnings=0",
+    "api:openapi": "tsx scripts/myblu-openapi.ts && prettier --write docs/myblu-api.openapi.json"
   },
   "dependencies": {
     "@node-rs/argon2": "2.1.0",

@@ -1,13 +1,13 @@
 import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
-import { recordSkip, sendSurvey, suppressedBy } from '@/lib/csat';
+import { recordSkip, sendPulledSurvey, sendSurvey, suppressedBy } from '@/lib/csat';
 import { surveyEmail } from '@/lib/csat/email';
 import { metaSurveyMessage } from '@/lib/csat/meta-survey';
-import { wordingForTicket } from '@/lib/csat/rules';
-import { surveyText } from '@/lib/csat/wording';
+import { wordingRuleForTicket } from '@/lib/csat/rules';
+import { resolveWording, surveyText } from '@/lib/csat/wording';
 import { cardRefusalStands, decideSurvey, type SurveyTrigger } from '@/lib/csat/decision';
-import { carriesLink } from '@/lib/csat/delivery';
+import { carriesLink, PULLED } from '@/lib/csat/delivery';
 import { readCsatSettings } from '@/lib/csat/settings';
 import { isCommentTicket, isMetaChannel, isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
@@ -150,31 +150,41 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // already read so it is not read twice.
   const locale = await requesterLocale(conversationId, ticket.contactLocale);
 
-  // The admin's wording for this ticket's group and channel, or the built-in.
-  const { ruleId, wording } = await wordingForTicket(
-    { groupId: ticket.groupId, channel: ticket.channel },
-    locale,
-  );
+  // The admin's wording rule for this ticket's group and channel, or none for
+  // the built-in: the row records it, and the survey is worded from it.
+  const rule = await wordingRuleForTicket({ groupId: ticket.groupId, channel: ticket.channel });
 
-  const sent = await sendSurvey({
+  const common = {
     conversationId,
     locale,
-    delivery: decision.delivery,
     snapshot,
     resurveyAfterDays: settings.resurveyAfterDays,
-    ruleId,
-    requesterEmail: ticket.contactEmail,
-    body: (url) => {
-      const delivery = decision.delivery;
-      if (!carriesLink(delivery)) return metaSurveyMessage(wording, locale, delivery, settings);
-      if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
-      if (delivery === 'email_link') {
-        const email = surveyEmail(wording, locale, url);
-        return { text: email.text, html: email.html };
-      }
-      return { text: surveyText(wording, url), html: null };
-    },
-  });
+    ruleId: rule?.id ?? null,
+  };
+  const delivery = decision.delivery;
+  // The myBlu app pulls its survey and words it from the row's rule and
+  // locale when it asks (`lib/api/survey.ts`), so it is sent no body and
+  // worded nothing here: only a survey that carries a body resolves one.
+  const sent =
+    delivery === PULLED
+      ? await sendPulledSurvey(common)
+      : await sendSurvey({
+          ...common,
+          requesterEmail: ticket.contactEmail,
+          delivery,
+          body: (url) => {
+            const wording = resolveWording(rule, locale);
+            if (!carriesLink(delivery)) {
+              return metaSurveyMessage(wording, locale, delivery, settings);
+            }
+            if (!url) throw new Error(`a ${delivery} survey goes out with its link`);
+            if (delivery === 'email_link') {
+              const email = surveyEmail(wording, locale, url);
+              return { text: email.text, html: email.html };
+            }
+            return { text: surveyText(wording, url), html: null };
+          },
+        });
 
   if (sent.kind === 'drop') return;
 

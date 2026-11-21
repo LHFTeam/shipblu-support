@@ -190,10 +190,22 @@ export function textToHtml(text: string): string {
     .join('\n');
 }
 
-/** One-line preview for the inbox list. */
+/**
+ * One line of a text, at most `maxLength` UTF-16 code units with its ellipsis:
+ * the inbox list's preview, and the subject a chat's opening message names.
+ * The cut steps back one unit where it would keep the first half of a
+ * surrogate pair — an emoji, most often, at the edge — because half a
+ * character is a lone surrogate, which Postgres's driver stores as U+FFFD and
+ * every reader then draws as a replacement mark before the `…`
+ * (`previewText` in `lib/api/preview.ts`, for the same reason).
+ */
 export function preview(text: string, maxLength = 140): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
-  return collapsed.length <= maxLength ? collapsed : `${collapsed.slice(0, maxLength - 1)}…`;
+  if (collapsed.length <= maxLength) return collapsed;
+  const end = maxLength - 1;
+  const last = collapsed.charCodeAt(end - 1);
+  const splits = last >= 0xd800 && last <= 0xdbff;
+  return `${collapsed.slice(0, splits ? end - 1 : end)}…`;
 }
 
 /**

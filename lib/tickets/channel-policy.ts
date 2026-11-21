@@ -22,9 +22,9 @@ export type ConversationChannel = (typeof conversations.$inferSelect)['channel']
 /**
  * Every channel a conversation row can carry.
  *
- * This is deliberately broader than `FILTERABLE_CHANNELS`: portal and API
- * tickets belong in the default working queue even though the filter does not
- * offer them as standalone choices yet. Realtime subscriptions need the full
+ * This is deliberately broader than `FILTERABLE_CHANNELS`: portal tickets
+ * belong in the default working queue even though the filter does not offer
+ * them as a standalone choice yet. Realtime subscriptions need the full
  * set or those tickets stop updating while the ordinary `all` query still
  * returns them.
  *
@@ -67,12 +67,16 @@ void allChannelsAreListed;
  * `plans/ticket-category-routing.md`): offered before, their views were empty
  * while every comment ticket sat under Facebook or Instagram. Since Stage 1.3 a
  * CHECK keeps every comment ticket on its comment channel, so these views hold
- * all of them.
+ * all of them. `api`, the myBlu app, joined the same way, with the stage that
+ * writes the first such ticket (`plans/myblu-ticket-api.md`, stage 4): a view
+ * is a stored link, and one naming a channel a revert takes away would reset
+ * itself to every channel.
  */
 export const FILTERABLE_CHANNELS = [
   'email',
   'whatsapp',
   'webchat',
+  'api',
   'facebook',
   'facebook_comment',
   'instagram',
@@ -160,6 +164,29 @@ export function metaPlatformOf(channel: MetaChannel): MetaPlatform {
  */
 export function isCommentTicket(channel: string, externalId: string | null): boolean {
   return isCommentChannel(channel) || rootCommentId(externalId) !== null;
+}
+
+/**
+ * Whether anything the software writes on this ticket must leave the
+ * customer's name out, wherever a template would put it (`{{customer_name}}`).
+ * One question, so a sender that greets by name asks it once, and a reason
+ * added here reaches every such sender.
+ *
+ * The one reason is **a public comment thread** (`isCommentTicket`). The reply
+ * is published under the post, and the contact's name can have come from
+ * another channel — a merge with the customer's email contact, an agent's
+ * edit — that the commenter never used in public.
+ *
+ * The myBlu app (`api`) is greeted by name, by the owner's decision of
+ * 2026-11-15. Its contact is found by the phone the app vouched for, and a
+ * number that changed hands would carry the previous holder's name; but
+ * numbers rarely change hands, and the name is the one myBlu's backend sends,
+ * brought up to date at every session (`plans/myblu-ticket-api.md`,
+ * _Identity_), so a new holder's own name replaces it once they set it in the
+ * app.
+ */
+export function withholdsCustomerName(channel: string, externalId: string | null): boolean {
+  return isCommentTicket(channel, externalId);
 }
 
 /** The channel a platform's public comments are filed on. */
@@ -319,11 +346,12 @@ export function readOnlyChannels(): ConversationChannel[] {
  * fallback — beside the latest message it would put the first message and the
  * last on one card.
  *
- * A named list rather than `sendsByEmail()`, which asks how a reply travels and
- * answers yes for `api`, whose tickets nothing writes yet and so have no subject
- * to vouch for. It would also answer yes for the next channel answered by
- * email, which would then default to "has a written subject" and bring the
- * duplicate back without anything failing.
+ * A named list rather than `sendsByEmail()`, which asks how a reply travels,
+ * not who wrote the subject. It answered yes for `api` until the myBlu app's
+ * replies stopped being email (`rowIsDelivery`), and an app ticket's subject is
+ * its opening words, as a chat's is. It would also answer yes for the next
+ * channel answered by email, which would then default to "has a written
+ * subject" and bring the duplicate back without anything failing.
  */
 const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
 
@@ -343,6 +371,11 @@ export function hasWrittenSubject(channel: string): boolean {
  * mail at a photo's size; and a camera photo attached to a mail runs to
  * megabytes. A named list, as `WRITTEN_SUBJECT` is, so a channel added later
  * keeps the cautious behaviour until somebody decides otherwise.
+ *
+ * The myBlu app (`api`) joined with its files (stage 7 of
+ * `plans/myblu-ticket-api.md`): a chat on a phone, whose files are a photo of a
+ * parcel or a voice note typed by the bytes as the widget's are
+ * (`sniffWidgetFile`), never a mail's signature logos.
  */
 const CHAT_MEDIA: readonly ConversationChannel[] = [
   'whatsapp',
@@ -352,6 +385,7 @@ const CHAT_MEDIA: readonly ConversationChannel[] = [
   'instagram',
   'instagram_comment',
   'webchat',
+  'api',
 ];
 
 export function drawsMediaInline(channel: string): boolean {

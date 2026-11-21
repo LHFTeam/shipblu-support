@@ -113,13 +113,17 @@ describe('a usable body', () => {
     const response = await csat.POST(post(JSON.stringify({ token: 't', rating: 4, comment: 5 })));
 
     expect(response.status).toBe(204);
-    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 4, null, 'page');
+    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 4, null, 'page', {
+      ratable: ['sent', 'expired'],
+    });
   });
 
   it('records a rating with its comment', async () => {
     await csat.POST(post(JSON.stringify({ token: 't', rating: 2, comment: ' slow ' })));
 
-    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 2, ' slow ', 'page');
+    expect(recordAnswer).toHaveBeenCalledWith('survey-1', 2, ' slow ', 'page', {
+      ratable: ['sent', 'expired'],
+    });
   });
 
   it('answers an unknown token exactly as it answers a known one, and records nothing', async () => {

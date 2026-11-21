@@ -70,6 +70,7 @@ export async function purgeJobs(
       'download_media',
       'classify_priority',
       'classify_category',
+      'notify_myblu',
     ] satisfies JobType[];
 
     scopes.push(
@@ -106,12 +107,18 @@ export async function purgeJobs(
         ),
       )!,
       and(
-        inArray(jobs.type, ['send_csat', 'settle_routing'] satisfies JobType[]),
+        inArray(jobs.type, [
+          'send_csat',
+          'settle_routing',
+          'finish_api_message',
+        ] satisfies JobType[]),
         inArray(sql`${jobs.payload}->>'conversationId'`, conversationIds),
       )!,
-      // A low rating's alert names its survey, which cascades with the ticket.
+      // A low rating's alert, and the myBlu app's push about a survey it pulls,
+      // name their survey, which cascades with the ticket. A push about a reply
+      // names its message instead, and is matched above.
       and(
-        eq(jobs.type, 'notify_low_rating' satisfies JobType),
+        inArray(jobs.type, ['notify_low_rating', 'notify_myblu'] satisfies JobType[]),
         exists(
           tx
             .select({ id: csatSurveys.id })

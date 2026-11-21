@@ -13,6 +13,7 @@ import {
   PermanentJobError,
   reclaimStalledJobs,
   STALLED_AFTER_MS,
+  takeQueuedJob,
   touchJobs,
 } from './index';
 
@@ -87,6 +88,36 @@ describe('hasActiveJob', () => {
 
     await db.update(jobs).set({ status: 'dead' }).where(eq(jobs.id, id));
     expect(await hasActiveJob('import_freshdesk_kb')).toBe(false);
+  });
+});
+
+// A backstop the request that wrote it goes on to run itself
+// (`lib/api/finish.ts`): exactly one of the two may run the work.
+describe('takeQueuedJob', () => {
+  const payload = {
+    messageId: '00000000-0000-4000-8000-000000000001',
+    conversationId: '00000000-0000-4000-8000-000000000002',
+  };
+
+  it('takes a job nobody has run, once, and leaves its key spent', async () => {
+    const id = await enqueued('finish_api_message', payload, { dedupeKey: 'take:first' });
+
+    expect(await takeQueuedJob('take:first')).toBe(true);
+    expect(await takeQueuedJob('take:first')).toBe(false);
+    expect((await row(id)).status).toBe('completed');
+    expect(await claimJobs(10, 'worker-a')).toEqual([]);
+    expect(await enqueue('finish_api_message', payload, { dedupeKey: 'take:first' })).toBeNull();
+  });
+
+  it('never takes a job a worker has claimed, nor one waiting to retry', async () => {
+    const id = await enqueued('finish_api_message', payload, { dedupeKey: 'take:claimed' });
+    const [claimed] = await claimJobs(10, 'worker-a');
+    expect(claimed?.id).toBe(id);
+
+    expect(await takeQueuedJob('take:claimed')).toBe(false);
+    await failJob(claimed!, new Error('pooler timeout'));
+    expect((await row(id)).status).toBe('pending');
+    expect(await takeQueuedJob('take:claimed')).toBe(false);
   });
 });
 

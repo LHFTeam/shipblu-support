@@ -16,10 +16,12 @@ import { importFreshdeskKb } from './import-freshdesk-kb';
 import { moderateMetaComment } from './moderate-meta-comment';
 import { normaliseKbFormatting } from './normalise-kb-formatting';
 import { notifyLowRating } from './notify-low-rating';
+import { notifyMyblu } from './notify-myblu';
 import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rehostKbImages } from './rehost-kb-images';
 import { settleRoutingJob } from './settle-routing';
+import { finishApiMessage } from './finish-api-message';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
 import { rotateWhatsAppCredentials } from './rotate-whatsapp-credentials';
@@ -63,6 +65,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   classify_priority: (job) => classifyPriority(job),
   classify_category: (job) => classifyCategory(job),
   settle_routing: (job) => settleRoutingJob(job),
+  finish_api_message: (job) => finishApiMessage(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   complete_coexistence_onboarding: completeCoexistenceOnboarding,
@@ -73,6 +76,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   normalise_kb_formatting: (job) => normaliseKbFormatting(job),
   rehost_kb_images: (job) => rehostKbImages(job),
   notify_low_rating: notifyLowRating,
+  notify_myblu: notifyMyblu,
   presence_sweep: () => presenceSweep(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),

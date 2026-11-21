@@ -26,6 +26,7 @@ export type JobType =
   | 'run_time_automations'
   | 'send_csat'
   | 'notify_low_rating'
+  | 'notify_myblu'
   | 'rollup_metrics'
   | 'snapshot_backlog'
   | 'import_freshdesk_kb'
@@ -37,6 +38,7 @@ export type JobType =
   | 'classify_priority'
   | 'classify_category'
   | 'settle_routing'
+  | 'finish_api_message'
   | 'normalise_kb_formatting'
   | 'rehost_kb_images'
   | 'restore_resolved_at'
@@ -342,6 +344,28 @@ export async function completeJob(attempt: Attempt): Promise<boolean> {
     .returning({ id: jobs.id });
 
   return updated.length > 0;
+}
+
+/**
+ * Takes a job nobody has run, by its key, before a worker claims it, and says
+ * whether the caller now owns its work: for a job written as a backstop beside
+ * rows a request goes on to act on itself (`finish_api_message`,
+ * `lib/api/finish.ts`), which runs only when the request never got there.
+ *
+ * One conditional update, so the take and a claim cannot both win: a claim
+ * holding the row first leaves it `processing`, which this then finds and
+ * refuses, and a take first leaves the claim's `SKIP LOCKED` nothing to find.
+ * Only while `attempts` is 0, so a job a worker has begun is never taken from
+ * it, even one waiting to retry. Completed rather than deleted, so its key
+ * stays spent and the row says the work was taken.
+ */
+export async function takeQueuedJob(dedupeKey: string): Promise<boolean> {
+  const taken = await db
+    .update(jobs)
+    .set({ status: 'completed', completedAt: new Date() })
+    .where(and(eq(jobs.dedupeKey, dedupeKey), eq(jobs.status, 'pending'), eq(jobs.attempts, 0)))
+    .returning({ id: jobs.id });
+  return taken.length > 0;
 }
 
 /**

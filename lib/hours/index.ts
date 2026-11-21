@@ -133,6 +133,13 @@ export function isWithinBusinessHours(config: HoursConfig, at: Date = new Date()
  * Drives the widget's "we reply from 9am" line. Scanning forward day by day
  * rather than computing it arithmetically is what makes holidays and an empty
  * weekend fall out for free.
+ *
+ * It stops early on a schedule that can never open. A holiday only ever shuts
+ * a day, so a weekday found to open nothing on a day no holiday shut opens
+ * nothing on any date; once all seven have been found so, nothing ahead can
+ * open. Without that, a schedule with no open day — every day emptied, or
+ * every range unreadable — scanned the whole lookahead on every call, a year
+ * of days (about 13 ms) on each `GET /config` of the myBlu API.
  */
 export function nextOpeningAt(
   config: HoursConfig,
@@ -142,13 +149,20 @@ export function nextOpeningAt(
   const start = DateTime.fromJSDate(at, { zone: config.timezone });
   if (!start.isValid) return null;
 
+  const shutWeekdays = new Set<number>();
   for (let offset = 0; offset <= lookaheadDays; offset += 1) {
     const day = start.plus({ days: offset }).startOf('day');
+    const intervals = openIntervalsOn(day, config);
 
-    for (const interval of openIntervalsOn(day, config)) {
+    for (const interval of intervals) {
       // Strictly after `at`, so a call made mid-window returns the *next*
       // window rather than one already in progress.
       if (interval.start.toMillis() > start.toMillis()) return interval.start.toJSDate();
+    }
+
+    if (intervals.length === 0 && !isHoliday(day, config.holidays)) {
+      shutWeekdays.add(day.weekday);
+      if (shutWeekdays.size === 7) return null;
     }
   }
 

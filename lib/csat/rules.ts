@@ -28,13 +28,18 @@ export async function listWordingRules(): Promise<WordingRule[]> {
   return db.select().from(csatRules).orderBy(asc(csatRules.createdAt));
 }
 
-/** The rule a ticket's survey uses, and its strings for the customer's language. */
-export async function wordingForTicket(
-  scope: { groupId: string | null; channel: string },
-  locale: WordingLocale,
-): Promise<{ ruleId: string | null; wording: Wording }> {
-  const rule = pickWordingRule(await listWordingRules(), scope);
-  return { ruleId: rule?.id ?? null, wording: resolveWording(rule, locale) };
+/**
+ * The rule a ticket's survey goes out under, or null for the built-in wording:
+ * the row records it, and whatever words the survey later — its page, the
+ * widget's card, the app's route — words it from that rule. A survey sent
+ * with a body words it now, through `resolveWording`; one the app pulls is
+ * worded when the app asks (`lib/api/survey.ts`), so it needs only this.
+ */
+export async function wordingRuleForTicket(scope: {
+  groupId: string | null;
+  channel: string;
+}): Promise<WordingRule | null> {
+  return pickWordingRule(await listWordingRules(), scope);
 }
 
 /**

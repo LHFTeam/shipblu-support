@@ -164,6 +164,11 @@ export const JOB_PAYLOADS = {
   // window, keyed on the ticket; re-run by hand after it dies, so strict, and a
   // uuid because the id goes straight into a locked read.
   settle_routing: z.strictObject({ conversationId: z.uuid() }),
+  // Written in the transaction that stores a message from the myBlu app, as
+  // the backstop for the work after its commit (`lib/api/finish.ts`); run by
+  // hand only for a message that never had it, so strict. The ticket rides
+  // along for the purge, which cancels a ticket's jobs by it.
+  finish_api_message: z.strictObject({ messageId: z.uuid(), conversationId: z.uuid() }),
   // `trigger` says who asked — an agent, a rule, or the sidebar's "Send now" —
   // because the admin may switch off surveys for rule-resolved tickets, and the
   // job cannot tell a rule's resolve from an agent's off the row.
@@ -174,6 +179,25 @@ export const JOB_PAYLOADS = {
   // The survey, not the ticket: one alert per answer, and the handler's
   // once-only check keys on it. Strict because CI runs it by hand.
   notify_low_rating: z.strictObject({ surveyId: z.uuid() }),
+  // The myBlu webhook: one arm per event, told apart by `event`, so the
+  // survey's (`survey.created`, stage 8 of `plans/myblu-ticket-api.md`) arrives
+  // as a second arm rather than a changed shape this strict schema would send
+  // every queued job of the first to `dead`. Ids only: a dead job's payload is
+  // kept for good, and the body is rebuilt from the rows when it is sent.
+  // Strict because a delivery that died is sent again by hand, as
+  // `npm run job -- notify_myblu event=message.created messageId=…`; a uuid
+  // because the id goes straight into a query, where a malformed one is 22P02.
+  // That resend sends only within a day of the message (`MAX_EVENT_AGE_MS`,
+  // 23 hours), and a job reaches `dead` about seventeen hours in, so there are
+  // some six hours to do it in. Later, it sends nothing on purpose — a push a
+  // day late is about a reply the app has long since shown, and the receiver
+  // may have forgotten the event's id and push twice — and says so at `warn`:
+  // `nothing sent: older than a day … reason=stale`. The exit is still 0,
+  // since nothing failed; the line is the answer to read.
+  notify_myblu: z.discriminatedUnion('event', [
+    z.strictObject({ event: z.literal('message.created'), messageId: z.uuid() }),
+    z.strictObject({ event: z.literal('survey.created'), surveyId: z.uuid() }),
+  ]),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
   // matches neither half rather than being read as WhatsApp media.

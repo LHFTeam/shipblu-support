@@ -9,6 +9,7 @@ import { readCategoryAiSettings } from '@/lib/category-ai/settings';
 import { allLimited } from '@/lib/concurrency';
 import { formatDateTime } from '@/lib/format';
 import { dateIn, rangeIn, reportingZone, type ReportWindow } from '@/lib/reports/rollup';
+import type { FilingGap } from '@/lib/routing/filing';
 import { routingStartFor, type RoutingMode } from '@/lib/routing/mode';
 import {
   idleClassifierSentence,
@@ -519,9 +520,8 @@ function StateNotice({
             {inert.length > 0 ? (
               <>
                 Set to route, though no ticket can enter routing there:{' '}
-                <ChannelNames channels={inert} modes />. Another row of the same kind files its
-                tickets, or its number’s owner is given them as they arrive; Settings → Channels
-                says which.{' '}
+                <ChannelNames channels={inert} modes />. {whyNoTicketEnters(inert)}; Settings →
+                Channels says which.{' '}
               </>
             ) : null}
             Every other active channel starts its tickets in its default group.
@@ -566,6 +566,25 @@ function ChannelNames({
 }
 
 /**
+ * Why no ticket enters routing on `rows`, naming each reason one of them has
+ * (`filingGap`) once, and no other: one sentence covering every reason told an
+ * admin that a myBlu app row, the only one of its kind and owned by nobody,
+ * was filed for by another row or given to its owner.
+ */
+function whyNoTicketEnters(rows: readonly RoutingChannel[]): string {
+  const reasons: Record<FilingGap, string> = {
+    inactive: 'it is switched off',
+    another_row: 'another row of its kind files its tickets',
+    owned: 'its number’s owner is given them as they arrive',
+  };
+  const gaps = [...new Set(rows.map((row) => row.gap))].filter(
+    (gap): gap is FilingGap => gap !== null,
+  );
+  const sentence = gaps.map((gap) => reasons[gap]).join(', or ');
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
+/**
  * Which of the two things a ticket needs to enter routing is missing, in the
  * forms' words — and, when both are set, whether any channel set to route can
  * hold a ticket at all (`files`), which only the readiness panel can explain.
@@ -581,7 +600,7 @@ function neverRoutedHint(classifier: CategoryAiMode, routingNow: RoutingChannel[
   if (missing.length > 0) return `${rule} ${missing.join(' ')}`;
   const entering = routingNow.filter((channel) => channel.files);
   if (entering.length === 0) {
-    return `${rule} Both are set, but no ticket on ${routingNow.map((channel) => channel.name).join(', ')} can enter it: another row of its kind files its tickets, or its number’s owner is given them as they arrive. Settings → Channels says which.`;
+    return `${rule} Both are set, but no ticket on ${routingNow.map((channel) => channel.name).join(', ')} can enter it. ${whyNoTicketEnters(routingNow)}; Settings → Channels says which.`;
   }
   return `${rule} Both are set, so the next new ticket on ${entering.map((channel) => channel.name).join(', ')} enters routing.`;
 }
