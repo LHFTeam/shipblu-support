@@ -329,8 +329,15 @@ async function teamRow(
   return row!.id;
 }
 
-/** `last_message_at` set from Postgres's own text, microseconds and all. */
+/**
+ * A ticket's newest message stamped from Postgres's own text, microseconds and
+ * all: its replies, which `lastMessageAt` and the list's order are read from,
+ * and `last_message_at` with them, as a reply moves both.
+ */
 async function stampLast(conversationId: string, text: string): Promise<void> {
+  await db.execute(
+    sql`update messages set created_at = ${text}::timestamptz where conversation_id = ${conversationId} and kind = 'reply'`,
+  );
   await db.execute(
     sql`update conversations set last_message_at = ${text}::timestamptz where id = ${conversationId}`,
   );
@@ -2119,6 +2126,51 @@ describe('GET /tickets', () => {
     expect(JSON.stringify(noted)).not.toContain('Private');
   });
 
+  // `last_message_at` also moves for what the app never sees: a hub answering a
+  // side conversation bumps it, so the ticket floats up the inbox. Read off the
+  // column, the app's list moved the ticket to the top with nothing new to read.
+  it('moves no ticket for what the app cannot read, though last_message_at moves', async () => {
+    await appRow();
+    const token = await minted();
+    const a = await opened(token, { text: 'First parcel', locale: 'en' });
+    const b = await opened(token, { text: 'Second parcel', locale: 'en' });
+    await stampLast(a.ticket.id, '2026-11-12 09:00:00+00');
+    await stampLast(b.ticket.id, '2026-11-12 10:00:00+00');
+    const before = await listed(token);
+    expect(idsOf(before)).toEqual([b.ticket.id, a.ticket.id]);
+    const readOne = async () => {
+      const response = await ticket(token, a.ticket.id);
+      expect(response.status).toBe(200);
+      return TicketEnvelope.parse(await response.json()).ticket;
+    };
+    const readBefore = await readOne();
+
+    // What `lib/side-conversations/ingest.ts` writes when a hub answers.
+    await db.execute(
+      sql`update conversations set last_message_at = '2026-11-12 11:00:00+00' where id = ${a.ticket.id}`,
+    );
+    const after = await listed(token);
+    expect(after.tickets).toEqual(before.tickets);
+    expect(await readOne()).toEqual(readBefore);
+    expect(readBefore.lastMessageAt).toBe('2026-11-12T09:00:00.000Z');
+
+    // A reply the app can read moves it, by the reply's own instant.
+    const replyId = await storeAgentReply(a.ticket.id, 'api', {
+      authorAgentId: await agent(),
+      bodyText: 'We have asked the courier.',
+    });
+    const [stored] = await db
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(eq(messages.id, replyId));
+    const answered = await listed(token);
+    expect(idsOf(answered)).toEqual([a.ticket.id, b.ticket.id]);
+    expect(answered.tickets[0]).toMatchObject({
+      lastMessageAt: stored!.createdAt.toISOString(),
+      lastActivityAt: stored!.createdAt.toISOString(),
+    });
+  });
+
   // Scoped by the identity, never by the token or the session row.
   it('lists the same tickets and badge to a fresh session for the same user, and none after account_deleted', async () => {
     await appRow();
@@ -2228,10 +2280,12 @@ describe('GET /tickets', () => {
     expect(answer.pollAfterSeconds).toBe(30);
     expect(answer.pollAfterSeconds).toBe(config.polling.listSeconds);
 
+    // Newest first by the newest reply the app may read: the team's last row
+    // is the resolved ticket's, and the closed ticket has only its opening.
     expect(answer.tickets.map(({ id, status, canReply }) => ({ id, status, canReply }))).toEqual([
-      { id: closed.ticket.id, status: 'closed', canReply: false },
       { id: resolved.ticket.id, status: 'resolved', canReply: true },
       { id: open.ticket.id, status: 'open', canReply: true },
+      { id: closed.ticket.id, status: 'closed', canReply: false },
     ]);
     for (const listedTicket of answer.tickets) {
       const one = TicketEnvelope.parse(await (await ticket(token, listedTicket.id)).json());
@@ -2252,12 +2306,13 @@ describe('GET /tickets', () => {
     const { ticket: older } = await opened(token);
     const { ticket: newer } = await opened(token, { text: 'A second parcel', locale: 'en' });
 
-    // The newer ticket's own `(last_message_at, id)` in this server's
-    // spelling, which the list would page from to the older one: unsigned,
-    // signed for a thread, and signed for the list under a secret this server
-    // does not hold. And a thread's cursor as a thread answered it.
+    // The newer ticket's own `(lastActivityAt, id)` in this server's
+    // spelling, its one message's instant, which the list would page from to
+    // the older one: unsigned, signed for a thread, and signed for the list
+    // under a secret this server does not hold. And a thread's cursor as a
+    // thread answered it.
     const [row] = await db.execute<{ t: string }>(
-      sql`select last_message_at::text as t from conversations where id = ${newer.id}`,
+      sql`select max(created_at)::text as t from messages where conversation_id = ${newer.id} and kind = 'reply'`,
     );
     const own = { time: row!.t, id: newer.id };
     const thread = MessagesPage.parse(await (await page(token, newer.id)).json()).newerCursor;
