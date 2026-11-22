@@ -288,17 +288,19 @@ async function presentedSession(
  * this server cannot serve. To stop serving one, add its name and the first
  * version still served — `['sdk-ts', '1.0.0']`, which also retires every
  * `1.0.0-rc.N` before it — in the change that needs it, with a dated line in
- * `docs/myblu-api-changelog.md`; it takes effect when that change deploys. A code constant rather than a variable, because which builds
- * a server can answer is a fact about its code, and a value set in the
- * dashboard could refuse every installed app on one typo.
+ * `docs/myblu-api-changelog.md`; it takes effect when that change deploys. A
+ * code constant rather than a variable, because which builds a server can
+ * answer is a fact about its code, and a value set in the dashboard could
+ * refuse every installed app on one typo.
  */
 export const MINIMUM_VERSIONS: ReadonlyMap<string, string> = new Map();
 
 /**
  * The first token in a `ShipBlu-Client` header older than its minimum, as the
  * header spelled it, or null. A version is ordered as semver orders it
- * (`olderThan`); one with no numbers to read is older than any minimum, since
- * nothing can say it is not. A token whose name has no minimum is not judged.
+ * (`olderThan`); one it cannot read whole — `dev`, `1.0.0rc1`, `1.0.0-` — is
+ * older than any minimum, since nothing can say it is not. A token whose name
+ * has no minimum is not judged.
  */
 export function belowMinimum(
   header: string,
@@ -316,7 +318,7 @@ export function belowMinimum(
  * Whether `version` comes before `minimum` in semver's order: the dotted
  * numbers first, a missing one read as 0, then a pre-release (`-rc.1`) before
  * the release it leads to, and two pre-releases of one release by their
- * identifiers. Build metadata (`+…`) and anything else after that is not read.
+ * identifiers. Build metadata (`+…`) is not read.
  *
  * Read by its numbers alone, as it was, `1.0.0-rc.1` was `1.0.0`, and the SDK's
  * first version is that release candidate: a minimum of `1.0.0` would have let
@@ -352,15 +354,31 @@ function preReleaseBefore(have: string[] | null, need: string[] | null): boolean
     if (a === b) continue;
     const aNumber = /^\d+$/.test(a);
     const bNumber = /^\d+$/.test(b);
-    if (aNumber && bNumber) return Number(a) < Number(b);
+    // `01` and `1` differ as text and not as numbers: semver forbids the
+    // first, but the header's schema does not, so they compare equal and the
+    // identifiers after them decide.
+    if (aNumber && bNumber) {
+      if (Number(a) !== Number(b)) return Number(a) < Number(b);
+      continue;
+    }
     if (aNumber !== bNumber) return aNumber;
     return a < b;
   }
   return false;
 }
 
+/** Dot-separated identifiers, none empty: a pre-release's, or build metadata's. */
+const IDENTIFIERS = '[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*';
+const SEMVER = new RegExp(`^(\\d+(?:\\.\\d+)*)(?:-(${IDENTIFIERS}))?(?:\\+${IDENTIFIERS})?$`);
+
+/**
+ * A version read whole, or null. Unanchored, text it could not read was
+ * dropped, so `1.0.0rc1`, `1.0.0.rc1` and `1.0.0-` read as `1.0.0`, and
+ * `rc_1` as `rc`: a candidate spelled without semver's hyphen passed the
+ * minimum of the release it leads to.
+ */
 function semver(version: string): { core: number[]; pre: string[] | null } | null {
-  const match = /^(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?/.exec(version);
+  const match = SEMVER.exec(version);
   if (!match) return null;
   return { core: match[1]!.split('.').map(Number), pre: match[2]?.split('.') ?? null };
 }

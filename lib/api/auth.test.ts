@@ -476,12 +476,33 @@ describe('belowMinimum', () => {
     expect(belowMinimum('sdk-ts/1.0.0-rc.1+42 app/5.4.1', minimums)).toBe('sdk-ts/1.0.0-rc.1+42');
   });
 
+  // Read from the front only, a candidate spelled without semver's hyphen read
+  // as the release, and passed its minimum.
+  it('reads a version whole, and refuses one it cannot', () => {
+    const minimums = new Map([['sdk-ts', '1.0.0']]);
+    for (const version of [
+      '1.0.0rc1',
+      '1.0.0.rc1',
+      '1.0.0-',
+      '1.0.0-rc..1',
+      '1.0.0-rc_1',
+      '1.0.0+',
+    ]) {
+      expect(belowMinimum(`sdk-ts/${version} app/5.4.1`, minimums)).toBe(`sdk-ts/${version}`);
+    }
+    expect(belowMinimum('sdk-ts/1.0.0.1 app/5.4.1', minimums)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.0+build.7 app/5.4.1', minimums)).toBeNull();
+  });
+
   it('orders two pre-releases of one release as semver does', () => {
     const atRc2 = new Map([['sdk-ts', '1.0.0-rc.2']]);
     expect(belowMinimum('sdk-ts/1.0.0-rc.1', atRc2)).toBe('sdk-ts/1.0.0-rc.1');
     expect(belowMinimum('sdk-ts/1.0.0-rc.2', atRc2)).toBeNull();
-    // Numbers by value, not as text.
+    // Numbers by value, not as text: `01` is `1`, and what follows decides.
     expect(belowMinimum('sdk-ts/1.0.0-rc.10', atRc2)).toBeNull();
+    expect(belowMinimum('sdk-ts/1.0.0-rc.01.0', new Map([['sdk-ts', '1.0.0-rc.1.5']]))).toBe(
+      'sdk-ts/1.0.0-rc.01.0',
+    );
     expect(belowMinimum('sdk-ts/1.0.0', atRc2)).toBeNull();
     expect(belowMinimum('sdk-ts/0.9.0', atRc2)).toBe('sdk-ts/0.9.0');
 
