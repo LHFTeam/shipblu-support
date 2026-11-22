@@ -32,7 +32,7 @@ import { isUuid } from '@/lib/http/uuid';
  * from the instant it names. Bound to its kind, though (`CursorKind`): a
  * thread's and the tickets list's cursors carry the same two things, a
  * timestamp and a uuid, and read as the other one would page from a message's
- * `created_at` on a ticket's `last_message_at`, or the other way round — a
+ * `created_at` on a ticket's `lastActivityAt`, or the other way round — a
  * page from an instant that says nothing about the rows it is compared with.
  * So each signs under a purpose of its own, and one sent where the other is
  * read is refused like any cursor this server did not mint. The kind is a

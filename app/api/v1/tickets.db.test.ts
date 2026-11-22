@@ -2171,6 +2171,38 @@ describe('GET /tickets', () => {
     });
   });
 
+  // A ticket the app opened always has its opening message, so only a ticket
+  // whose replies are all gone reaches the fallback: without it the field is
+  // null, `ticketView` throws, or an inner join drops the ticket from the list.
+  it('answers a ticket with no reply it can read by its created_at, and still lists and pages it', async () => {
+    await appRow();
+    const token = await minted();
+    const bare = await opened(token, { text: 'First parcel', locale: 'en' });
+    const other = await opened(token, { text: 'Second parcel', locale: 'en' });
+    await stampLast(other.ticket.id, '2026-11-12 09:00:00+00');
+    await db.execute(
+      sql`update conversations set created_at = '2026-11-12 10:00:00+00' where id = ${bare.ticket.id}`,
+    );
+    await db.execute(
+      sql`update messages set kind = 'note' where conversation_id = ${bare.ticket.id}`,
+    );
+
+    const response = await ticket(token, bare.ticket.id);
+    expect(response.status).toBe(200);
+    expect(TicketEnvelope.parse(await response.json()).ticket).toMatchObject({
+      createdAt: '2026-11-12T10:00:00.000Z',
+      lastMessageAt: '2026-11-12T10:00:00.000Z',
+      lastActivityAt: '2026-11-12T10:00:00.000Z',
+      preview: null,
+    });
+
+    const first = await listed(token, '?limit=1');
+    expect(idsOf(first)).toEqual([bare.ticket.id]);
+    const next = await listed(token, `?limit=1&before=${first.olderCursor}`);
+    expect(idsOf(next)).toEqual([other.ticket.id]);
+    expect(next.olderCursor).toBeNull();
+  });
+
   // Scoped by the identity, never by the token or the session row.
   it('lists the same tickets and badge to a fresh session for the same user, and none after account_deleted', async () => {
     await appRow();

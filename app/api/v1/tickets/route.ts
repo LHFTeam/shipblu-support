@@ -16,7 +16,7 @@ const ROUTE = 'POST /tickets';
 const LIST_ROUTE = 'GET /tickets';
 
 /**
- * The user's tickets, newest first by `(lastMessageAt, id)`, paged back with
+ * The user's tickets, newest first by `(lastActivityAt, id)`, paged back with
  * `before`, every status, and only those opened with one tracking number when
  * `trackingNumber` asks (`listTickets`). Polled by re-reading the first page
  * at `pollAfterSeconds`. A read: one statement after the session — two on a
