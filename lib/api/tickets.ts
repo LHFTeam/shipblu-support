@@ -313,27 +313,67 @@ const trackingNumberSql = sql<
 type SurveyNow = ReturnType<typeof appSurveyRow>;
 
 /**
- * `lastActivityAt`: the later of the ticket's newest message and the newest
- * survey the app was given (`survey.givenAt`), `greatest` passing over the
- * null of a ticket never surveyed. What the list is ordered and paged by, so a
- * survey written on a ticket far down the list, which no message moves, still
- * brings it to the first page the SDK re-reads. Mapped as `last_message_at`
- * is, to a `Date`; the cursor takes its text.
+ * When the newest message the app may read was stored: a reply, not a
+ * reaction, the rule `previewSql` and the thread read by. One lateral row per
+ * ticket, as the survey's is, so the order, the cursor and the field read one
+ * computation; an aggregate, so the row is there, its instant null, for a
+ * ticket with no such message. Built per statement, for `appSurveyRow`'s
+ * reason.
+ *
+ * Never `conversations.last_message_at`, which also moves for what the app
+ * never sees: a hub answering a side conversation bumps it on purpose, so the
+ * ticket floats up the inbox (`lib/side-conversations/ingest.ts`). Read here,
+ * it moved the ticket to the top of the app's list with nothing new to read,
+ * and `lastMessageAt` no longer meant what the contract says, "when its newest
+ * message was stored". The owner chose this reading over accepting the jump on
+ * 2026-11-22, before an app build depended on the field.
  */
-function lastActivityOf(survey: SurveyNow) {
-  return sql<Date>`greatest(${conversations.lastMessageAt}, ${survey.givenAt})`.mapWith(
+function appReplyRow() {
+  return db
+    .select({ at: sql<string | null>`max(${messages.createdAt})`.as('app_reply_at') })
+    .from(messages)
+    .where(
+      and(eq(messages.conversationId, conversations.id), eq(messages.kind, 'reply'), notReaction()),
+    )
+    .as('app_reply');
+}
+
+type ReplyNow = ReturnType<typeof appReplyRow>;
+
+/**
+ * `lastMessageAt`, off the lateral reply row. A ticket the app opened always
+ * has its opening message; `created_at` stands in only for one whose replies
+ * are all gone, so the field stays the instant the contract says it is. Mapped
+ * as `last_message_at` is, to a `Date`.
+ */
+function lastMessageOf(reply: ReplyNow) {
+  return sql<Date>`coalesce(${reply.at}, ${conversations.createdAt})`.mapWith(
     conversations.lastMessageAt,
   );
 }
 
 /**
- * A ticket's columns as the read model takes them, off the survey row the
- * statement joins (`leftJoinLateral(survey, sql\`true\`)`). Built per
- * statement, as the row is: built once at module scope, the subquery asked
+ * `lastActivityAt`: the later of the ticket's newest message (`lastMessageOf`)
+ * and the newest survey the app was given (`survey.givenAt`), `greatest`
+ * passing over the null of a ticket never surveyed. What the list is ordered
+ * and paged by, so a survey written on a ticket far down the list, which no
+ * message moves, still brings it to the first page the SDK re-reads. The cursor
+ * takes its text.
+ */
+function lastActivityOf(reply: ReplyNow, survey: SurveyNow) {
+  return sql<Date>`greatest(${lastMessageOf(reply)}, ${survey.givenAt})`.mapWith(
+    conversations.lastMessageAt,
+  );
+}
+
+/**
+ * A ticket's columns as the read model takes them, off the reply and survey
+ * rows the statement joins (`leftJoinLateral(…, sql\`true\`)`). Built per
+ * statement, as the rows are: built once at module scope, a subquery asked
  * `db` for a builder on import, which reads the environment, and `next build`
  * imports route modules with none.
  */
-function ticketColumns(survey: SurveyNow) {
+function ticketColumns(reply: ReplyNow, survey: SurveyNow) {
   return {
     id: conversations.id,
     number: conversations.number,
@@ -342,8 +382,8 @@ function ticketColumns(survey: SurveyNow) {
     status: ticketStatuses.category,
     statusLabel: shownLabelSql,
     createdAt: conversations.createdAt,
-    lastMessageAt: conversations.lastMessageAt,
-    lastActivityAt: lastActivityOf(survey),
+    lastMessageAt: lastMessageOf(reply),
+    lastActivityAt: lastActivityOf(reply, survey),
     unreadCount: unreadCountSql,
     preview: previewSql,
     survey: survey.status,
@@ -409,14 +449,16 @@ async function ownedTicketRow(
   ticketId: string,
   { withTotal = false, executor = db }: { withTotal?: boolean; executor?: Executor } = {},
 ) {
+  const reply = appReplyRow();
   const survey = appSurveyRow();
   const [row] = await executor
     .select({
-      ...ticketColumns(survey),
+      ...ticketColumns(reply, survey),
       unreadTotal: withTotal ? unreadTotalSql(caller) : sql<number>`0`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(reply, sql`true`)
     .leftJoinLateral(survey, sql`true`)
     .where(and(eq(conversations.id, ticketId), ownedTicket(caller)))
     .limit(1);
@@ -491,7 +533,7 @@ const cursorOf = (row: MessageRow): string =>
 /**
  * The row-value comparison with a cursor, its instant bound as the text
  * Postgres printed. A message's `(created_at, id)` unless the columns are
- * named — the list's are a ticket's `(last_message_at, id)` — so every page of
+ * named — the list's are a ticket's `(lastActivityAt, id)` — so every page of
  * this API binds a cursor one way.
  */
 function vsCursor(
@@ -640,8 +682,8 @@ export type TicketsListPage = {
 
 /**
  * A page of the caller's tickets, newest first by `(lastActivityAt, id)` —
- * the later of the newest message and the newest survey the app was given
- * (`lastActivityOf`) — one row more than the page so the caller knows
+ * the later of the newest message the app may read and the newest survey it
+ * was given (`lastActivityOf`) — one row more than the page so the caller knows
  * whether anything is left, every status, and only those opened with one
  * tracking number when one is asked for. The order and the `before`
  * comparison change together, on the same expression, as the inbox's do: the
@@ -651,8 +693,8 @@ export type TicketsListPage = {
  * its last message — moved nothing, and the SDK, which re-reads only that page,
  * never saw its `survey` turn up. The order is computed per row, so no index
  * serves it: the identity's own tickets, a few per user, are what it sorts,
- * each reading its surveys once, in the lateral row the order and the cursor
- * both name (`appSurveyRow`).
+ * each reading its replies and its surveys once, in the lateral rows the order
+ * and the cursor both name (`appReplyRow`, `appSurveyRow`).
  *
  * The identity is named on the joined ownership row as well as inside
  * `ownedTicket`, so the planner can drive from `api_tickets_identity_idx`, a
@@ -676,17 +718,19 @@ export type TicketsListPage = {
  * text Postgres printed, never through a `Date`.
  */
 export function listStatement(caller: Caller, asked: ListAsked) {
+  const reply = appReplyRow();
   const survey = appSurveyRow();
-  const lastActivity = lastActivityOf(survey);
+  const lastActivity = lastActivityOf(reply, survey);
   return db
     .select({
-      ...ticketColumns(survey),
+      ...ticketColumns(reply, survey),
       cursorTime: sql<string>`${lastActivity}::text`,
       unreadTotal: unreadTotalSql(caller),
     })
     .from(conversations)
     .innerJoin(apiTickets, eq(apiTickets.conversationId, conversations.id))
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .leftJoinLateral(reply, sql`true`)
     .leftJoinLateral(survey, sql`true`)
     .where(
       and(
