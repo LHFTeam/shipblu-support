@@ -1947,9 +1947,12 @@ The SDK was to follow the API: 0.1 after stage 4 (text and polling), 0.2
 after 5 (history, unread, the sample app), 0.3 after 6 (push), 0.4 after 7
 (files), 1.0 after 8. All eight stages reached production in one release
 (2026-11-21), so no 0.x is cut. The SDK's first version is `1.0.0-rc.1`, a
-pre-release published under `next`, which the stages' production checks run
-the sample app against; `1.0.0` follows under `latest` once they pass. The
-SDK's AGENTS.md records the decision.
+pre-release published under `next` and tagged before the stages' production
+checks begin. Stage 7's checks and the end of stage 8's run the sample app
+against it; the others use `curl`, the console and a request bin.
+`1.0.0` follows under `latest` once those pass and the side conversation's
+`lastMessageAt` (_Risks_) is decided. The SDK's AGENTS.md records the
+decision.
 
 Documentation moves in the pull request that makes it stale. AGENTS.md gains
 `app/api/v1/` under _Layout_, a paragraph of the rules below, `rowIsDelivery`
@@ -2035,10 +2038,13 @@ The rules AGENTS.md gains, as they would be written:
   newer `lastMessageAt` and no message it can read: the timing of the team's
   internal correspondence, and a field that no longer means "when its newest
   message was stored". Stage 5 orders the list by the column as the plan
-  says. The fix is to answer and order by the newest reply the app may read,
+  says. It moves `lastActivityAt`, which the list is now ordered by, the same
+  way. The fix is to answer and order by the newest reply the app may read,
   which `previewSql` already finds, and it changes `GET /tickets/{id}` too, so
-  it is decided before the SDK's first version ships the list, or accepted
-  here.
+  it is decided, or accepted here, before an app build depends on the list:
+  `1.0.0-rc.1`, which only the production checks run, can go out with it
+  open, and the SDK's `1.0.0`, the version myBlu builds against, waits for
+  the owner's decision.
 - **Not determined:** whether the backend holds a stable user id it never
   shows the app (the app holds none, so one is exposed or minted either way);
   the app's minimum OS versions, which are Expo SDK 57's defaults and are read
