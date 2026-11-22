@@ -2308,9 +2308,14 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   with the token set and a test phone no WhatsApp contact holds: mint, create,
   see "myBlu app" and the header line in the inbox, answer from the console,
   read the answer back, then purge the ticket and the contact — this writes to
-  production, and the purge is what removes it. **The SDK's 0.1 is cut from
-  here.** Way back: switch the `api` row off, which stops new tickets while the
-  app's reads and replies go on; or unset the token, which stops the whole API.
+  production, and the purge is what removes it. **No SDK version is cut
+  here,** though the plan first cut 0.1 at this point. All eight stages
+  reached production in one release (2026-11-21), so the SDK's first version,
+  `1.0.0-rc.1`, already on the SDK's `dev`, is tagged by the owner before these
+  checks begin and published under `next`: stage 7's checks and the end of
+  stage 8's run the sample app against it, and `1.0.0` follows them. Way back:
+  switch the `api` row off, which stops new tickets while the app's reads and
+  replies go on; or unset the token, which stops the whole API.
   Not a revert, once one `api` ticket exists: the build before this one scopes
   the help centre's portal by contact with only the read-only channels left
   out, so it would list, open and take a reply on every app ticket for whoever
@@ -2339,33 +2344,39 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   read counts as none) and `opensAt` looked for a year ahead. Production's
   default schedule, read for the stage's design on 2026-11-13, is Cairo 10:00
   to 18:00, Saturday to Thursday, with the Sales Team's override shut on
-  Saturday. **A pilot can run from here;**
-  the SDK's 0.2 follows. After the release carrying stages 4 and 5 is on
-  `main`, and once an `api` ticket exists (the pilot's, or the owner's test
-  ticket before it is purged), read the plans on production, read-only: first
-  `select to_regclass('public.api_tickets')`, the `api` row and ticket counts,
-  `pg_stat_user_tables.last_autoanalyze` for `conversations`, `messages` and
-  `api_tickets`, and `most_common_vals` of `conversations.channel`; then each
-  statement built locally with `toSQL()`, a real identity, contact and ticket
-  inlined, under `EXPLAIN (ANALYZE, BUFFERS, VERBOSE)` — the poll's two
-  statements (`ownedTicketRow` with the badge, then the page), `listStatement`
-  with a limit of 21 with and without `trackingNumber`, and the badge alone —
-  and `markStatement` under a plain `EXPLAIN` only, since `ANALYZE` would run
-  the `UPDATE`. Expect `api_tickets_identity_idx` driving the list and the
-  badge, the preview and unread subqueries above the sort, run at most
-  `limit + 1` times, the badge once as an InitPlan, and the marker an InitPlan
-  on `conversations_pkey` over `messages_conversation_idx`. A walk of
+  Saturday. **A pilot can run from here.** After the release carrying stages 4
+  and 5 is on `main`, and once an `api` ticket exists (the pilot's, or the
+  owner's test ticket before it is purged), read the plans on production,
+  read-only: first `select to_regclass('public.api_tickets')`, the `api` row and
+  ticket counts, `pg_stat_user_tables.last_autoanalyze` for `conversations`,
+  `messages` and `api_tickets`, and `most_common_vals` of
+  `conversations.channel`; then each statement built locally with `toSQL()`, a
+  real identity, contact and ticket inlined, under
+  `EXPLAIN (ANALYZE, BUFFERS, VERBOSE)` — the poll's two statements
+  (`ownedTicketRow` with the badge, then the page), `listStatement` with a limit
+  of 21 with and without `trackingNumber`, and the badge alone — and
+  `markStatement` under a plain `EXPLAIN` only, since `ANALYZE` would run the
+  `UPDATE`. Expect `api_tickets_identity_idx` driving the list and the badge,
+  the newest-reply and survey lateral rows below the sort, one each per ticket
+  of the identity (#542), the preview and unread subqueries above it, run at
+  most `limit + 1` times, the badge once as an InitPlan, and the marker an
+  InitPlan on `conversations_pkey` over `messages_conversation_idx`. A walk of
   `conversations_channel_idx` instead means `'api'` is not yet among that
   column's common values: record it with the `last_autoanalyze` read, and
   re-check later; an `ANALYZE` by hand writes statistics and needs the owner.
   Write what was found here. Way back: revert, which puts stage 4's body-less
-  `404` back on `GET /tickets` and Next's `404` on the marker, both of which
-  the SDK reads as a route not served yet, and leaves `support` absent, which
-  every client handles; a `read_at` or `read` already written stays, and the
-  build before it draws both. Two things stay open with the owner: a side
-  conversation's answer moves an `api` ticket's `lastMessageAt`, so the app's
-  list can show the ticket move with nothing new to read, and the tracking
-  number rides in the list's query string (the plan's _Risks_).
+  `404` back on `GET /tickets` and Next's `404` on the marker, both of which the
+  SDK reads as a route not served yet, and leaves `support` absent, which every
+  client handles; a `read_at` or `read` already written stays, and the build
+  before it draws both. A side conversation's answer moved an `api` ticket's
+  `lastMessageAt`, and with it `lastActivityAt`, which orders the list, so the
+  app's list could show the ticket move with nothing new to read. The owner
+  decided on 2026-11-22 that both read the newest reply the app may read (#542):
+  it changes what a field means, so it lands before an app build depends on the
+  list, and the SDK's `1.0.0`, the version myBlu builds against, waits for it;
+  `1.0.0-rc.1`, which only the production checks run, does not. One thing stays
+  open with the owner: the tracking number rides in the list's query string (the
+  plan's _Risks_).
 - **The myBlu webhook arrives with stage 6 of `plans/myblu-ticket-api.md`,
   inert until `MYBLU_WEBHOOK_URL` is set** (§2). No schema, no migration and no
   shape: the webhook's `message.created` and the push keys were published in
@@ -2390,11 +2401,11 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   no text and no phone, and a signature the guide's `verify` accepts under the
   throwaway; then purge the ticket and the contact, and unset the URL (or set
   it to myBlu's receiver, with a fresh secret handed to the backend, once that
-  receiver exists and verifies). **The launch waits for this.** The SDK's 0.3
-  follows. Way back: unset the URL, which stops new jobs at once on the web
-  service and makes the queued ones send nothing once the worker restarts; a
-  revert leaves any `notify_myblu` row queued without a handler, failing until
-  it is `dead`, which is harmless.
+  receiver exists and verifies). **The launch waits for this.** Way back:
+  unset the URL, which stops new jobs at once on the web service and makes the
+  queued ones send nothing once the worker restarts; a revert leaves any
+  `notify_myblu` row queued without a handler, failing until it is `dead`, which
+  is harmless.
 - **The myBlu app's files arrive with stage 7 of `plans/myblu-ticket-api.md`,**
   inert on the same terms as stage 4 (the token and an active `api` row). No
   schema, no migration, no variable and no shape: the multipart bodies, the
@@ -2443,7 +2454,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   the survey from `curl`, answer it, add a comment, and check the ticket's
   timeline reads the survey as sent and rated "in the myBlu app", and that one
   `survey.created` reached the bin; then purge the ticket and the contact, and
-  put both switches back. This writes to production. The SDK's 1.0 follows.
+  put both switches back. This writes to production. Then the round trip from
+  the SDK's sample app at `v1.0.0-rc.1` (tagged before stage 4's checks): sign
+  in, open a ticket, read the console's answer, send a photo, tap a push, answer
+  the survey; the SDK's `example/README.md` says how, and its backend stand-in
+  refuses production's hosts unless told. `1.0.0` follows under `latest` once
+  that passes and #542, stage 5's side-conversation answer, is on production.
   Way back: `survey_api` off on `/admin/csat`, which surveys no further app
   ticket and leaves those sent readable; a revert also leaves the enum values,
   which nothing then writes.

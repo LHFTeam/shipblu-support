@@ -45,15 +45,15 @@ answers `404` without this API's error body, and an SDK changes nothing on one
 (_Errors_). The document marks each operation with the stage that serves it
 (`x-shipblu-stage`):
 
-| Stage | Serves                                                                                                   |
-| ----- | -------------------------------------------------------------------------------------------------------- |
-| 0b    | `GET /openapi.json`, the contract of the server answering, with no credential                            |
-| 3     | `POST /sessions`, `POST /sessions/revoke`, `DELETE /session`, `GET /config`                              |
-| 4     | `POST /tickets`, `GET /tickets/{id}`, `GET` and `POST /tickets/{id}/messages`. The SDK's 0.1 is cut here |
-| 5     | `GET /tickets`, `POST /tickets/{id}/read`, and `support` on `GET /config`. A pilot can run from here     |
-| 6     | The webhook's `message.created`. The launch waits for this                                               |
-| 7     | Files: multipart on the two sends, and `GET /attachments/{id}`                                           |
-| 8     | `GET` and `POST /tickets/{id}/survey`, and the webhook's `survey.created`                                |
+| Stage | Serves                                                                                                     |
+| ----- | ---------------------------------------------------------------------------------------------------------- |
+| 0b    | `GET /openapi.json`, the contract of the server answering, with no credential                              |
+| 3     | `POST /sessions`, `POST /sessions/revoke`, `DELETE /session`, `GET /config`                                |
+| 4     | `POST /tickets`, `GET /tickets/{id}`, `GET` and `POST /tickets/{id}/messages`                              |
+| 5     | `GET /tickets`, `POST /tickets/{id}/read`, and `support` on `GET /config`. A pilot can run from here       |
+| 6     | The webhook's `message.created`. The launch waits for this                                                 |
+| 7     | Files: multipart on the two sends, and `GET /attachments/{id}`                                             |
+| 8     | `GET` and `POST /tickets/{id}/survey`, and the webhook's `survey.created`. The SDK's first version follows |
 
 ### Running a mock
 
