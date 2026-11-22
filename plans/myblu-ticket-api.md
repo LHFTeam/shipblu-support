@@ -1281,14 +1281,14 @@ the contract.
 
 "An SDK" is three things, and they live in two places.
 
-| Deliverable                            | Where                                                                     | Who                                               | When                                |
-| -------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------- |
-| Contract, guide, conformance scenarios | this repository                                                           | this team                                         | stage 0b                            |
-| Mock                                   | the committed document under any OpenAPI mock server; the guide names one | the app team runs                                 | stage 0b                            |
-| Changelog                              | `docs/myblu-api-changelog.md`, one dated line per contract change         | this team                                         | from stage 0b                       |
-| TypeScript SDK                         | the SDK's repository, published from tags                                 | this team                                         | 0.1 after stage 4                   |
-| Sample app                             | `example/` there: list, thread, composer with a photo, push hand-off      | this team                                         | with 0.2                            |
-| Swift and Kotlin, or Dart              | the same repository, if ever                                              | not needed: the app is React Native (_Decisions_) | only for a native app written later |
+| Deliverable                            | Where                                                                     | Who                                               | When                                  |
+| -------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------- |
+| Contract, guide, conformance scenarios | this repository                                                           | this team                                         | stage 0b                              |
+| Mock                                   | the committed document under any OpenAPI mock server; the guide names one | the app team runs                                 | stage 0b                              |
+| Changelog                              | `docs/myblu-api-changelog.md`, one dated line per contract change         | this team                                         | from stage 0b                         |
+| TypeScript SDK                         | the SDK's repository, published from tags                                 | this team                                         | 1.0.0-rc.1, then 1.0.0, after stage 8 |
+| Sample app                             | `example/` there: list, thread, composer with a photo, push hand-off      | this team                                         | with 1.0.0-rc.1                       |
+| Swift and Kotlin, or Dart              | the same repository, if ever                                              | not needed: the app is React Native (_Decisions_) | only for a native app written later   |
 
 ### In this repository: the contract
 
@@ -1642,7 +1642,9 @@ Then on production, by the owner, with the token set and a test phone no
 WhatsApp contact holds: mint, create, see "myBlu app" and the header line in
 the inbox, answer from the console, read the answer back, then purge the
 ticket and the contact. The pull request says plainly that this writes to
-production and what removes it. **The SDK's 0.1 is cut from here.** Way back:
+production and what removes it. **No SDK version is cut here,** though this plan
+first cut 0.1 at this point: all eight stages reached production in one release,
+and the SDK's first version follows stage 8 (below). Way back:
 switch the `api` row off, or unset the token. Not a revert once an `api`
 ticket exists, since the build before this stage shows those tickets on the
 portal, which is what the portal's exclusion above prevents; a revert of the
@@ -1941,9 +1943,16 @@ recorded as the app's, a comment attached after it and a second ignored; an
 the push signed and sent, sent nothing once answered, and ended for good on a
 survey that is gone. Nine mutations were each caught by a failing test.
 
-The SDK follows the API: 0.1 after stage 4 (text and polling), 0.2 after 5
-(history, unread, the sample app), 0.3 after 6 (push), 0.4 after 7 (files),
-1.0 after 8.
+The SDK was to follow the API: 0.1 after stage 4 (text and polling), 0.2
+after 5 (history, unread, the sample app), 0.3 after 6 (push), 0.4 after 7
+(files), 1.0 after 8. All eight stages reached production in one release
+(2026-11-21), so no 0.x is cut. The SDK's first version is `1.0.0-rc.1`, a
+pre-release published under `next` and tagged before the stages' production
+checks begin. Stage 7's checks and the end of stage 8's run the sample app
+against it; the others use `curl`, the console and a request bin.
+`1.0.0` follows under `latest` once those pass and the release carrying the
+side conversation's `lastMessageAt` (_Risks_) is on production. The SDK's
+AGENTS.md records the decision.
 
 Documentation moves in the pull request that makes it stale. AGENTS.md gains
 `app/api/v1/` under _Layout_, a paragraph of the rules below, `rowIsDelivery`
@@ -2029,9 +2038,14 @@ The rules AGENTS.md gains, as they would be written:
   newer `lastMessageAt` and no message it can read: the timing of the team's
   internal correspondence, and a field that no longer means "when its newest
   message was stored". Stage 5 orders the list by the column as the plan
-  says. The fix is to answer and order by the newest reply the app may read,
-  which `previewSql` already finds, and it changes `GET /tickets/{id}` too, so
-  it is decided before the SDK's 0.2 ships the list, or accepted here.
+  says. It moves `lastActivityAt`, which the list is now ordered by, the same
+  way. **Decided by the owner on 2026-11-22: answer and order by the newest
+  reply the app may read**, by the rule `previewSql` and the thread read by,
+  for `GET /tickets/{id}` as for the list (#542), rather than accept the jump.
+  It had to be settled before an app build depends on the list: `1.0.0-rc.1`,
+  which only the production checks run, can go out before it reaches
+  production, and the SDK's `1.0.0`, the version myBlu builds against, waits
+  for it.
 - **Not determined:** whether the backend holds a stable user id it never
   shows the app (the app holds none, so one is exposed or minted either way);
   the app's minimum OS versions, which are Expo SDK 57's defaults and are read
