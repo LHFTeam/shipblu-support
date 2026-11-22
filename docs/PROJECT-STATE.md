@@ -2357,9 +2357,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   of 21 with and without `trackingNumber`, and the badge alone — and
   `markStatement` under a plain `EXPLAIN` only, since `ANALYZE` would run the
   `UPDATE`. Expect `api_tickets_identity_idx` driving the list and the badge,
-  the preview and unread subqueries above the sort, run at most `limit + 1`
-  times, the badge once as an InitPlan, and the marker an InitPlan on
-  `conversations_pkey` over `messages_conversation_idx`. A walk of
+  the newest-reply and survey lateral rows below the sort, one each per ticket
+  of the identity (#542), the preview and unread subqueries above it, run at
+  most `limit + 1` times, the badge once as an InitPlan, and the marker an
+  InitPlan on `conversations_pkey` over `messages_conversation_idx`. A walk of
   `conversations_channel_idx` instead means `'api'` is not yet among that
   column's common values: record it with the `last_autoanalyze` read, and
   re-check later; an `ANALYZE` by hand writes statistics and needs the owner.
@@ -2367,14 +2368,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `404` back on `GET /tickets` and Next's `404` on the marker, both of which the
   SDK reads as a route not served yet, and leaves `support` absent, which every
   client handles; a `read_at` or `read` already written stays, and the build
-  before it draws both. Two things stay open with the owner: a side
-  conversation's answer moves an `api` ticket's `lastMessageAt`, and with it
-  `lastActivityAt`, which orders the list, so the app's list can show the ticket
-  move with nothing new to read; and the tracking number rides in the list's
-  query string (the plan's _Risks_). The first changes what a field means once
-  fixed, so it is decided before an app build depends on the list: `1.0.0-rc.1`,
-  which only the production checks run, can go out with it open, and the SDK's
-  `1.0.0`, the version myBlu builds against, waits for it.
+  before it draws both. A side conversation's answer moved an `api` ticket's
+  `lastMessageAt`, and with it `lastActivityAt`, which orders the list, so the
+  app's list could show the ticket move with nothing new to read. The owner
+  decided on 2026-11-22 that both read the newest reply the app may read (#542):
+  it changes what a field means, so it lands before an app build depends on the
+  list, and the SDK's `1.0.0`, the version myBlu builds against, waits for it;
+  `1.0.0-rc.1`, which only the production checks run, does not. One thing stays
+  open with the owner: the tracking number rides in the list's query string (the
+  plan's _Risks_).
 - **The myBlu webhook arrives with stage 6 of `plans/myblu-ticket-api.md`,
   inert until `MYBLU_WEBHOOK_URL` is set** (§2). No schema, no migration and no
   shape: the webhook's `message.created` and the push keys were published in
@@ -2457,10 +2459,10 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   in, open a ticket, read the console's answer, send a photo, tap a push, answer
   the survey; the SDK's `example/README.md` says how, and its backend stand-in
   refuses production's hosts unless told. `1.0.0` follows under `latest` once
-  that passes and stage 5's side-conversation question is decided. Way back:
-  `survey_api` off on `/admin/csat`, which surveys no further app ticket and
-  leaves those sent readable; a revert also leaves the enum values, which
-  nothing then writes.
+  that passes and #542, stage 5's side-conversation answer, is on production.
+  Way back: `survey_api` off on `/admin/csat`, which surveys no further app
+  ticket and leaves those sent readable; a revert also leaves the enum values,
+  which nothing then writes.
 - **Unset config:** `WIDGET_IDENTITY_SECRET`. `WIDGET_ALLOWED_ORIGINS` has
   been set since this list was written (below). The
   email keys that were on this list are all set. `EMAIL_API_KEY` and
