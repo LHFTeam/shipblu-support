@@ -5,11 +5,12 @@ import { localeOf, text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
 import { signInWithPassword } from '@/lib/auth/sign-in';
 import { destroyCustomerSession } from '@/lib/auth/customer-session';
+import { requestAccountReset } from '@/lib/auth/account-reset';
 import { customerPath, safePath } from '@/lib/auth/next-path';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { type Locale, type StringKey } from '@/lib/kb/locale';
-import { completePasswordReset, requestAccount, requestPasswordReset } from '@/lib/portal/accounts';
+import { completePasswordReset, requestAccount } from '@/lib/portal/accounts';
 
 /**
  * The help centre's sign-in, registration and password actions.
@@ -106,7 +107,9 @@ export async function portalForgotPassword(
 
   const { ip } = await requestMeta();
   if (allowEmailDispatch(email, ip)) {
-    await requestPasswordReset(email, locale);
+    // An agent's address gets the console's link: both forms sign both
+    // populations in, so both must reset the password that sign-in checks.
+    await requestAccountReset(email, locale);
   }
 
   // Same answer whether or not the address has an account: see the note on

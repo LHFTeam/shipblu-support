@@ -7,13 +7,17 @@ import { agents, invites } from '@/db/schema';
 import { MAX_AGENT_NAME } from '@/lib/admin/agent-name';
 import { lockAddress } from '@/lib/admin/agent-profile';
 import { joinGroups } from '@/lib/admin/group-members';
+import { requestAccountReset } from '@/lib/auth/account-reset';
 import { needsBootstrap } from '@/lib/auth/guard';
 import { safePath } from '@/lib/auth/next-path';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
+import { completeAgentPasswordReset } from '@/lib/auth/password-reset';
 import { createSession } from '@/lib/auth/session';
+import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { text } from '@/lib/http/form-data';
+import { logger } from '@/lib/log';
 import { requestMeta } from '@/lib/http/request-meta';
 import { findOpenInvite } from '@/lib/auth/invites';
 import { signInWithPassword } from '@/lib/auth/sign-in';
@@ -210,3 +214,74 @@ export async function acceptInvite(
 
 /** An active agent holds the invite's address; see `acceptInvite`. */
 class AddressHeld extends Error {}
+
+const resetLog = logger('password_reset');
+
+/**
+ * "Forgot your password?" on the console's sign-in.
+ *
+ * Every submission of a well-formed address ends on the same page saying the
+ * same thing: an agent's, a customer's, nobody's, one that was throttled, and
+ * one whose lookup failed. Which addresses sign in here is the staff list, and
+ * a form that answered differently for them would hand it to anybody who asks.
+ * The two refusals are about the spelling alone, so they say nothing either.
+ *
+ * It redirects rather than answering success, so the sentence survives a
+ * reload and the form is not there to be sent twice.
+ */
+export async function requestReset(
+  _state: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const email = normaliseEmail(String(formData.get('email') ?? ''));
+
+  if (!email) return { error: 'Enter your email address' };
+  // Without it a mistyped address reads "check your inbox" with nothing sent.
+  if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
+
+  const { ip } = await requestMeta();
+  if (allowEmailDispatch(email, ip)) {
+    try {
+      // The console signs customers in too, so it finds their password too:
+      // `requestAccountReset` asks in `authenticate()`'s order.
+      await requestAccountReset(email, DEFAULT_LOCALE);
+    } catch (error) {
+      // An error page for some addresses and not for others is the same
+      // oracle as a different sentence. Logged; the person asks again.
+      resetLog.error('a reset request failed', error);
+    }
+  }
+
+  redirect('/forgot?sent=1');
+}
+
+/**
+ * Redeems a reset link.
+ *
+ * It signs nobody in: the link changes the password and ends every session,
+ * and the agent then signs in with what they chose (`lib/auth/password-reset.ts`
+ * says why). The token arrives in a form field and is the whole credential, so
+ * there is nothing else to re-read it against.
+ */
+export async function resetPassword(
+  _state: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const token = text(formData, 'token');
+  const password = String(formData.get('password') ?? '');
+
+  const result = token
+    ? await completeAgentPasswordReset(token, password)
+    : ({ ok: false, reason: 'bad_token' } as const);
+
+  if (!result.ok) {
+    return {
+      error:
+        result.reason === 'weak_password'
+          ? result.message
+          : 'This link has expired or has already been used. Ask for a new one.',
+    };
+  }
+
+  redirect('/login?reset=1');
+}

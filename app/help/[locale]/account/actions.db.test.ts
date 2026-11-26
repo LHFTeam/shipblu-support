@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { contactIdentities, contacts, contactTokens, jobs } from '@/db/schema';
+import { agents, contactIdentities, contacts, contactTokens, jobs } from '@/db/schema';
 import { hashPassword } from '@/lib/auth/password';
+import { resetEnvCache } from '@/lib/env';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -136,5 +137,38 @@ describe('the account a registration left before the fix', () => {
     });
     expect(await written()).toEqual(before);
     expect(dispatches).toEqual([]);
+  });
+});
+
+describe("an agent's address on the help centre's forgotten-password form", () => {
+  it("is sent the console's link, and no customer's", async () => {
+    // Both sign-in forms take both populations, so somebody who signs in here
+    // with their console password asks for it back here.
+    const savedFrom = process.env.EMAIL_FROM_ADDRESS;
+    process.env.EMAIL_FROM_ADDRESS = 'support@shipblu.test';
+    resetEnvCache();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const [agent] = await db
+        .insert(agents)
+        .values({ name: 'Mona', email: 'mona@shipblu.test', passwordHash: 'console-hash' })
+        .returning({ id: agents.id });
+
+      expect(await portalForgotPassword(INITIAL, form({ email: 'mona@shipblu.test' }))).toEqual({
+        error: null,
+        done: true,
+      });
+
+      const queued = await db.select({ type: jobs.type, payload: jobs.payload }).from(jobs);
+      expect(queued).toEqual([
+        { type: 'send_agent_password_reset', payload: { agentId: agent!.id } },
+      ]);
+      expect(await db.$count(contactTokens)).toBe(0);
+    } finally {
+      if (savedFrom === undefined) delete process.env.EMAIL_FROM_ADDRESS;
+      else process.env.EMAIL_FROM_ADDRESS = savedFrom;
+      resetEnvCache();
+      vi.restoreAllMocks();
+    }
   });
 });

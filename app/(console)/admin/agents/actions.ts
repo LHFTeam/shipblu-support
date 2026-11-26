@@ -18,6 +18,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
+import { revokePasswordResets } from '@/lib/auth/password-reset';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
@@ -272,7 +273,12 @@ export async function setAgentActive(_state: AdminState, formData: FormData): Pr
   if (!updated.length) return { error: 'Unknown agent' };
 
   // Deactivation must take effect now, not when their cookie expires.
-  if (!active) await destroyAllSessionsForAgent(agentId);
+  if (!active) {
+    await destroyAllSessionsForAgent(agentId);
+    // And any reset link in their inbox: a link redeemed after a later
+    // reactivation would be a password set by a request from before it.
+    await revokePasswordResets(db, agentId);
+  }
 
   revalidatePath('/admin/agents');
   return { error: null };

@@ -122,8 +122,9 @@ export async function requestPasswordReset(rawEmail: string, locale: Locale): Pr
   // An address the send path refuses is left to `issueToken`, past the lookup
   // rather than before it, so a stored one is refused with a warning naming
   // its identity. The help centre's forms refuse such an address before they
-  // get here; what still arrives is the console's sign-in, which has no format
-  // check, and any caller added later.
+  // get here, and so does the console's forgotten-password form; what still
+  // arrives is the console's sign-in, which has no format check, and any
+  // caller added later.
   if (!email) return;
 
   const rows = await db

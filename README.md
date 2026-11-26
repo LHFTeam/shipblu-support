@@ -54,6 +54,13 @@ Design decisions worth knowing before changing things:
   console's own `/login` run the same check: agents are looked up first and never fall
   through, so a staff address that is also a contact always reaches the console. Nobody is
   asked to say which kind of account they have.
+- **One forgotten password, in the same order.** The console's `/forgot` and the help
+  centre's form ask one function (`requestAccountReset`): an agent first, then a customer,
+  so the link sent changes the password the sign-in beside it checks. Both say the same
+  sentence for every address, an agent's, a customer's or nobody's. An agent's link is
+  minted by the worker that mails it, works once for an hour, signs nobody in, and ends
+  every session the agent has when it is redeemed; an agent's deactivation or change of
+  address cancels the links they hold (`lib/auth/password-reset.ts`).
 - **Portal credentials hang off the verified email identity, not the contact.** A password
   proves control of one address, which is exactly what `contact_identities` already
   modelled — and its `is_verified` flag is what makes the password inert until the customer
@@ -497,7 +504,9 @@ Verification and reset links are sent by the `send_notification_email` job, whic
 finished mail that is no message on a conversation: these links, an admin's test survey, and
 a low rating's alert to the supervisors, which names a ticket and nothing the customer wrote.
 An agent's invitation is the same kind of mail with a job of its own (`send_agent_invite`), so
-its link is never kept in a payload.
+its link is never kept in a payload, and so is an agent's password reset
+(`send_agent_password_reset`), whose payload is the agent's id and whose link is minted by
+the job that mails it.
 
 `logged_in` and `selected_companies` knowledge base articles are still not served: the
 public KB queries do not yet take the viewer into account, and an unevaluated visibility

@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { agentChanges, agents, invites } from '@/db/schema';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
+import { revokePasswordResets } from '@/lib/auth/password-reset';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { logger } from '@/lib/log';
 import { MAX_AGENT_NAME } from './agent-name';
@@ -131,6 +132,11 @@ export async function saveAgentProfile(
         if (invited.length > 0) {
           return 'That address has an invite waiting to be accepted, and accepting it would sign in to this account. Use another address, or let the invite expire first.';
         }
+
+        // A reset link sent to the old address stops working with it: that
+        // mailbox is no longer this agent's. Under the agent's row lock, taken
+        // above, which a redemption takes first too.
+        await revokePasswordResets(tx, agentId);
       }
 
       // Before the agent's row is written, so a stale form is refused with

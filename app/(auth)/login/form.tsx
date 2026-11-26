@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 import { signIn, type AuthFormState } from '../actions';
 import { ErrorText, Input, Label } from '@/components/ui';
@@ -42,6 +43,15 @@ export function LoginForm({ next }: { next: string }) {
       <ErrorText>{state.error}</ErrorText>
 
       <SubmitButton idle="Sign in" busy="Signing in…" className="w-full" />
+
+      <p className="text-center text-sm">
+        <Link
+          href="/forgot"
+          className="text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
+        >
+          Forgot your password?
+        </Link>
+      </p>
     </form>
   );
 }
