@@ -20,7 +20,21 @@ const sessions = vi.hoisted(() => [] as string[]);
 vi.mock('@/lib/auth/session', async (original) => ({
   ...(await original<typeof import('@/lib/auth/session')>()),
   createSession: async (agentId: string) => sessions.push(agentId),
+  // Reads the request's cookie, which a test has none of.
+  destroySession: async () => void (signedOut.count += 1),
 }));
+const signedOut = vi.hoisted(() => ({ count: 0 }));
+const lookup = vi.hoisted(() => ({ fails: false }));
+vi.mock('@/lib/auth/account-reset', async (original) => {
+  const real = await original<typeof import('@/lib/auth/account-reset')>();
+  return {
+    requestAccountReset: async (...args: Parameters<typeof real.requestAccountReset>) => {
+      if (lookup.fails)
+        throw new Error('Failed query: select … from agents\nparams: mona@shipblu.test');
+      return real.requestAccountReset(...args);
+    },
+  };
+});
 const throttle = vi.hoisted(() => ({ allows: true, asked: [] as string[] }));
 vi.mock('@/lib/auth/throttle', () => ({
   allowEmailDispatch: (email: string) => {
@@ -49,6 +63,8 @@ let savedFrom: string | undefined;
 beforeEach(() => {
   sessions.length = 0;
   throttle.allows = true;
+  signedOut.count = 0;
+  lookup.fails = false;
   throttle.asked.length = 0;
   savedFrom = process.env.EMAIL_FROM_ADDRESS;
   process.env.EMAIL_FROM_ADDRESS = 'support@shipblu.test';
@@ -225,6 +241,27 @@ describe('requestReset', () => {
   });
 });
 
+describe('requestReset when the lookup fails', () => {
+  it('ends on the same page, and does not print the address', async () => {
+    // An error page for the addresses that reach the queue, and the usual
+    // page for the rest, is the staff list by another route.
+    const printed = vi.spyOn(console, 'error').mockImplementation(() => {});
+    lookup.fails = true;
+    const data = new FormData();
+    data.set('email', 'mona@shipblu.test');
+
+    await expect(requestReset(INITIAL, data)).rejects.toThrow('NEXT_REDIRECT /forgot?sent=1');
+
+    expect(printed).toHaveBeenCalledOnce();
+    const line = printed.mock.calls
+      .flat()
+      .map((part) => (part instanceof Error ? `${part.message} ${part.stack}` : String(part)))
+      .join(' ');
+    expect(line).toContain('[password_reset] a reset request failed');
+    expect(line).not.toContain('mona@shipblu.test');
+  });
+});
+
 describe('resetPassword', () => {
   function redeem(token: string, password = PASSWORD) {
     const data = new FormData();
@@ -259,6 +296,8 @@ describe('resetPassword', () => {
     expect(await verifyPassword(after!.passwordHash!, PASSWORD)).toBe(true);
     // A link in an inbox is not a session.
     expect(sessions).toEqual([]);
+    // And whoever was signed in on this browser no longer is.
+    expect(signedOut.count).toBe(1);
   });
 
   it('says why a weak password was refused, and keeps the link', async () => {
@@ -277,5 +316,7 @@ describe('resetPassword', () => {
 
     expect(await redeem('guess')).toEqual(refused);
     expect(await redeem('')).toEqual(refused);
+    // A guessed link signs nobody out.
+    expect(signedOut.count).toBe(0);
   });
 });

@@ -159,6 +159,22 @@ export async function issueAgentPasswordReset(
 }
 
 /**
+ * Withdraws a link whose email was never handed to the provider.
+ *
+ * Without it every failed attempt of one job leaves a link nobody received,
+ * and the five attempts of one request made while the provider is down fill
+ * `MAX_LIVE_LINKS`: for the next hour the agent is told to check an inbox
+ * nothing can be sent to. One statement holding one row's lock, so it closes
+ * no cycle with a redemption, which locks the agent first. Never a used link:
+ * that one reached somebody.
+ */
+export async function discardUnsentReset(token: string): Promise<void> {
+  await db
+    .delete(passwordResets)
+    .where(and(eq(passwordResets.tokenHash, hashToken(token)), isNull(passwordResets.usedAt)));
+}
+
+/**
  * Whose link this is, without spending it, so the page can draw its form.
  *
  * A mail scanner follows every link before the person does; a read is all a

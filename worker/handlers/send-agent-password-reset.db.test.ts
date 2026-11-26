@@ -120,4 +120,21 @@ describe('sendAgentPasswordReset', () => {
 
     await expect(sendAgentPasswordReset(job(id))).rejects.toThrow('provider down');
   });
+
+  it('withdraws the link of a send that failed, so retries cannot fill the five an agent may hold', async () => {
+    provider.fails = true;
+    const id = await agent();
+
+    // The queue's five attempts of one request, made while the provider is down.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(sendAgentPasswordReset(job(id))).rejects.toThrow('provider down');
+    }
+    expect(await db.$count(passwordResets)).toBe(0);
+
+    // The provider is back: the agent's next request is mailed.
+    provider.fails = false;
+    await sendAgentPasswordReset(job(id));
+    expect(sent).toHaveLength(1);
+    expect(await db.$count(passwordResets)).toBe(1);
+  });
 });

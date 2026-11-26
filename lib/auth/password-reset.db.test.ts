@@ -18,6 +18,7 @@ import { verifyPassword } from './password';
 import {
   completeAgentPasswordReset,
   deleteExpiredPasswordResets,
+  discardUnsentReset,
   findLiveAgentReset,
   issueAgentPasswordReset,
   requestAgentPasswordReset,
@@ -219,6 +220,21 @@ describe('issueAgentPasswordReset', () => {
     expect(await issueAgentPasswordReset('5b0c8f4e-7a1d-4c6b-9e2f-3a4b5c6d7e8f', NOW)).toBeNull();
     expect(await db.$count(passwordResets)).toBe(0);
   });
+
+  it('mints nothing that would give a first password to an invited agent', async () => {
+    const id = await agent({ passwordHash: null });
+
+    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
+    expect(await db.$count(passwordResets)).toBe(0);
+  });
+
+  it('mints nothing for a stored address the provider refuses', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const id = await agent({ email: 'mona..farouk@gmail.com' });
+
+    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
+    expect(await db.$count(passwordResets)).toBe(0);
+  });
 });
 
 describe('findLiveAgentReset', () => {
@@ -360,6 +376,29 @@ describe('completeAgentPasswordReset', () => {
     expect(await hashOf(id)).toBe('old-hash');
   });
 
+  it('never sets a first password: an invited agent holding a link redeems nothing', async () => {
+    // No path mints one for them; a row written some other way must still not
+    // activate an account nobody activated.
+    const id = await agent({ passwordHash: null });
+    await link(id, 'live');
+
+    expect(await findLiveAgentReset('live', NOW)).toBeNull();
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({
+      ok: false,
+      reason: 'bad_token',
+    });
+    expect(await hashOf(id)).toBeNull();
+  });
+
+  it('queues no notice to an address its job would refuse, and still changes the password', async () => {
+    const id = await agent({ email: 'mona..farouk@gmail.com' });
+    await link(id, 'live');
+
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({ ok: true });
+    expect(await verifyPassword((await hashOf(id))!, PASSWORD)).toBe(true);
+    expect(await db.$count(jobs)).toBe(0);
+  });
+
   it('still changes the password when the notice cannot be sent', async () => {
     delete process.env.EMAIL_FROM_ADDRESS;
     resetEnvCache();
@@ -383,6 +422,19 @@ describe('what cancels a link', () => {
 
     expect(await db.select({ agentId: passwordResets.agentId }).from(passwordResets)).toEqual([
       { agentId: other },
+    ]);
+  });
+
+  it('withdraws an unsent link, and never one that was used', async () => {
+    const id = await agent();
+    await link(id, 'unsent');
+    await link(id, 'used', { usedAt: NOW });
+
+    await discardUnsentReset('unsent');
+    await discardUnsentReset('used');
+
+    expect(await db.select({ tokenHash: passwordResets.tokenHash }).from(passwordResets)).toEqual([
+      { tokenHash: hashToken('used') },
     ]);
   });
 

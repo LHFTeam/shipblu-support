@@ -13,11 +13,11 @@ import { safePath } from '@/lib/auth/next-path';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { completeAgentPasswordReset } from '@/lib/auth/password-reset';
-import { createSession } from '@/lib/auth/session';
+import { createSession, destroySession } from '@/lib/auth/session';
 import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { text } from '@/lib/http/form-data';
-import { logger } from '@/lib/log';
+import { logger, scrubbed } from '@/lib/log';
 import { requestMeta } from '@/lib/http/request-meta';
 import { findOpenInvite } from '@/lib/auth/invites';
 import { signInWithPassword } from '@/lib/auth/sign-in';
@@ -248,7 +248,9 @@ export async function requestReset(
     } catch (error) {
       // An error page for some addresses and not for others is the same
       // oracle as a different sentence. Logged; the person asks again.
-      resetLog.error('a reset request failed', error);
+      // Scrubbed, because a failed query is worded with its parameters, and
+      // the first of them is the address somebody typed.
+      resetLog.error('a reset request failed', scrubbed(error));
     }
   }
 
@@ -282,6 +284,13 @@ export async function resetPassword(
           : 'This link has expired or has already been used. Ask for a new one.',
     };
   }
+
+  // Whatever session this browser holds ends too. The agent's own are gone
+  // already; on a shared desk it can be a colleague's, and `/login` sends a
+  // signed-in visitor to the inbox, so the agent would land in that console
+  // believing the link had signed them in. Only after a link was redeemed, so
+  // a guessed token signs nobody out.
+  await destroySession();
 
   redirect('/login?reset=1');
 }

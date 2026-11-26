@@ -655,14 +655,21 @@ hash, so no payload ever holds a link (`docs/PROJECT-STATE.md` §6.47). A retry
 therefore mints another link rather than re-sending the first, and a newer
 link never cancels an older one: under "newest wins" a job's second run would
 kill the link already delivered, and anybody who knows an address could keep
-cancelling its owner's. An agent holds at most five, and all of them end
+cancelling its owner's. A link whose send failed is withdrawn before the retry
+(`discardUnsentReset`), or one request made while the provider is down fills
+the cap with links nobody received. An agent holds at most five, and all of them end
 together, when one is redeemed, on deactivation and on a change of address
 (`revokePasswordResets`). Eligible is what can sign in — active, with a
 password — asked at the request, at the mint and at redemption, so a link never
 activates an account. Redemption locks the agent's row and then claims the
 reset row, the order `saveAgentProfile` takes them in, and changes the
 password, ends every session and cancels the other links in one transaction.
-It creates no session: sign-in is the one place that does. The form answers
+It creates no session: sign-in is the one place that does, and the action ends
+whatever session the redeeming browser holds, a colleague's on a shared desk
+included, since `/login` sends a signed-in visitor to the inbox. One gap is
+accepted: a sign-in whose old password was already verified when the reset
+commits inserts its session after the delete, and keeps it; closing it means
+locking the agent's row in the sign-in both populations share. The form answers
 every well-formed address with the same redirect, a failed lookup included,
 because which addresses sign in to the console is the staff list.
 

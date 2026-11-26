@@ -1,4 +1,4 @@
-import { issueAgentPasswordReset } from '@/lib/auth/password-reset';
+import { discardUnsentReset, issueAgentPasswordReset } from '@/lib/auth/password-reset';
 import { agentPasswordResetEmail } from '@/lib/auth/password-reset-email';
 import { senderAddress } from '@/lib/email/sender';
 import { sendTransactionalEmail } from '@/lib/email/transactional';
@@ -27,9 +27,13 @@ const STALE_AFTER_MS = 30 * 60 * 1000;
  * shows the link again, so it needs no envelope either — only the hash is
  * stored, and the token exists in this function and in the email.
  *
- * So a retry mints another link rather than re-sending the first. Both work,
- * and `issueAgentPasswordReset` stops at five outstanding, which is also what
- * bounds a provider that keeps refusing.
+ * So a retry mints another link rather than re-sending the first. A link whose
+ * send failed is withdrawn before the retry, so only links handed to the
+ * provider count against the five an agent may hold: kept, one request made
+ * during a provider outage filled all five with links nobody received, and the
+ * agent could get none for an hour. A send that failed after the provider had
+ * in fact accepted it leaves a dead link in the inbox, and the retry mails one
+ * that works.
  */
 export async function sendAgentPasswordReset(job: ClaimedJob): Promise<void> {
   const { agentId } = parseJobPayload(job, 'send_agent_password_reset');
@@ -49,15 +53,23 @@ export async function sendAgentPasswordReset(job: ClaimedJob): Promise<void> {
   // ordinary sequence of events, logged where it was decided.
   if (!issued) return;
 
-  await sendTransactionalEmail(
-    {
-      to: issued.to,
-      ...agentPasswordResetEmail({
-        url: `${base}/reset/${issued.token}`,
-        name: issued.name,
-        expiresAt: issued.expiresAt,
-      }),
-    },
-    'send_agent_password_reset',
-  );
+  try {
+    await sendTransactionalEmail(
+      {
+        to: issued.to,
+        ...agentPasswordResetEmail({
+          url: `${base}/reset/${issued.token}`,
+          name: issued.name,
+          expiresAt: issued.expiresAt,
+        }),
+      },
+      'send_agent_password_reset',
+    );
+  } catch (error) {
+    // Best-effort: the send's failure is what the queue must hear.
+    await discardUnsentReset(issued.token).catch((cause: unknown) =>
+      log.warn(`could not withdraw an unsent link agent=${agentId}`, cause),
+    );
+    throw error;
+  }
 }
