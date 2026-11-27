@@ -5,11 +5,13 @@ import { localeOf, text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
 import { signInWithPassword } from '@/lib/auth/sign-in';
 import { destroyCustomerSession } from '@/lib/auth/customer-session';
+import { requestAccountReset } from '@/lib/auth/account-reset';
 import { customerPath, safePath } from '@/lib/auth/next-path';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { type Locale, type StringKey } from '@/lib/kb/locale';
-import { completePasswordReset, requestAccount, requestPasswordReset } from '@/lib/portal/accounts';
+import { logger, scrubbed } from '@/lib/log';
+import { completePasswordReset, requestAccount } from '@/lib/portal/accounts';
 
 /**
  * The help centre's sign-in, registration and password actions.
@@ -106,7 +108,18 @@ export async function portalForgotPassword(
 
   const { ip } = await requestMeta();
   if (allowEmailDispatch(email, ip)) {
-    await requestPasswordReset(email, locale);
+    // An agent's address gets the console's link: both forms sign both
+    // populations in, so both must reset the password that sign-in checks.
+    try {
+      await requestAccountReset(email, locale);
+    } catch (error) {
+      // An address with an account writes a row and one without only reads,
+      // so a failure of writes alone answered "no answer" for the first and
+      // `done` for the second: the customer list, and now the staff list, by
+      // their error page. The console's form catches for the same reason.
+      // Scrubbed, because a failed query is worded with the address in it.
+      logger('password_reset').error('a reset request failed', scrubbed(error));
+    }
   }
 
   // Same answer whether or not the address has an account: see the note on

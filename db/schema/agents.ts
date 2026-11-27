@@ -478,7 +478,11 @@ export const invites = pgTable(
   (t) => [uniqueIndex('invites_token_idx').on(t.tokenHash), index('invites_email_idx').on(t.email)],
 );
 
-/** Single-use tokens for the "forgot password" flow. */
+/**
+ * Single-use links for an agent's forgotten password. Only the hash is kept,
+ * and only `lib/auth/password-reset.ts` reads or writes it; an agent can hold
+ * several at once, which is why the key is the hash and not the agent.
+ */
 export const passwordResets = pgTable(
   'password_resets',
   {

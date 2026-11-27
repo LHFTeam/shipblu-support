@@ -18,6 +18,7 @@ import { canonicalUuid } from '@/lib/http/uuid';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
+import { revokePasswordResets } from '@/lib/auth/password-reset';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
@@ -264,15 +265,27 @@ export async function setAgentActive(_state: AdminState, formData: FormData): Pr
     return { error: 'You cannot deactivate your own account' };
   }
 
-  const updated = await db
-    .update(agents)
-    .set({ isActive: active })
-    .where(eq(agents.id, agentId))
-    .returning({ id: agents.id });
-  if (!updated.length) return { error: 'Unknown agent' };
+  // One transaction, the agent's row first: the order a reset's redemption
+  // and its mint take them in. Three statements on the pool left an agent
+  // deactivated with their links still live when the second one failed.
+  const found = await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(agents)
+      .set({ isActive: active })
+      .where(eq(agents.id, agentId))
+      .returning({ id: agents.id });
+    if (!updated.length) return false;
 
-  // Deactivation must take effect now, not when their cookie expires.
-  if (!active) await destroyAllSessionsForAgent(agentId);
+    if (!active) {
+      // Deactivation must take effect now, not when their cookie expires.
+      await destroyAllSessionsForAgent(agentId, tx);
+      // And any reset link in their inbox: a link redeemed after a later
+      // reactivation would be a password set by a request from before it.
+      await revokePasswordResets(tx, agentId);
+    }
+    return true;
+  });
+  if (!found) return { error: 'Unknown agent' };
 
   revalidatePath('/admin/agents');
   return { error: null };

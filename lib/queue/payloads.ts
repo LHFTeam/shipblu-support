@@ -139,6 +139,8 @@ export const JOB_PAYLOADS = {
   send_whatsapp: z.object({ messageId: z.string() }),
   send_meta: z.object({ messageId: z.string() }),
   send_agent_invite: z.object({ inviteId: z.uuid() }),
+  // An id, never the link: the worker mints it (`send-agent-password-reset.ts`).
+  send_agent_password_reset: z.object({ agentId: z.uuid() }),
   // `isEmailAddress`, the one definition every form asks through
   // `looksLikeEmail`: two checks, one here and one at the form, are how the
   // portal came to store an address this job then refused (§6.117).

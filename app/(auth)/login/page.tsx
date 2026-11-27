@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; signedOut?: string }>;
+  searchParams: Promise<{ next?: string; signedOut?: string; reset?: string }>;
 }) {
   // The session first, because it is the cheaper question: `getSessionAgent()`
   // returns without touching the database when there is no cookie, while
@@ -22,10 +22,17 @@ export default async function LoginPage({
   // rather than to a form nobody can pass.
   if (await needsBootstrap()) redirect('/setup');
 
-  const { next, signedOut } = await searchParams;
+  const { next, signedOut, reset } = await searchParams;
 
   return (
     <div className="flex flex-col gap-3.5">
+      {/* Where a redeemed reset link lands. The link signs nobody in, so this
+          is what says the change happened and what to do next. */}
+      {reset ? (
+        <Notice tone="success" icon>
+          Your password has been changed. Sign in with the new one.
+        </Notice>
+      ) : null}
       {/* Arriving at a login form you did not ask for reads as a bug, and the
           guess people make is that the system logged them out at random. Saying
           which rule did it — once, only when it did — is the difference between

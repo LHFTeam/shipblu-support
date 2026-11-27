@@ -45,6 +45,7 @@ skip: send_email — needs a message to send, and sends it
 skip: send_side_email — needs a side-conversation message to send, and sends it
 skip: send_notification_email — needs a rendered email in its payload, and sends it
 skip: send_agent_invite — needs an invite to send, and sends it
+skip: send_agent_password_reset — needs an agent to mail, and sends it
 skip: send_whatsapp — needs a message to send, and calls the WhatsApp Cloud API
 skip: send_meta — needs a message to send, and calls Graph
 skip: moderate_meta_comment — needs a comment to act on, and calls Graph

@@ -77,7 +77,8 @@ export function allowLoginAttempt(email: string, ip: string | null): boolean {
 
 /**
  * Budget for anything that makes us send an email to an address somebody typed
- * into a form — portal registration and password-reset requests.
+ * into a form — portal registration and password-reset requests, the
+ * console's forgotten-password form included.
  *
  * A different concern from sign-in: a failed sign-in costs an attacker a guess,
  * while these cost a *third party* an unwanted email. So the per-address budget
