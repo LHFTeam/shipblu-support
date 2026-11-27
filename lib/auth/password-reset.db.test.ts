@@ -186,7 +186,7 @@ describe('issueAgentPasswordReset', () => {
   it('mints a link good for an hour and stores only its hash', async () => {
     const id = await agent();
 
-    const issued = await issueAgentPasswordReset(id, NOW);
+    const issued = await issueAgentPasswordReset(id, NOW, NOW);
 
     expect(issued).toMatchObject({
       to: 'mona@shipblu.test',
@@ -202,29 +202,47 @@ describe('issueAgentPasswordReset', () => {
   it('leaves an earlier link working, and stops at five outstanding', async () => {
     const id = await agent();
 
-    const first = await issueAgentPasswordReset(id, NOW);
-    for (let i = 0; i < 4; i += 1) expect(await issueAgentPasswordReset(id, NOW)).not.toBeNull();
+    const first = await issueAgentPasswordReset(id, NOW, NOW);
+    for (let i = 0; i < 4; i += 1)
+      expect(await issueAgentPasswordReset(id, NOW, NOW)).not.toBeNull();
 
-    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
+    expect(await issueAgentPasswordReset(id, NOW, NOW)).toBeNull();
     expect(await db.$count(passwordResets)).toBe(5);
     expect(await findLiveAgentReset(first!.token, NOW)).toMatchObject({ agentId: id });
 
     // The cap is on what is outstanding: an hour on, there is room again.
-    expect(await issueAgentPasswordReset(id, new Date(NOW.getTime() + HOUR))).not.toBeNull();
+    expect(await issueAgentPasswordReset(id, new Date(NOW.getTime() + HOUR), NOW)).not.toBeNull();
   });
 
   it('mints nothing for an agent who can no longer sign in, or who is gone', async () => {
     const id = await agent({ isActive: false });
 
-    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
-    expect(await issueAgentPasswordReset('5b0c8f4e-7a1d-4c6b-9e2f-3a4b5c6d7e8f', NOW)).toBeNull();
+    expect(await issueAgentPasswordReset(id, NOW, NOW)).toBeNull();
+    expect(
+      await issueAgentPasswordReset('5b0c8f4e-7a1d-4c6b-9e2f-3a4b5c6d7e8f', NOW, NOW),
+    ).toBeNull();
     expect(await db.$count(passwordResets)).toBe(0);
+  });
+
+  it('mints nothing for a request made before the agent reset their password', async () => {
+    // Asked three times while the provider was failing; the first mail got
+    // through and was used. The other two jobs are still to run.
+    const id = await agent();
+    const asked = new Date(NOW.getTime() - 5 * 60 * 1000);
+    await link(id, 'redeemed', { usedAt: NOW });
+    const later = new Date(NOW.getTime() + 60 * 1000);
+
+    expect(await issueAgentPasswordReset(id, later, asked)).toBeNull();
+    expect(await db.$count(passwordResets)).toBe(1);
+
+    // Asked again after the reset: a new request, and it is served.
+    expect(await issueAgentPasswordReset(id, later, later)).not.toBeNull();
   });
 
   it('mints nothing that would give a first password to an invited agent', async () => {
     const id = await agent({ passwordHash: null });
 
-    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
+    expect(await issueAgentPasswordReset(id, NOW, NOW)).toBeNull();
     expect(await db.$count(passwordResets)).toBe(0);
   });
 
@@ -232,7 +250,7 @@ describe('issueAgentPasswordReset', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const id = await agent({ email: 'mona..farouk@gmail.com' });
 
-    expect(await issueAgentPasswordReset(id, NOW)).toBeNull();
+    expect(await issueAgentPasswordReset(id, NOW, NOW)).toBeNull();
     expect(await db.$count(passwordResets)).toBe(0);
   });
 });
@@ -297,7 +315,10 @@ describe('completeAgentPasswordReset', () => {
     await session(id, 'phone');
     await session(other, 'omar');
 
-    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({ ok: true });
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({
+      ok: true,
+      email: 'mona@shipblu.test',
+    });
 
     expect(await verifyPassword((await hashOf(id))!, PASSWORD)).toBe(true);
     expect(await db.select({ agentId: sessions.agentId }).from(sessions)).toEqual([
@@ -327,7 +348,10 @@ describe('completeAgentPasswordReset', () => {
     const id = await agent();
     await link(id, 'live');
 
-    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({ ok: true });
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({
+      ok: true,
+      email: 'mona@shipblu.test',
+    });
     const first = await hashOf(id);
 
     expect(await completeAgentPasswordReset('live', 'Another-Horse-9-battery', NOW)).toEqual({
@@ -394,7 +418,7 @@ describe('completeAgentPasswordReset', () => {
     const id = await agent({ email: 'mona..farouk@gmail.com' });
     await link(id, 'live');
 
-    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({ ok: true });
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toMatchObject({ ok: true });
     expect(await verifyPassword((await hashOf(id))!, PASSWORD)).toBe(true);
     expect(await db.$count(jobs)).toBe(0);
   });
@@ -405,7 +429,10 @@ describe('completeAgentPasswordReset', () => {
     const id = await agent();
     await link(id, 'live');
 
-    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({ ok: true });
+    expect(await completeAgentPasswordReset('live', PASSWORD, NOW)).toEqual({
+      ok: true,
+      email: 'mona@shipblu.test',
+    });
     expect(await db.$count(jobs)).toBe(0);
   });
 });
@@ -456,6 +483,30 @@ describe('what cancels a link', () => {
 
     expect(refusal).toBeNull();
     expect(await db.$count(passwordResets, eq(passwordResets.agentId, id))).toBe(0);
+  });
+
+  it('a save refused for a deleted group changes nothing, the links included', async () => {
+    // A refusal returns from the transaction, which commits: anything written
+    // ahead of it stays. The address is unchanged, so the link must be too.
+    const admin = await agent({
+      name: 'Admin',
+      email: 'admin@shipblu.test',
+      role: 'account_admin',
+    });
+    const id = await agent({ role: 'agent' });
+    await link(id, 'in-the-inbox');
+
+    const refusal = await saveAgentProfile(admin, id, {
+      name: 'Mona',
+      email: 'mona.farouk@shipblu.test',
+      role: 'agent',
+      groups: { held: [], chosen: ['5b0c8f4e-7a1d-4c6b-9e2f-3a4b5c6d7e8f'] },
+    });
+
+    expect(refusal).not.toBeNull();
+    const [after] = await db.select({ email: agents.email }).from(agents).where(eq(agents.id, id));
+    expect(after).toEqual({ email: 'mona@shipblu.test' });
+    expect(await findLiveAgentReset('in-the-inbox', NOW)).not.toBeNull();
   });
 
   it('cleanup deletes the expired, spent or not, and keeps what still works', async () => {

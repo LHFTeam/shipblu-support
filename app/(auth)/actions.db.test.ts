@@ -35,8 +35,13 @@ vi.mock('@/lib/auth/account-reset', async (original) => {
     },
   };
 });
-const throttle = vi.hoisted(() => ({ allows: true, asked: [] as string[] }));
+const throttle = vi.hoisted(() => ({
+  allows: true,
+  asked: [] as string[],
+  cleared: [] as string[],
+}));
 vi.mock('@/lib/auth/throttle', () => ({
+  clearLoginAttempts: (email: string) => void throttle.cleared.push(email),
   allowEmailDispatch: (email: string) => {
     throttle.asked.push(email);
     return throttle.allows;
@@ -66,6 +71,7 @@ beforeEach(() => {
   signedOut.count = 0;
   lookup.fails = false;
   throttle.asked.length = 0;
+  throttle.cleared.length = 0;
   savedFrom = process.env.EMAIL_FROM_ADDRESS;
   process.env.EMAIL_FROM_ADDRESS = 'support@shipblu.test';
   resetEnvCache();
@@ -298,6 +304,8 @@ describe('resetPassword', () => {
     expect(sessions).toEqual([]);
     // And whoever was signed in on this browser no longer is.
     expect(signedOut.count).toBe(1);
+    // The wrong guesses that sent them here no longer refuse the new password.
+    expect(throttle.cleared).toEqual(['mona@shipblu.test']);
   });
 
   it('says why a weak password was refused, and keeps the link', async () => {
@@ -316,7 +324,8 @@ describe('resetPassword', () => {
 
     expect(await redeem('guess')).toEqual(refused);
     expect(await redeem('')).toEqual(refused);
-    // A guessed link signs nobody out.
+    // A guessed link signs nobody out, and lifts nobody's throttle.
     expect(signedOut.count).toBe(0);
+    expect(throttle.cleared).toEqual([]);
   });
 });

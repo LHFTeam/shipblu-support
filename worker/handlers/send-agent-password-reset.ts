@@ -48,9 +48,10 @@ export async function sendAgentPasswordReset(job: ClaimedJob): Promise<void> {
   const base = appUrl();
   senderAddress();
 
-  const issued = await issueAgentPasswordReset(agentId, new Date());
-  // The agent was deactivated, or already holds every link allowed: an
-  // ordinary sequence of events, logged where it was decided.
+  const issued = await issueAgentPasswordReset(agentId, new Date(), job.createdAt);
+  // The agent was deactivated, already holds every link allowed, or has reset
+  // their password since asking: an ordinary sequence of events, logged where
+  // it was decided.
   if (!issued) return;
 
   try {

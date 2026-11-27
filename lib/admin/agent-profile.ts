@@ -132,16 +132,19 @@ export async function saveAgentProfile(
         if (invited.length > 0) {
           return 'That address has an invite waiting to be accepted, and accepting it would sign in to this account. Use another address, or let the invite expire first.';
         }
-
-        // A reset link sent to the old address stops working with it: that
-        // mailbox is no longer this agent's. Under the agent's row lock, taken
-        // above, which a redemption takes first too.
-        await revokePasswordResets(tx, agentId);
       }
 
       // Before the agent's row is written, so a stale form is refused with
       // nothing to undo.
       if (!(await applyAgentGroups(tx, agentId, input.groups))) return GROUP_GONE;
+
+      // A reset link sent to the old address stops working with it: that
+      // mailbox is no longer this agent's. Past every refusal, because a
+      // refusal returns from this callback and so commits: revoked above the
+      // group check, a save refused for a deleted group left the address as it
+      // was and the link in the agent's inbox dead. Still under the agent's
+      // row lock, which a redemption takes first too.
+      if (email !== current.email) await revokePasswordResets(tx, agentId);
 
       await tx
         .update(agents)

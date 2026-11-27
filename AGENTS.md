@@ -659,7 +659,8 @@ cancelling its owner's. A link whose send failed is withdrawn before the retry
 (`discardUnsentReset`), or one request made while the provider is down fills
 the cap with links nobody received. An agent holds at most five, and all of them end
 together, when one is redeemed, on deactivation and on a change of address
-(`revokePasswordResets`). Eligible is what can sign in — active, with a
+(`revokePasswordResets`) — and a job queued before a redemption mints nothing
+after it, by the spent row the redemption keeps. Eligible is what can sign in — active, with a
 password — asked at the request, at the mint and at redemption, so a link never
 activates an account. Redemption locks the agent's row and then claims the
 reset row, the order `saveAgentProfile` takes them in, and changes the

@@ -14,7 +14,7 @@ import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { completeAgentPasswordReset } from '@/lib/auth/password-reset';
 import { createSession, destroySession } from '@/lib/auth/session';
-import { allowEmailDispatch } from '@/lib/auth/throttle';
+import { allowEmailDispatch, clearLoginAttempts } from '@/lib/auth/throttle';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { text } from '@/lib/http/form-data';
 import { logger, scrubbed } from '@/lib/log';
@@ -291,6 +291,15 @@ export async function resetPassword(
   // believing the link had signed them in. Only after a link was redeemed, so
   // a guessed token signs nobody out.
   await destroySession();
+
+  // The agent most likely to be here is one `/login` has just told "too many
+  // attempts", and only a sign-in that succeeds clears that. Left, the page
+  // they land on says to sign in with the new password and refuses it until
+  // the window their first wrong guess opened runs out. Proving the mailbox
+  // is theirs earns the clean slate a correct password would. Per instance,
+  // as the throttle is: it helps where the reset was served.
+  const { ip } = await requestMeta();
+  clearLoginAttempts(result.email, ip);
 
   redirect('/login?reset=1');
 }

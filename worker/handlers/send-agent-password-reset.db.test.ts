@@ -93,6 +93,22 @@ describe('sendAgentPasswordReset', () => {
     expect(await db.$count(passwordResets)).toBe(0);
   });
 
+  it('mails nothing for a request the agent has since made moot by resetting', async () => {
+    const id = await agent();
+    const asked = new Date(Date.now() - 2 * 60 * 1000);
+    await db.insert(passwordResets).values({
+      tokenHash: hashToken('redeemed'),
+      agentId: id,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      usedAt: new Date(Date.now() - 60 * 1000),
+    });
+
+    await sendAgentPasswordReset(job(id, asked));
+
+    expect(sent).toEqual([]);
+    expect(await db.$count(passwordResets)).toBe(1);
+  });
+
   it('mails nothing to an agent deactivated since they asked', async () => {
     const id = await agent({ isActive: false });
 

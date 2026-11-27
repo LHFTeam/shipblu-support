@@ -1,4 +1,4 @@
-import { and, eq, gt, isNotNull, isNull, lt, ne } from 'drizzle-orm';
+import { and, eq, gt, gte, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, passwordResets } from '@/db/schema';
 import { enqueueNotificationEmail } from '@/lib/email/notify';
@@ -106,13 +106,22 @@ export type IssuedReset = { to: string; name: string; token: string; expiresAt: 
  * Mints a link for the agent, for the job that mails it.
  *
  * Null when there is nothing to send: the agent is gone or can no longer sign
- * in, their address is one the provider refuses, or they already hold
- * `MAX_LIVE_LINKS`. The count and the insert are under the agent's row lock,
- * so two jobs for one agent cannot both find room for the fifth.
+ * in, their address is one the provider refuses, they already hold
+ * `MAX_LIVE_LINKS`, or they have redeemed a link since this one was asked for.
+ * The count and the insert are under the agent's row lock, so two jobs for one
+ * agent cannot both find room for the fifth.
+ *
+ * `requestedAt` is when the job was queued. "Every link ends when one is
+ * redeemed" is about rows, and a job still queued or backing off is not one:
+ * an agent who asked three times while the provider was failing, and reset
+ * with the first mail that got through, was then mailed two more working
+ * links saying somebody had asked to reset a password already changed. The
+ * spent row is kept until cleanup, and is what says so.
  */
 export async function issueAgentPasswordReset(
   agentId: string,
   now: Date,
+  requestedAt: Date,
 ): Promise<IssuedReset | null> {
   return db.transaction(async (tx) => {
     const [agent] = await tx
@@ -132,6 +141,16 @@ export async function issueAgentPasswordReset(
     }
     if (!looksLikeEmail(agent.email)) {
       log.warn(`not issued: the send path refuses this agent's address agent=${agentId}`);
+      return null;
+    }
+
+    const redeemedSince = await tx
+      .select({ tokenHash: passwordResets.tokenHash })
+      .from(passwordResets)
+      .where(and(eq(passwordResets.agentId, agentId), gte(passwordResets.usedAt, requestedAt)))
+      .limit(1);
+    if (redeemedSince.length > 0) {
+      log.info('not issued: a link was redeemed after this was asked for', { agent: agentId });
       return null;
     }
 
@@ -203,7 +222,8 @@ export async function findLiveAgentReset(
 }
 
 export type AgentResetResult =
-  | { ok: true }
+  /** `email` is the address the agent signs in with, for the caller's throttle. */
+  | { ok: true; email: string }
   /** `message` is the sentence `validatePasswordStrength` gave. */
   | { ok: false; reason: 'weak_password'; message: string }
   | { ok: false; reason: 'bad_token' };
@@ -251,7 +271,7 @@ export async function completeAgentPasswordReset(
       .for('no key update');
     // Deactivated since the page was drawn. Nothing is spent: the
     // deactivation deleted the row, or is about to.
-    if (!agent || !agent.isActive || !agent.passwordHash) return false;
+    if (!agent || !agent.isActive || !agent.passwordHash) return null;
 
     // Conditional on the link still being unused, so two submissions of one
     // link — two tabs, a double click — come to one change of password.
@@ -268,7 +288,7 @@ export async function completeAgentPasswordReset(
         ),
       )
       .returning({ agentId: passwordResets.agentId });
-    if (claimed.length === 0) return false;
+    if (claimed.length === 0) return null;
 
     await tx
       .update(agents)
@@ -295,13 +315,15 @@ export async function completeAgentPasswordReset(
       );
     }
 
-    return true;
+    // Read under the lock, not off the unlocked look above: an address
+    // changed in between would have revoked this link.
+    return { email: agent.email };
   });
 
   if (!done) return { ok: false, reason: 'bad_token' };
 
   log.info('completed', { agent: live.agentId });
-  return { ok: true };
+  return { ok: true, email: done.email };
 }
 
 /**
