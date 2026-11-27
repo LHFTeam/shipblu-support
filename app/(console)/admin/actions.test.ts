@@ -249,11 +249,8 @@ describe('admin actions given a well-formed id that names nothing', () => {
   });
 
   it.each([
-    [
-      'setAgentActive',
-      () => actions.setAgentActive(INITIAL, form({ agentId: NOBODY, active: 'true' })),
-      'Unknown agent',
-    ],
+    // `setAgentActive` is a transaction, which this fake does not run;
+    // `agents/actions.db.test.ts` holds its case against Postgres.
     [
       'setAgentCapacity',
       () => actions.setAgentCapacity(INITIAL, form({ agentId: NOBODY, maxOpenTickets: '5' })),

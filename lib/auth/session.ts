@@ -180,9 +180,16 @@ export async function destroySession(): Promise<void> {
   store.delete(SESSION_COOKIE);
 }
 
-/** Sign the agent out everywhere — used on password change and offboarding. */
-export async function destroyAllSessionsForAgent(agentId: string): Promise<void> {
-  await db.delete(sessions).where(eq(sessions.agentId, agentId));
+/**
+ * Sign the agent out everywhere — used on deactivation and on a password
+ * reset, which passes its transaction so the sessions end with the change of
+ * password or not at all (`lib/auth/password-reset.ts`).
+ */
+export async function destroyAllSessionsForAgent(
+  agentId: string,
+  on: Pick<typeof db, 'delete'> = db,
+): Promise<void> {
+  await on.delete(sessions).where(eq(sessions.agentId, agentId));
 }
 
 /**

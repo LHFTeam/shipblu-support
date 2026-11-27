@@ -176,7 +176,7 @@ Three things CI still cannot check, so they remain yours:
 
 ```
 app/(console)/   agent console: inbox, contacts, kb, reports, settings (admin/)
-app/(auth)/      login, first-admin setup, invites
+app/(auth)/      login, first-admin setup, invites, forgotten password and its reset
 app/help/        public help centre and customer portal (served on its own host)
 app/api/         webhooks, SSE, widget, attachments, health
 app/api/v1/      the myBlu ticket API; its shapes are lib/api/schemas.ts
@@ -645,6 +645,34 @@ for a provider that said no — that is transient, or it is recorded on the row 
 person reads, as `send_whatsapp` marks the message failed — and not for a job
 type with no handler, because the web service can enqueue a type before the
 worker that runs it is deployed and a retry is what rescues that job.
+
+**An agent's password reset is minted by the worker and signs nobody in.**
+`lib/auth/password-reset.ts` is the one module that names `password_resets`.
+The form (`/forgot`, and the help centre's, through `requestAccountReset`,
+which asks in `authenticate()`'s order) queues `send_agent_password_reset` with
+the agent's id and writes no link; the job generates the token and stores its
+hash, so no payload ever holds a link (`docs/PROJECT-STATE.md` §6.47). A retry
+therefore mints another link rather than re-sending the first, and a newer
+link never cancels an older one: under "newest wins" a job's second run would
+kill the link already delivered, and anybody who knows an address could keep
+cancelling its owner's. A link whose send failed is withdrawn before the retry
+(`discardUnsentReset`), or one request made while the provider is down fills
+the cap with links nobody received. An agent holds at most five, and all of them end
+together, when one is redeemed, on deactivation and on a change of address
+(`revokePasswordResets`) — and a job queued before a redemption mints nothing
+after it, by the spent row the redemption keeps. Eligible is what can sign in — active, with a
+password — asked at the request, at the mint and at redemption, so a link never
+activates an account. Redemption locks the agent's row and then claims the
+reset row, the order `saveAgentProfile` takes them in, and changes the
+password, ends every session and cancels the other links in one transaction.
+It creates no session: sign-in is the one place that does, and the action ends
+whatever session the redeeming browser holds, a colleague's on a shared desk
+included, since `/login` sends a signed-in visitor to the inbox. One gap is
+accepted: a sign-in whose old password was already verified when the reset
+commits inserts its session after the delete, and keeps it; closing it means
+locking the agent's row in the sign-in both populations share. The form answers
+every well-formed address with the same redirect, a failed lookup included,
+because which addresses sign in to the console is the staff list.
 
 **Logging goes through `logger(tag)`** from `lib/log.ts`: one line per event,
 `[tag] message key=value`. The tag is usually the job type or the domain

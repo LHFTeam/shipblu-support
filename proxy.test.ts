@@ -129,6 +129,18 @@ describe('every other hostname', () => {
     expect(rewrittenTo(visit('https://shipblu-support.onrender.com/robots.txt/x'))).toBeNull();
   });
 
+  it('lets somebody who cannot sign in reach the pages that reset a password', () => {
+    for (const path of ['/forgot', '/forgot?sent=1', '/reset/JqL0-9_aBc']) {
+      const response = visit(`https://shipblu-support.onrender.com${path}`);
+      expect(response.status, path).not.toBe(307);
+      expect(rewrittenTo(response), path).toBeNull();
+    }
+    // Whole segments only: a console path that merely starts the same way is
+    // still behind the cookie.
+    expect(visit('https://shipblu-support.onrender.com/forgotten').status).toBe(307);
+    expect(visit('https://shipblu-support.onrender.com/resets').status).toBe(307);
+  });
+
   it('lets a signed-out visitor reach the widget but not the console', () => {
     expect(visit('https://shipblu-support.onrender.com/widget').status).not.toBe(307);
     expect(visit('https://shipblu-support.onrender.com/inbox').status).toBe(307);

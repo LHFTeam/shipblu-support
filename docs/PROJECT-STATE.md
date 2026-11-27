@@ -5613,8 +5613,18 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     So: anything with a one-time link in it either carries an id and rebuilds, or
     accepts that the credential is readable for a week. `send_notification_email`
     still takes bodies, and the portal's verification and reset links still go
-    through it — `password_resets` stores only a hash, so there is nothing to
+    through it — `contact_tokens` stores only a hash, so there is nothing to
     rebuild from and closing it needs a column, not a handler.
+
+    There is a third way, which the agent's password reset takes (2026-11-26):
+    **mint the link in the job that mails it.** `send_agent_password_reset`
+    carries the agent's id, `issueAgentPasswordReset` generates the token in
+    the worker and stores its hash, and the link exists in the email and
+    nowhere else. It works where nothing has to show the link a second time,
+    and it costs one thing: a retry cannot re-send the first link, so it mints
+    another, and the links must not cancel each other. An agent may hold five,
+    and all of them die when one is redeemed, when the agent is deactivated or
+    when their address changes. The portal's two links could move the same way.
 
 48. **`className` cannot override `FIELD_BASE`'s background, and fails
     silently.** _2026-09-03, same review._

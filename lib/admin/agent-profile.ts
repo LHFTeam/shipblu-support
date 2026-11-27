@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { agentChanges, agents, invites } from '@/db/schema';
 import { isUniqueViolation } from '@/lib/db/errors';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
+import { revokePasswordResets } from '@/lib/auth/password-reset';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { logger } from '@/lib/log';
 import { MAX_AGENT_NAME } from './agent-name';
@@ -136,6 +137,14 @@ export async function saveAgentProfile(
       // Before the agent's row is written, so a stale form is refused with
       // nothing to undo.
       if (!(await applyAgentGroups(tx, agentId, input.groups))) return GROUP_GONE;
+
+      // A reset link sent to the old address stops working with it: that
+      // mailbox is no longer this agent's. Past every refusal, because a
+      // refusal returns from this callback and so commits: revoked above the
+      // group check, a save refused for a deleted group left the address as it
+      // was and the link in the agent's inbox dead. Still under the agent's
+      // row lock, which a redemption takes first too.
+      if (email !== current.email) await revokePasswordResets(tx, agentId);
 
       await tx
         .update(agents)

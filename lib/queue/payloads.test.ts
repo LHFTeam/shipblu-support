@@ -456,6 +456,8 @@ async function enqueueIsTypedFromTheSchema(messageId: string) {
   await enqueue('send_whatsapp', { messageId: 42 });
   // @ts-expect-error the payload of another job
   await enqueue('send_agent_invite', { messageId });
+  // @ts-expect-error a reset naming an invite, not the agent
+  await enqueue('send_agent_password_reset', { inviteId: messageId });
   // @ts-expect-error a profile on a platform that has none
   await enqueue('fetch_meta_profile', { contactId: 'c', platform: 'email', userId: 'u' });
   // @ts-expect-error a moderation that does not exist

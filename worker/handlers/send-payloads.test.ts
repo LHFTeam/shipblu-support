@@ -16,6 +16,7 @@ const { sendSideEmail } = await import('./send-side-email');
 const { sendWhatsApp } = await import('./send-whatsapp');
 const { sendMeta } = await import('./send-meta');
 const { sendAgentInvite } = await import('./send-agent-invite');
+const { sendAgentPasswordReset } = await import('./send-agent-password-reset');
 const { sendNotificationEmail } = await import('./send-notification-email');
 
 beforeEach(() => {
@@ -28,6 +29,7 @@ describe.each([
   ['send_whatsapp', sendWhatsApp],
   ['send_meta', sendMeta],
   ['send_agent_invite', sendAgentInvite],
+  ['send_agent_password_reset', sendAgentPasswordReset],
   ['send_notification_email', sendNotificationEmail],
 ] as const)('%s', (type, handler) => {
   it('fails an empty payload for good, before it reads a row', async () => {

@@ -62,6 +62,10 @@ const PUBLIC_PREFIXES = [
   '/login',
   '/setup',
   '/invite',
+  // The console's forgotten-password pages: asked for by somebody who cannot
+  // sign in, by definition.
+  '/forgot',
+  '/reset',
   '/api/webhooks',
   '/api/health',
   // The page `/api/health` renders to prove that rendering works, fetched over
